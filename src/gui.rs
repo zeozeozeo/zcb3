@@ -1,12 +1,28 @@
 use crate::{Bot, Macro, MacroType};
-use eframe::egui::{self, RichText};
+use eframe::{
+    egui::{self, RichText},
+    IconData,
+};
 use egui_modal::{Icon, Modal};
+use image::io::Reader as ImageReader;
 use rfd::FileDialog;
+use std::io::Cursor;
 use std::{io::Read, path::PathBuf};
 
 pub fn run_gui() -> Result<(), eframe::Error> {
+    let img = ImageReader::new(Cursor::new(include_bytes!("../icon.ico")))
+        .with_guessed_format()
+        .unwrap()
+        .decode()
+        .unwrap();
+
     let options = eframe::NativeOptions {
         initial_window_size: Some(egui::vec2(420.0, 390.0)),
+        icon_data: Some(IconData {
+            rgba: img.to_rgba8().to_vec(),
+            width: img.width(),
+            height: img.height(),
+        }),
         ..Default::default()
     };
     eframe::run_native(

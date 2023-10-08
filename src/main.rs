@@ -1,3 +1,6 @@
+// hide cmd window on windows
+#![windows_subsystem = "windows"]
+
 mod bot;
 mod gui;
 pub use bot::*;
