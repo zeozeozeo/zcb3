@@ -1,4 +1,5 @@
-use crate::{Bot, Macro, MacroType};
+use crate::{built_info, Bot, Macro, MacroType};
+use anyhow::{Context, Result};
 use eframe::{
     egui::{self, RichText},
     IconData,
@@ -6,6 +7,7 @@ use eframe::{
 use egui_modal::{Icon, Modal};
 use image::io::Reader as ImageReader;
 use rfd::FileDialog;
+use serde_json::Value;
 use std::{io::Cursor, time::Instant};
 use std::{io::Read, path::PathBuf};
 
@@ -83,6 +85,8 @@ impl Default for App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
+            let mut dialog = Modal::new(ctx, "update_dialog");
+
             ui.add_space(2.0);
             ui.horizontal(|ui| {
                 if self.stage != Stage::SelectReplay {
@@ -94,8 +98,17 @@ impl eframe::App for App {
                         self.stage = self.stage.previous();
                     }
                 }
+                if ui
+                    .button("Check for updates")
+                    .on_hover_text("Check if your ZCB version is up-to-date")
+                    .clicked()
+                {
+                    self.do_update_check(&dialog);
+                }
                 ui.hyperlink_to("Join the discord server", "https://discord.gg/b4kBQyXYZT");
             });
+
+            dialog.show_dialog();
         });
         egui::CentralPanel::default().show(ctx, |ui| {
             match self.stage {
@@ -107,7 +120,65 @@ impl eframe::App for App {
     }
 }
 
+fn get_latest_tag() -> Result<usize> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/37.0.2062.94 Chrome/37.0.2062.94 Safari/537.36")
+        .build()?;
+    let resp = client
+        .get("https://api.github.com/repos/zeozeozeo/zcb3/tags")
+        .send()?
+        .text()?;
+
+    log::debug!("response text: '{resp}'");
+    let v: Value = serde_json::from_str(&resp)?;
+    let tags = v.as_array().context("not an array")?;
+    let latest_tag = tags.get(0).context("couldn't latest tags")?;
+    let name = latest_tag.get("name").context("couldn't get tag name")?;
+
+    Ok(name
+        .as_str()
+        .context("tag name is not a string")?
+        .replace(".", "")
+        .parse()?)
+}
+
+fn get_current_tag() -> usize {
+    built_info::PKG_VERSION.replace(".", "").parse().unwrap()
+}
+
 impl App {
+    fn do_update_check(&mut self, dialog: &Modal) {
+        let latest_tag = get_latest_tag();
+        let current_tag = get_current_tag();
+
+        if let Ok(tag) = latest_tag {
+            log::info!("latest tag: {tag}, current tag {current_tag}");
+            if tag > current_tag {
+                dialog.open_dialog(
+                    Some("New version available"), // title
+                    Some(format!(
+                        "A new version of ZCB is available (latest: {tag}, this: {current_tag}).\nDownload the new version on the GitHub page or in the Discord server."
+                    )), // body
+                    Some(Icon::Info),              // icon
+                );
+            } else {
+                dialog.open_dialog(
+                    Some("You are up-to-date!"),                                 // title
+                    Some(format!("You are running the latest version of ZCB.\nYou can always download new versions on GitHub or on the Discord server.")), // body
+                    Some(Icon::Success),                                         // icon
+                );
+            }
+        } else if let Err(e) = latest_tag {
+            log::error!("failed to check for updates: {e}");
+            dialog.open_dialog(
+                Some("Failed to check for updates"), // title
+                Some(e),                             // body
+                Some(Icon::Error),                   // icon
+            );
+            return;
+        }
+    }
+
     fn show_replay_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.heading("1. Select replay file");
 

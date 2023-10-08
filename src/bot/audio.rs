@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use rayon::prelude::*;
 use std::io::{BufWriter, Cursor};
 use std::time::{Duration, Instant};
-use symphonia::core::audio::{Channels, SampleBuffer};
+use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::errors::Error;
 use symphonia::core::formats::FormatOptions;
@@ -24,6 +24,30 @@ pub struct AudioSegment {
 
 impl AudioSegment {
     pub const NUM_CHANNELS: usize = 2;
+
+    fn convert_channels(audio: &[f32], channels: usize) -> Vec<f32> {
+        if channels < Self::NUM_CHANNELS {
+            // duplicate channels
+            let mut new: Vec<f32> = Vec::with_capacity(audio.len() * Self::NUM_CHANNELS);
+            for s in audio {
+                for _ in 0..=Self::NUM_CHANNELS - channels {
+                    new.push(*s);
+                }
+            }
+            new
+        } else if channels > Self::NUM_CHANNELS {
+            // remove channels (TODO idk if this is correct)
+            let mut new = vec![0.0f32; (audio.len() / channels) * Self::NUM_CHANNELS];
+            new.iter_mut().enumerate().for_each(|(i, s)| {
+                for k in 0..channels - 1 {
+                    *s = audio[i * k];
+                }
+            });
+            new
+        } else {
+            audio.to_vec()
+        }
+    }
 
     pub fn from_media_source(media_source: Box<dyn MediaSource>) -> Result<Self> {
         log::info!("decoding media");
@@ -57,8 +81,7 @@ impl AudioSegment {
         // store track identifier (will be used to filter packets)
         let track_id = track.id;
 
-        let mut sample_buf = None;
-        let mut audio_spec = None;
+        let mut sample_rate = 0u32;
         let mut data: Vec<f32> = vec![];
 
         loop {
@@ -76,29 +99,20 @@ impl AudioSegment {
             // decode packet into audio samples, ignore any decode errors
             match decoder.decode(&packet) {
                 Ok(audio_buf) => {
-                    // if this is the *first* decoded packet, create a sample buffer matching the
-                    // decoded audio buffer format
-                    if sample_buf.is_none() {
-                        // get the audio buffer specification
-                        let mut spec = *audio_buf.spec();
-                        audio_spec = Some(spec);
+                    let spec = *audio_buf.spec();
+                    // let dur = (audio_buf.frames() / spec.channels.count()) as u64;
+                    sample_rate = spec.rate;
 
-                        // get the capacity of the decoded buffer (capacity, not length!)
-                        let cap = audio_buf.capacity();
-                        data = Vec::with_capacity(cap);
-                        spec.channels = Channels::FRONT_LEFT | Channels::FRONT_RIGHT;
+                    // copy audio buf to sample buf
+                    let mut sample_buf =
+                        SampleBuffer::<f32>::new(audio_buf.capacity() as u64, spec);
+                    sample_buf.copy_interleaved_ref(audio_buf); // interleaved!
 
-                        // create the sample buffer
-                        sample_buf = Some(SampleBuffer::<f32>::new(cap as u64, spec));
-                    }
-
-                    // copy the decoded audio buffer into the sample buffer in an interleaved format
-                    if let Some(buf) = &mut sample_buf {
-                        buf.copy_interleaved_ref(audio_buf);
-
-                        // extend samples vec with new data
-                        data.extend_from_slice(buf.samples());
-                    }
+                    // extend data slice, convert channels to `Self::NUM_CHANNELS`
+                    data.extend(Self::convert_channels(
+                        sample_buf.samples(),
+                        spec.channels.count(),
+                    ));
                 }
                 Err(Error::DecodeError(err)) => log::warn!("decode error: {err}; ignoring"),
                 Err(_) => break,
@@ -107,10 +121,7 @@ impl AudioSegment {
 
         log::info!("decoded in {:?}", start.elapsed());
 
-        Ok(Self {
-            sample_rate: audio_spec.unwrap().rate,
-            data,
-        })
+        Ok(Self { sample_rate, data })
     }
 
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
@@ -162,7 +173,7 @@ impl AudioSegment {
         self.data[start..end]
             .par_iter_mut() // run in parallel
             .zip(&other.data)
-            .for_each(|(s, o)| *s = (*s / 2.0) + (o / 2.0)); // divide by 2 to mix both samples
+            .for_each(|(s, o)| *s = *s + o);
     }
 
     #[inline]
@@ -174,7 +185,7 @@ impl AudioSegment {
         self.data[start..end]
             .par_iter_mut() // run in parallel
             .zip(&other.data)
-            .for_each(|(s, o)| *s = (*s / 2.0) + ((o / 2.0) * volume)); // divide by 2 to mix both samples
+            .for_each(|(s, o)| *s = *s + (o * volume));
     }
 
     /// Returns the duration of the audio segment.

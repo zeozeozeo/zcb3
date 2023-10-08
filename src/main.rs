@@ -1,5 +1,5 @@
 // hide cmd window on windows
-#![windows_subsystem = "windows"]
+// #![windows_subsystem = "windows"]
 
 mod bot;
 mod gui;
@@ -10,6 +10,11 @@ use std::{
     io::Read,
     path::{Path, PathBuf},
 };
+
+pub mod built_info {
+    // the file has been placed there by the build script.
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Run without any arguments to launch GUI.", long_about = None)]

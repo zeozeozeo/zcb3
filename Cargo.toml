@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.0.0"
+version = "3.0.2"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -18,6 +18,7 @@ image = "0.24.7"
 log = "0.4.20"
 rand = "0.8.5"
 rayon = "1.8.0"
+reqwest = { version = "0.11.22", features = ["blocking"] }
 rfd = "0.12.0"
 rubato = "0.14.1"
 serde_json = "1.0.107"
@@ -25,3 +26,4 @@ symphonia = { version = "0.5.3", features = ["all"] }
 
 [build-dependencies]
 winres = "0.1"
+built = "0.7.0"
