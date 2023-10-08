@@ -179,12 +179,17 @@ impl Macro {
         let get_click_type = |time: f32, prev_time: f32, down: bool, prev: ClickType| {
             ClickType::from_time_and_threshold(time, prev_time, threshold, down, prev)
         };
+        let mut had_down_field = false;
 
         for ev in events {
             let time =
                 ev["frame"].as_u64().context("couldn't get 'frame' field")? as f32 / self.fps;
 
-            let d = ev["down"].as_bool().context("couldn't get 'down' field")?;
+            let Some(d) = ev["down"].as_bool() else {
+                continue;
+            };
+            had_down_field = true;
+
             if next_p2 {
                 // p2 action
                 click.1 = get_click_type(time, prev_time.1, d, click.1);
@@ -202,6 +207,9 @@ impl Macro {
             }
 
             self.actions.push(Action::new(time, click));
+        }
+        if !had_down_field {
+            return Err(Error::msg("replay has no 'down' field"));
         }
 
         Ok(())
