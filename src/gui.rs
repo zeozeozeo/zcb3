@@ -6,7 +6,7 @@ use eframe::{
 use egui_modal::{Icon, Modal};
 use image::io::Reader as ImageReader;
 use rfd::FileDialog;
-use std::io::Cursor;
+use std::{io::Cursor, time::Instant};
 use std::{io::Read, path::PathBuf};
 
 pub fn run_gui() -> Result<(), eframe::Error> {
@@ -125,49 +125,58 @@ impl App {
             });
         });
 
-        if ui.button("Select replay").clicked() {
-            // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
-            if let Some(file) = FileDialog::new()
-                .add_filter("Replay file", &["json"])
-                .pick_file()
-            {
-                log::info!("selected replay file: {file:?}");
+        ui.horizontal(|ui| {
+            if ui.button("Select replay").clicked() {
+                // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
+                if let Some(file) = FileDialog::new()
+                    .add_filter("Replay file", &["json"])
+                    .pick_file()
+                {
+                    log::info!("selected replay file: {file:?}");
 
-                let filename = file.file_name().unwrap().to_str().unwrap();
+                    let filename = file.file_name().unwrap().to_str().unwrap();
 
-                // read replay file
-                let mut f = std::fs::File::open(file.clone()).unwrap();
-                let mut data = String::new();
-                f.read_to_string(&mut data).unwrap();
+                    // read replay file
+                    let mut f = std::fs::File::open(file.clone()).unwrap();
+                    let mut data = String::new();
+                    f.read_to_string(&mut data).unwrap();
 
-                let replay_type = MacroType::guess_format(&data, filename);
-                if let Ok(replay_type) = replay_type {
-                    let replay = Macro::parse(replay_type, &data, 0.15);
-                    if let Ok(replay) = replay {
-                        self.replay = replay;
-                        self.stage = Stage::SelectClickpack;
-                    } else if let Err(e) = replay {
+                    let replay_type = MacroType::guess_format(&data, filename);
+                    if let Ok(replay_type) = replay_type {
+                        let replay = Macro::parse(replay_type, &data, 0.15);
+                        if let Ok(replay) = replay {
+                            self.replay = replay;
+                            self.stage = Stage::SelectClickpack;
+                        } else if let Err(e) = replay {
+                            dialog.open_dialog(
+                                Some("Failed to parse replay file"),             // title
+                                Some(&format!("{e}. Is the format supported?")), // body
+                                Some(Icon::Error),                               // icon
+                            );
+                        }
+                    } else if let Err(e) = replay_type {
                         dialog.open_dialog(
-                            Some("Failed to parse replay file"),             // title
+                            Some("Failed to guess replay format"),           // title
                             Some(&format!("{e}. Is the format supported?")), // body
                             Some(Icon::Error),                               // icon
                         );
                     }
-                } else if let Err(e) = replay_type {
+                } else {
                     dialog.open_dialog(
-                        Some("Failed to guess replay format"),           // title
-                        Some(&format!("{e}. Is the format supported?")), // body
-                        Some(Icon::Error),                               // icon
-                    );
+                        Some("No file was selected"), // title
+                        Some("Please select a file"), // body
+                        Some(Icon::Error),            // icon
+                    )
                 }
-            } else {
-                dialog.open_dialog(
-                    Some("No file was selected"), // title
-                    Some("Please select a file"), // body
-                    Some(Icon::Error),            // icon
-                )
             }
-        }
+
+            if self.replay.actions.len() > 0 {
+                ui.label(format!(
+                    "Number of actions in macro: {}",
+                    self.replay.actions.len()
+                ));
+            }
+        });
 
         ui.separator();
         ui.collapsing("Supported file formats", |ui| {
@@ -264,7 +273,7 @@ impl App {
         });
         ui.checkbox(&mut self.normalize, "Normalize audio")
             .on_hover_text(
-                "Whether to normalize the output audio (make all samples to be in range of 0-1)",
+                "Whether to normalize the output audio\n(make all samples to be in range of 0-1)",
             );
 
         ui.separator();
@@ -278,12 +287,14 @@ impl App {
             {
                 log::info!("rendering macro, this might take some time!");
 
+                let start = Instant::now();
                 let mut segment =
                     self.bot
                         .render_macro(self.replay.clone(), self.noise, self.volume_var);
                 if self.normalize {
                     segment.normalize();
                 }
+                let end = start.elapsed();
 
                 let f = std::fs::File::create(self.output.as_ref().unwrap());
 
@@ -298,14 +309,15 @@ impl App {
                         dialog.open_dialog(
                             Some("Done!"), // title
                             Some(format!(
-                                "Successfully exported '{}'",
+                                "Successfully exported '{}' in {end:?} (~{} actions/second)",
                                 self.output // lol
                                     .clone()
                                     .unwrap()
                                     .file_name()
                                     .unwrap()
                                     .to_str()
-                                    .unwrap()
+                                    .unwrap(),
+                                self.replay.actions.len() as f32 / end.as_secs_f32(),
                             )), // body
                             Some(Icon::Success), // icon
                         );
