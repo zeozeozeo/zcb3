@@ -1,0 +1,21 @@
+[package]
+name = "zcb3"
+version = "3.0.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.75"
+clap = { version = "4.4.6", features = ["derive"] }
+eframe = "0.23.0"
+egui-modal = "0.2.5"
+env_logger = "0.10.0"
+hound = "3.5.1"
+log = "0.4.20"
+rand = "0.8.5"
+rayon = "1.8.0"
+rfd = "0.12.0"
+rubato = "0.14.1"
+serde_json = "1.0.107"
+symphonia = { version = "0.5.3", features = ["all"] }
