@@ -1,5 +1,5 @@
 // hide cmd window on windows
-// #![windows_subsystem = "windows"]
+#![windows_subsystem = "windows"]
 
 mod bot;
 mod gui;

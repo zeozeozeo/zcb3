@@ -57,3 +57,4 @@ If you run without any arguments, the GUI will start.
 
 * CLI currently doesn't work on Windows (due to `#![windows_subsystem = "windows"]` flag)
 * Translate to other languages
+* Progress bar for rendering audio and loading clickpacks
