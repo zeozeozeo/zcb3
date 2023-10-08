@@ -184,18 +184,16 @@ impl Macro {
             let time =
                 ev["frame"].as_u64().context("couldn't get 'frame' field")? as f32 / self.fps;
 
-            if let Some(d) = ev.get("down") {
-                let d = d.as_bool().context("couldn't get 'down' field")?;
-                if next_p2 {
-                    // p2 action
-                    click.1 = get_click_type(time, prev_time.1, d, click.1);
-                    next_p2 = false; // next action is either another "p2" or it refers to player 1
-                    prev_time.1 = time;
-                } else {
-                    // p1 action
-                    click.0 = get_click_type(time, prev_time.0, d, click.0);
-                    prev_time.0 = time;
-                }
+            let d = ev["down"].as_bool().context("couldn't get 'down' field")?;
+            if next_p2 {
+                // p2 action
+                click.1 = get_click_type(time, prev_time.1, d, click.1);
+                next_p2 = false; // next action is either another "p2" or it refers to player 1
+                prev_time.1 = time;
+            } else {
+                // p1 action
+                click.0 = get_click_type(time, prev_time.0, d, click.0);
+                prev_time.0 = time;
             }
 
             // "p2" always seems to be true, but for safety we'll query the value anyway
