@@ -52,3 +52,8 @@ The `noise.*` file can also be named `whitenoise.*` and it can be also be locate
 To see commandline arguments in your terminal, run `zcb --help`
 
 If you run without any arguments, the GUI will start.
+
+# TODO
+
+* CLI currently doesn't work on Windows (due to `#![windows_subsystem = "windows"]` flag)
+* Translate to other languages
