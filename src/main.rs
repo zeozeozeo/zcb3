@@ -73,8 +73,8 @@ fn main() {
 fn run_cli(mut args: Args) {
     // read replay
     let mut f = std::fs::File::open(args.replay.clone()).expect("failed to open replay file");
-    let mut replay = String::new();
-    f.read_to_string(&mut replay)
+    let mut replay = Vec::new();
+    f.read_to_end(&mut replay)
         .expect("failed to read replay file");
 
     let replay_filename = Path::new(&args.replay)
@@ -84,7 +84,7 @@ fn run_cli(mut args: Args) {
         .unwrap();
 
     // create bot (loads clickpack)
-    let mut bot = Bot::new(PathBuf::from(args.clicks));
+    let mut bot = Bot::new(PathBuf::from(args.clicks)).expect("failed to create bot");
 
     // parse replay
     let replay = Macro::parse(
@@ -95,11 +95,7 @@ fn run_cli(mut args: Args) {
     .unwrap();
 
     // render output file
-    let mut segment = bot.render_macro(replay, args.noise, args.volume_variation);
-
-    if args.normalize {
-        segment.normalize();
-    }
+    let segment = bot.render_macro(replay, args.noise, args.volume_variation, args.normalize);
 
     // save
     if args.output.is_empty() {

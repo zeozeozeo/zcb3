@@ -1,4 +1,5 @@
-use crate::{AudioSegment, ClickType, Macro};
+use crate::{AudioSegment, ClickType, Macro, Player};
+use anyhow::Result;
 use rand::{seq::SliceRandom, Rng};
 use std::{
     path::PathBuf,
@@ -64,26 +65,26 @@ impl PlayerClicks {
     }
 
     /// Choose a random click based on a click type.
-    pub fn random_click(&self, click_type: ClickType) -> Option<&AudioSegment> {
+    pub fn random_click(&self, click_type: ClickType) -> &AudioSegment {
         match click_type {
-            ClickType::Click => self.clicks.choose(&mut rand::thread_rng()),
+            ClickType::Click => self.clicks.choose(&mut rand::thread_rng()).unwrap(),
             ClickType::Release => {
                 if self.releases.is_empty() {
                     return self.random_click(ClickType::Click); // no releases, use clicks
                 };
-                self.releases.choose(&mut rand::thread_rng())
+                self.releases.choose(&mut rand::thread_rng()).unwrap()
             }
             ClickType::SoftClick => {
                 if self.softclicks.is_empty() {
                     return self.random_click(ClickType::Click); // no softclicks, use regular clicks
                 };
-                self.softclicks.choose(&mut rand::thread_rng())
+                self.softclicks.choose(&mut rand::thread_rng()).unwrap()
             }
             ClickType::SoftRelease => {
                 if self.softreleases.is_empty() {
                     return self.random_click(ClickType::Release); // no softreleases, use regular releases
                 };
-                self.softreleases.choose(&mut rand::thread_rng())
+                self.softreleases.choose(&mut rand::thread_rng()).unwrap()
             }
             ClickType::None => unreachable!(),
         }
@@ -114,10 +115,15 @@ pub struct Bot {
 }
 
 impl Bot {
-    pub fn new(clickpack_dir: PathBuf) -> Self {
+    pub fn new(clickpack_dir: PathBuf) -> Result<Self> {
         let mut bot = Self::default();
         bot.load_clickpack(clickpack_dir);
-        bot
+        if bot.player.0.clicks.is_empty() && bot.player.1.clicks.is_empty() {
+            return Err(anyhow::anyhow!(
+                "couldn't find any clicks, did you choose the right folder?"
+            ));
+        }
+        Ok(bot)
     }
 
     pub const fn has_noise(&self) -> bool {
@@ -182,8 +188,36 @@ impl Bot {
         }
     }
 
+    fn get_random_click(&self, player: Player, click: ClickType) -> &AudioSegment {
+        // try to get a random click from the player clicks
+        // if it doesn't exist for the wanted player, use the other one (guaranteed to have atleast
+        // one click)
+        match player {
+            Player::One => {
+                if self.player.0.clicks.is_empty() {
+                    self.player.1.random_click(click)
+                } else {
+                    self.player.0.random_click(click)
+                }
+            }
+            Player::Two => {
+                if self.player.1.clicks.is_empty() {
+                    self.player.0.random_click(click)
+                } else {
+                    self.player.1.random_click(click)
+                }
+            }
+        }
+    }
+
     /// Always outputs files with sample rate of 48000.
-    pub fn render_macro(&mut self, replay: Macro, noise: bool, volume_var: f32) -> AudioSegment {
+    pub fn render_macro(
+        &mut self,
+        replay: Macro,
+        noise: bool,
+        volume_var: f32,
+        normalize: bool,
+    ) -> AudioSegment {
         log::info!(
             "starting render, {} actions, noise: {noise}, volume variation: {volume_var}",
             replay.actions.len()
@@ -194,39 +228,21 @@ impl Bot {
         let variate_volume = volume_var != 0.0;
 
         for action in replay.actions {
-            if action.click.0 != ClickType::None {
-                // try to get p1 click if possible, if not get p2 click
-                let click = if let Some(p1) = self.player.0.random_click(action.click.0) {
-                    p1
-                } else if let Some(p2) = self.player.1.random_click(action.click.0) {
-                    p2
-                } else {
-                    break;
-                };
+            let click = self.get_random_click(action.player, action.click);
+            if variate_volume {
+                // overlay with volume variation
+                segment.overlay_at_vol(
+                    action.time,
+                    click,
+                    1.0 + rand::thread_rng().gen_range(-volume_var..volume_var),
+                );
+            } else {
+                // overlay normally
                 segment.overlay_at(action.time, click);
             }
-            if action.click.1 != ClickType::None {
-                // try to get p2 click if possible, if not get p1 click
-                let click = if let Some(p2) = self.player.1.random_click(action.click.1) {
-                    p2
-                } else if let Some(p1) = self.player.0.random_click(action.click.1) {
-                    p1
-                } else {
-                    break;
-                };
 
-                if variate_volume {
-                    // overlay with volume variation
-                    segment.overlay_at_vol(
-                        action.time,
-                        click,
-                        1.0 + rand::thread_rng().gen_range(-volume_var..volume_var),
-                    );
-                } else {
-                    // overlay normally
-                    segment.overlay_at(action.time, click);
-                }
-            }
+            // call progress func
+            // progress(i);
         }
 
         if noise && self.noise.is_some() {
@@ -238,6 +254,10 @@ impl Bot {
                 segment.overlay_at(noise_duration.as_secs_f32(), noise_segment);
                 noise_duration += noise_segment.duration();
             }
+        }
+
+        if normalize {
+            segment.normalize();
         }
 
         log::info!("rendered in {:?}", start.elapsed());

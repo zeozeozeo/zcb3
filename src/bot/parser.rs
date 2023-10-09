@@ -1,5 +1,6 @@
-use anyhow::{Context, Error, Result};
+use anyhow::{Context, Result};
 use serde_json::Value;
+use std::io::Cursor;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
@@ -28,21 +29,15 @@ impl ClickType {
     }
 
     #[inline]
-    pub fn from_time_and_threshold(
-        time: f32,
-        last_time: f32,
-        threshold: f32,
-        down: bool,
-        prev: Self,
-    ) -> Self {
-        // if mouse action was the same in current and previous frame, then no action was made
-        if down == prev.is_click() {
-            return ClickType::None;
-        }
+    pub fn is_release(self) -> bool {
+        self == ClickType::Release || self == ClickType::SoftRelease
+    }
+
+    pub fn hard_or_soft(time: f32, prev_time: f32, threshold: f32, down: bool, prev: Self) -> Self {
         match down {
             true => {
                 // if time between current and previous action < threshold, click is considered soft
-                if time - last_time < threshold {
+                if time - prev_time < threshold {
                     ClickType::SoftClick
                 } else {
                     ClickType::Click
@@ -60,19 +55,31 @@ impl ClickType {
         }
     }
 }
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Action {
     /// Time since the macro was started (in seconds).
     pub time: f32,
-    /// Whether player 1 and player 2 mouse sound should be played.
-    pub click: (ClickType, ClickType),
+    /// What player this action is for.
+    pub player: Player,
+    /// Click type for this player.
+    pub click: ClickType,
 }
 
 impl Action {
-    pub fn new(time: f32, click: (ClickType, ClickType)) -> Self {
-        Self { time, click }
+    pub const fn new(time: f32, player: Player, click: ClickType) -> Self {
+        Self {
+            time,
+            player,
+            click,
+        }
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Player {
+    #[default]
+    One,
+    Two,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -81,19 +88,27 @@ pub struct Macro {
     /// Duration of the macro (in seconds).
     pub duration: f32,
     pub actions: Vec<Action>,
+
+    prev_action: (ClickType, ClickType),
+    prev_time: (f32, f32),
+    soft_threshold: f32,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub enum MacroType {
+    /// .mhr.json files
     MegaHack,
+    /// .json files
     TasBot,
+    /// .zbf files
+    Zbot,
 }
 
 impl MacroType {
-    pub fn guess_format(data: &str, filename: &str) -> Result<Self> {
+    pub fn guess_format(data: &[u8], filename: &str) -> Result<Self> {
         log::info!("guessing macro format, filename '{filename}'");
         if filename.ends_with(".json") {
-            let v: Value = serde_json::from_str(data)?;
+            let v: Value = serde_json::from_slice(data)?;
 
             if v.get("meta").is_some() && v.get("events").is_some() {
                 return Ok(Self::MegaHack); // probably mega hack replay
@@ -101,19 +116,24 @@ impl MacroType {
             if v.get("macro").is_some() && v.get("fps").is_some() {
                 return Ok(Self::TasBot); // probably tasbot
             }
+        } else if filename.ends_with(".zbf") {
+            log::debug!("TODO: add zbf file validation");
+            return Ok(Self::Zbot); // probably zbot replay (no validation yet)
         }
-        Err(Error::msg("failed to identify replay format"))
+        Err(anyhow::anyhow!("failed to identify replay format"))
     }
 }
 
 impl Macro {
-    pub fn parse(typ: MacroType, data: &str, soft_threshold: f32) -> Result<Self> {
+    pub fn parse(typ: MacroType, data: &[u8], soft_threshold: f32) -> Result<Self> {
         log::info!("parsing replay, strlen {}, replay type {typ:?}", data.len());
         let mut replay = Self::default();
+        replay.soft_threshold = soft_threshold;
 
         match typ {
-            MacroType::MegaHack => replay.parse_mhr(data, soft_threshold)?,
-            MacroType::TasBot => replay.parse_tasbot(data, soft_threshold)?,
+            MacroType::MegaHack => replay.parse_mhr(data)?,
+            MacroType::TasBot => replay.parse_tasbot(data)?,
+            MacroType::Zbot => replay.parse_zbf(data)?,
         }
 
         if !replay.actions.is_empty() {
@@ -123,93 +143,125 @@ impl Macro {
         Ok(replay)
     }
 
-    fn parse_tasbot(&mut self, data: &str, threshold: f32) -> Result<()> {
-        let v: Value = serde_json::from_str(data)?;
-        self.fps = v["fps"].as_f64().context("couldn't get 'fps' field")? as f32;
-        let events = v["macro"]
-            .as_array()
-            .context("couldn't get 'macro' array")?;
+    fn process_action_p1(&mut self, time: f32, down: bool) {
+        if down == self.prev_action.0.is_click() {
+            return;
+        }
 
-        let mut click = (ClickType::None, ClickType::None); // store mouse state of previous frame
-        let get_click_type = |time: f32, prev_time: f32, down: bool, prev: ClickType| {
-            ClickType::from_time_and_threshold(time, prev_time, threshold, down, prev)
-        };
-        let mut prev_time = (0.0f32, 0.0f32);
+        let typ = ClickType::hard_or_soft(
+            time,
+            self.prev_time.0,
+            self.soft_threshold,
+            down,
+            self.prev_action.0,
+        );
 
-        for ev in events {
-            let frame = ev["frame"].as_u64().context("couldn't get 'frame' field")?;
+        self.prev_time.0 = time;
+        self.prev_action.0 = typ;
+        self.actions.push(Action::new(time, Player::One, typ))
+    }
+
+    fn process_action_p2(&mut self, time: f32, down: bool) {
+        if down == self.prev_action.1.is_click() {
+            return;
+        }
+
+        let typ = ClickType::hard_or_soft(
+            time,
+            self.prev_time.1,
+            self.soft_threshold,
+            down,
+            self.prev_action.1,
+        );
+
+        self.prev_time.1 = time;
+        self.prev_action.1 = typ;
+        self.actions.push(Action::new(time, Player::Two, typ))
+    }
+
+    fn parse_zbf(&mut self, data: &[u8]) -> Result<()> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        let mut cursor = Cursor::new(data);
+
+        let delta = cursor.read_f32::<LittleEndian>()?;
+        let mut speedhack = cursor.read_f32::<LittleEndian>()?;
+        if speedhack == 0.0 {
+            log::error!("zbf speedhack is 0.0, defaulting to 1.0");
+            speedhack = 1.0; // reset to 1 so we don't get Infinity as fps
+        }
+        self.fps = 1.0 / delta / speedhack;
+
+        for _ in (8..data.len()).step_by(6).enumerate() {
+            let frame = cursor.read_i32::<LittleEndian>()?;
+            let down = cursor.read_u8()? == 0x31;
+            let p1 = cursor.read_u8()? == 0x31;
             let time = frame as f32 / self.fps;
 
-            let player1 = ev["player_1"]["click"]
-                .as_i64()
-                .context("couldn't get 'click' field")?
-                != 0;
-            let player2 = ev["player_2"]["click"]
-                .as_i64()
-                .context("couldn't get 'click' field")?
-                != 0;
-
-            click.0 = get_click_type(time, prev_time.0, player1, click.0);
-            prev_time.0 = time;
-
-            click.1 = get_click_type(time, prev_time.1, player2, click.1);
-            prev_time.1 = time;
-
-            if click.0 != ClickType::None || click.1 != ClickType::None {
-                self.actions.push(Action::new(time, click));
+            if p1 {
+                self.process_action_p1(time, down);
+            } else {
+                self.process_action_p2(time, down);
             }
         }
 
         Ok(())
     }
 
-    fn parse_mhr(&mut self, data: &str, threshold: f32) -> Result<()> {
-        let v: Value = serde_json::from_str(data)?;
+    fn parse_tasbot(&mut self, data: &[u8]) -> Result<()> {
+        let v: Value = serde_json::from_slice(data)?;
+        self.fps = v["fps"].as_f64().context("couldn't get 'fps' field")? as f32;
+        let events = v["macro"]
+            .as_array()
+            .context("couldn't get 'macro' array")?;
+
+        for ev in events {
+            let frame = ev["frame"].as_u64().context("couldn't get 'frame' field")?;
+            let time = frame as f32 / self.fps;
+
+            let p1 = ev["player_1"]["click"]
+                .as_i64()
+                .context("failed to get p1 'click' field")?;
+            let p2 = ev["player_2"]["click"]
+                .as_i64()
+                .context("failed to get p2 'click' field")?;
+
+            self.process_action_p1(time, p1 != 0);
+            self.process_action_p2(time, p2 != 0);
+        }
+
+        Ok(())
+    }
+
+    fn parse_mhr(&mut self, data: &[u8]) -> Result<()> {
+        let v: Value = serde_json::from_slice(data)?;
         self.fps = v["meta"]["fps"]
             .as_f64()
-            .context("couldn't get 'fps' field")? as f32;
+            .context("couldn't get 'fps' field (does 'meta' exist?)")? as f32;
 
         let events = v["events"]
             .as_array()
             .context("couldn't get 'events' array")?;
 
-        let mut click = (ClickType::None, ClickType::None); // store mouse state of previous frame
-        let mut next_p2 = false; // whether the next action refers to the player 2 mouse state
-        let mut prev_time = (0.0f32, 0.0f32); // last time when an action was performed (for both players)
-        let get_click_type = |time: f32, prev_time: f32, down: bool, prev: ClickType| {
-            ClickType::from_time_and_threshold(time, prev_time, threshold, down, prev)
-        };
-        let mut had_down_field = false;
+        let mut next_p2 = false;
 
         for ev in events {
-            let time =
-                ev["frame"].as_u64().context("couldn't get 'frame' field")? as f32 / self.fps;
+            let frame = ev["frame"].as_u64().context("couldn't get 'frame' field")?;
+            let time = frame as f32 / self.fps;
 
-            let Some(d) = ev["down"].as_bool() else {
+            let Some(down) = ev["down"].as_bool() else {
                 continue;
             };
-            had_down_field = true;
 
             if next_p2 {
-                // p2 action
-                click.1 = get_click_type(time, prev_time.1, d, click.1);
-                next_p2 = false; // next action is either another "p2" or it refers to player 1
-                prev_time.1 = time;
+                self.process_action_p2(time, down);
             } else {
-                // p1 action
-                click.0 = get_click_type(time, prev_time.0, d, click.0);
-                prev_time.0 = time;
+                self.process_action_p1(time, down);
             }
 
-            // "p2" always seems to be true, but for safety we'll query the value anyway
+            // 'p2' always seems to be true if it exists, but we'll still query the value just to be safe
             if let Some(p2) = ev.get("p2") {
                 next_p2 = p2.as_bool().context("couldn't get 'p2' field")?;
             }
-
-            self.actions.push(Action::new(time, click));
-        }
-        if !had_down_field {
-            return Err(Error::msg("replay has no 'down' field"));
         }
 
         Ok(())

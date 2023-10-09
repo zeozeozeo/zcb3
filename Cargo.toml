@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.0.2"
+version = "3.0.4"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -9,6 +9,7 @@ build = "build.rs"
 
 [dependencies]
 anyhow = "1.0.75"
+byteorder = "1.5.0"
 clap = { version = "4.4.6", features = ["derive"] }
 eframe = "0.23.0"
 egui-modal = "0.2.5"

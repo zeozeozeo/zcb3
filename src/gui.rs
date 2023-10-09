@@ -200,7 +200,7 @@ impl App {
             if ui.button("Select replay").clicked() {
                 // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
                 if let Some(file) = FileDialog::new()
-                    .add_filter("Replay file", &["json"])
+                    .add_filter("Replay file", &["json", "mhr.json", "zbf"])
                     .pick_file()
                 {
                     log::info!("selected replay file: {file:?}");
@@ -209,8 +209,8 @@ impl App {
 
                     // read replay file
                     let mut f = std::fs::File::open(file.clone()).unwrap();
-                    let mut data = String::new();
-                    f.read_to_string(&mut data).unwrap();
+                    let mut data = Vec::new();
+                    f.read_to_end(&mut data).unwrap();
 
                     let replay_type = MacroType::guess_format(&data, filename);
                     if let Ok(replay_type) = replay_type {
@@ -251,9 +251,10 @@ impl App {
 
         ui.separator();
         ui.collapsing("Supported file formats", |ui| {
-            ui.label(RichText::new("• Mega Hack Replay").strong());
-            ui.label(RichText::new("• TASBOT Replay").strong());
-            ui.label("...more coming in the next version");
+            ui.label(RichText::new("• Mega Hack Replay (.mhr.json)").strong());
+            ui.label(RichText::new("• TASBOT Replay (.json)").strong());
+            ui.label(RichText::new("• Zbot Replay (.zbf)").strong());
+            ui.label("...more coming in the next versions");
         });
 
         // show dialog if there is one
@@ -268,8 +269,17 @@ impl App {
         if ui.button("Select clickpack").clicked() {
             if let Some(dir) = FileDialog::new().pick_folder() {
                 log::info!("selected clickpack folder: {dir:?}");
-                self.bot = Bot::new(dir);
-                self.stage = Stage::Render;
+                let bot = Bot::new(dir);
+                if let Ok(bot) = bot {
+                    self.bot = bot;
+                    self.stage = Stage::Render;
+                } else if let Err(e) = bot {
+                    dialog.open_dialog(
+                        Some("Failed to load clickpack"), // title
+                        Some(e),                          // body
+                        Some(Icon::Error),                // icon
+                    )
+                }
             } else {
                 dialog.open_dialog(
                     Some("No directory was selected"), // title
@@ -356,15 +366,14 @@ impl App {
                 .on_hover_text("Start rendering the macro.\nThis might take some time!")
                 .clicked()
             {
-                log::info!("rendering macro, this might take some time!");
-
+                // start rendering
                 let start = Instant::now();
-                let mut segment =
-                    self.bot
-                        .render_macro(self.replay.clone(), self.noise, self.volume_var);
-                if self.normalize {
-                    segment.normalize();
-                }
+                let segment = self.bot.render_macro(
+                    self.replay.clone(),
+                    self.noise,
+                    self.volume_var,
+                    self.normalize,
+                );
                 let end = start.elapsed();
 
                 let f = std::fs::File::create(self.output.as_ref().unwrap());
@@ -395,10 +404,10 @@ impl App {
                     }
                 } else if let Err(e) = f {
                     dialog.open_dialog(
-                        Some("Failed to open output file"),                 // title
-                        Some(format!("{e}. Try running with administrator permissions or select a different output file")), // body
-                        Some(Icon::Error),                                  // icon
-                    );
+                            Some("Failed to open output file"),                 // title
+                            Some(format!("{e}. Try running with administrator permissions or select a different output file")), // body
+                            Some(Icon::Error),                                  // icon
+                        );
                 }
             }
         });

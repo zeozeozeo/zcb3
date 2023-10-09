@@ -6,10 +6,11 @@ Free and easy to use Geometry Dash clickbot.
 
 # Supported replay formats
 
-* Mega Hack
-* TASBOT
+* Mega Hack (.mhr.json)
+* TASBOT (.json)
+* Zbot (.zbf)
 
-note: i'll add more of them in the next version
+note: i'll add more of them in the next versions
 
 # Clickpack format
 
