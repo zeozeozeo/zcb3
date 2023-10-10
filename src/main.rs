@@ -1,6 +1,3 @@
-// hide cmd window on windows
-#![windows_subsystem = "windows"]
-
 mod bot;
 mod gui;
 pub use bot::*;
@@ -53,6 +50,18 @@ struct Args {
         default_value_t = false
     )]
     normalize: bool,
+    #[arg(long, help = "Minimum pitch value", default_value_t = 0.9)]
+    pitch_from: f32,
+    #[arg(long, help = "Maximum pitch value", default_value_t = 1.1)]
+    pitch_to: f32,
+    #[arg(long, help = "Pitch table step", default_value_t = 0.01)]
+    pitch_step: f32,
+}
+
+#[cfg(target_os = "windows")]
+fn hide_console_window() {
+    // note that this does not hide the console window when running from a batch file
+    // unsafe { winapi::um::wincon::FreeConsole() };
 }
 
 fn main() {
@@ -65,6 +74,13 @@ fn main() {
         run_cli(args);
     } else {
         log::info!("no args, running gui. pass -h or --help to see help");
+
+        // hide console window if running gui
+        #[cfg(target_os = "windows")]
+        {
+            hide_console_window();
+        }
+
         gui::run_gui().unwrap();
     }
 }
@@ -84,7 +100,13 @@ fn run_cli(mut args: Args) {
         .unwrap();
 
     // create bot (loads clickpack)
-    let mut bot = Bot::new(PathBuf::from(args.clicks)).expect("failed to create bot");
+    let mut bot = Bot::new(
+        PathBuf::from(args.clicks),
+        args.pitch_from,
+        args.pitch_to,
+        args.pitch_step,
+    )
+    .expect("failed to create bot");
 
     // parse replay
     let replay = Macro::parse(

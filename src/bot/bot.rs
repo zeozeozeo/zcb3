@@ -16,7 +16,12 @@ pub struct PlayerClicks {
     pub softreleases: Vec<AudioSegment>,
 }
 
-fn read_clicks_in_directory(dir: PathBuf) -> Vec<AudioSegment> {
+fn read_clicks_in_directory(
+    dir: PathBuf,
+    pitch_from: f32,
+    pitch_to: f32,
+    pitch_step: f32,
+) -> Vec<AudioSegment> {
     log::debug!(
         "loading clicks from directory {}",
         dir.to_str().unwrap_or("")
@@ -40,6 +45,7 @@ fn read_clicks_in_directory(dir: PathBuf) -> Vec<AudioSegment> {
                 continue;
             };
             segment.resample(SAMPLE_RATE); // make sure samplerate is equal to SAMPLE_RATE
+            segment.make_pitch_table(pitch_from, pitch_to, pitch_step);
             segments.push(segment);
         }
     }
@@ -47,20 +53,23 @@ fn read_clicks_in_directory(dir: PathBuf) -> Vec<AudioSegment> {
 }
 
 impl PlayerClicks {
-    pub fn from_path(mut path: PathBuf) -> Self {
+    pub fn from_path(mut path: PathBuf, pitch_from: f32, pitch_to: f32, pitch_step: f32) -> Self {
         let mut player = PlayerClicks::default();
+        let read_in_dir =
+            |path: PathBuf| read_clicks_in_directory(path, pitch_from, pitch_to, pitch_step);
+
         // -.-
         path.push("clicks");
-        player.clicks = read_clicks_in_directory(path.clone());
+        player.clicks = read_in_dir(path.clone());
         path.pop();
         path.push("releases");
-        player.releases = read_clicks_in_directory(path.clone());
+        player.releases = read_in_dir(path.clone());
         path.pop();
         path.push("softclicks");
-        player.softclicks = read_clicks_in_directory(path.clone());
+        player.softclicks = read_in_dir(path.clone());
         path.pop();
         path.push("softreleases");
-        player.softreleases = read_clicks_in_directory(path);
+        player.softreleases = read_in_dir(path);
         player
     }
 
@@ -115,9 +124,14 @@ pub struct Bot {
 }
 
 impl Bot {
-    pub fn new(clickpack_dir: PathBuf) -> Result<Self> {
+    pub fn new(
+        clickpack_dir: PathBuf,
+        pitch_from: f32,
+        pitch_to: f32,
+        pitch_step: f32,
+    ) -> Result<Self> {
         let mut bot = Self::default();
-        bot.load_clickpack(clickpack_dir);
+        bot.load_clickpack(clickpack_dir, pitch_from, pitch_to, pitch_step);
         if bot.player.0.clicks.is_empty() && bot.player.1.clicks.is_empty() {
             return Err(anyhow::anyhow!(
                 "couldn't find any clicks, did you choose the right folder?"
@@ -130,7 +144,13 @@ impl Bot {
         self.noise.is_some()
     }
 
-    fn load_clickpack(&mut self, clickpack_dir: PathBuf) {
+    fn load_clickpack(
+        &mut self,
+        clickpack_dir: PathBuf,
+        pitch_from: f32,
+        pitch_to: f32,
+        pitch_step: f32,
+    ) {
         let mut player1_path = clickpack_dir.clone();
         player1_path.push("player1");
         let mut player2_path = clickpack_dir.clone();
@@ -139,7 +159,8 @@ impl Bot {
         // check if the clickpack has player1/player2 folders
         if !player1_path.exists() && !player2_path.exists() {
             log::warn!("clickpack directory doesn't have player1/player2 folders");
-            let clicks = PlayerClicks::from_path(clickpack_dir.clone());
+            let clicks =
+                PlayerClicks::from_path(clickpack_dir.clone(), pitch_from, pitch_to, pitch_step);
             self.player = (clicks.clone(), clicks);
             self.load_noise(clickpack_dir); // try to load noise
             return;
@@ -147,8 +168,8 @@ impl Bot {
 
         // load clicks from player1 and player2 folders
         self.player = (
-            PlayerClicks::from_path(player1_path.clone()),
-            PlayerClicks::from_path(player2_path.clone()),
+            PlayerClicks::from_path(player1_path.clone(), pitch_from, pitch_to, pitch_step),
+            PlayerClicks::from_path(player2_path.clone(), pitch_from, pitch_to, pitch_step),
         );
 
         // find longest click (will be used to ensure that the end doesn't get cut off)
@@ -228,7 +249,10 @@ impl Bot {
         let variate_volume = volume_var != 0.0;
 
         for action in replay.actions {
-            let click = self.get_random_click(action.player, action.click);
+            let click = self
+                .get_random_click(action.player, action.click)
+                .random_pitch(); // if no pitch table is generated, returns self
+
             if variate_volume {
                 // overlay with volume variation
                 segment.overlay_at_vol(
@@ -240,13 +264,9 @@ impl Bot {
                 // overlay normally
                 segment.overlay_at(action.time, click);
             }
-
-            // call progress func
-            // progress(i);
         }
 
         if noise && self.noise.is_some() {
-            log::info!("overlaying noise...");
             let mut noise_duration = Duration::from_secs(0);
             let noise_segment = self.noise.as_ref().unwrap();
 

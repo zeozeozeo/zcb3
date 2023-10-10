@@ -65,6 +65,10 @@ struct App {
     volume_var: f32,
     noise: bool,
     normalize: bool,
+    pitch_enabled: bool,
+    pitch_from: f32,
+    pitch_to: f32,
+    pitch_step: f32,
 }
 
 impl Default for App {
@@ -78,6 +82,10 @@ impl Default for App {
             volume_var: 0.20,
             noise: false,
             normalize: false,
+            pitch_enabled: true,
+            pitch_from: 0.90,
+            pitch_to: 1.1,
+            pitch_step: 0.01,
         }
     }
 }
@@ -200,7 +208,7 @@ impl App {
             if ui.button("Select replay").clicked() {
                 // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
                 if let Some(file) = FileDialog::new()
-                    .add_filter("Replay file", &["json", "mhr.json", "zbf"])
+                    .add_filter("Replay file", &["json", "mhr.json", "zbf", "replay"])
                     .pick_file()
                 {
                     log::info!("selected replay file: {file:?}");
@@ -266,10 +274,29 @@ impl App {
 
         let mut dialog = Modal::new(ctx, "clickpack_stage_dialog");
 
+        // pitch settings
+        ui.separator();
+        ui.checkbox(&mut self.pitch_enabled, "Pitch variation");
+        ui.add_enabled_ui(self.pitch_enabled, |ui| {
+            ui.add(
+                egui::Slider::new(&mut self.pitch_from, 0.0..=self.pitch_to).text("Minimum pitch"),
+            );
+            ui.add(
+                egui::Slider::new(&mut self.pitch_to, self.pitch_from..=50.0)
+                    .text("Maxiumum pitch"),
+            );
+            ui.add(egui::Slider::new(&mut self.pitch_step, 0.001..=1.0).text("Pitch step"));
+        });
+        ui.separator();
+
         if ui.button("Select clickpack").clicked() {
             if let Some(dir) = FileDialog::new().pick_folder() {
                 log::info!("selected clickpack folder: {dir:?}");
-                let bot = Bot::new(dir);
+                let bot = if self.pitch_enabled {
+                    Bot::new(dir, self.pitch_from, self.pitch_to, self.pitch_step)
+                } else {
+                    Bot::new(dir, 1.0, 1.0, 0.0)
+                };
                 if let Ok(bot) = bot {
                     self.bot = bot;
                     self.stage = Stage::Render;
@@ -295,6 +322,7 @@ impl App {
             ui.label("Optionally you can put a noise.* or whitenoise.* file inside the clickpack folder to have an option to overlay background noise.");
             ui.label("All audio files will be resampled to 48kHz.");
             ui.label("Loading the clickpack may take a while, please be patient.");
+            ui.label("Pitch step is the step between pitch changes in the pitch table. The lower it is, the more random the pitch is. Pitch 1.0 = no pitch.");
         });
         ui.collapsing("Supported audio formats", |ui| {
             ui.label("AAC, ADPCM, ALAC, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files.");

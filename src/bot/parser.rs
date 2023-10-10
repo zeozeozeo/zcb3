@@ -102,6 +102,8 @@ pub enum MacroType {
     TasBot,
     /// .zbf files
     Zbot,
+    /// .replay files
+    Obot2,
 }
 
 impl MacroType {
@@ -117,8 +119,11 @@ impl MacroType {
                 return Ok(Self::TasBot); // probably tasbot
             }
         } else if filename.ends_with(".zbf") {
-            log::debug!("TODO: add zbf file validation");
-            return Ok(Self::Zbot); // probably zbot replay (no validation yet)
+            log::debug!("TODO: add .zbf file validation");
+            return Ok(Self::Zbot);
+        } else if filename.ends_with(".replay") {
+            log::debug!("TODO: add obot .replay file validation");
+            return Ok(Self::Obot2);
         }
         Err(anyhow::anyhow!("failed to identify replay format"))
     }
@@ -134,11 +139,18 @@ impl Macro {
             MacroType::MegaHack => replay.parse_mhr(data)?,
             MacroType::TasBot => replay.parse_tasbot(data)?,
             MacroType::Zbot => replay.parse_zbf(data)?,
+            MacroType::Obot2 => replay.parse_obot2(data)?,
         }
 
         if !replay.actions.is_empty() {
             replay.duration = replay.actions.last().unwrap().time;
         }
+
+        log::info!(
+            "macro fps: {}; macro duration: {:?}",
+            replay.fps,
+            replay.duration
+        );
 
         Ok(replay)
     }
@@ -177,6 +189,76 @@ impl Macro {
         self.prev_time.1 = time;
         self.prev_action.1 = typ;
         self.actions.push(Action::new(time, Player::Two, typ))
+    }
+
+    fn parse_obot2(&mut self, data: &[u8]) -> Result<()> {
+        use serde::Deserialize;
+
+        // structs that are serialized by obot using [`bincode`]
+        #[derive(Deserialize, Debug, Clone, Copy)]
+        pub enum OLocation {
+            XPos(u32),
+            Frame(u32),
+        }
+        #[derive(Deserialize, Debug, Clone, Copy, PartialEq)]
+        enum OReplayType {
+            XPos,
+            Frame,
+        }
+        #[derive(Deserialize, Debug, Clone, Copy)]
+        enum OClickType {
+            None,
+            FpsChange(f32),
+            Player1Down,
+            Player1Up,
+            Player2Down,
+            Player2Up,
+        }
+        #[derive(Deserialize, Debug, Clone, Copy)]
+        struct OClick {
+            location: OLocation,
+            click_type: OClickType,
+        }
+        #[derive(Deserialize, Debug, Clone)]
+        struct OReplay {
+            initial_fps: f32,
+            _current_fps: f32,
+            replay_type: OReplayType,
+            _current_click: usize,
+            clicks: Vec<OClick>,
+        }
+
+        let decoded: OReplay = bincode::deserialize(data)?;
+
+        if decoded.replay_type == OReplayType::XPos {
+            log::error!("xpos replays not supported, because they doesn't store frames");
+            return Err(anyhow::anyhow!(
+                "xpos replays not supported, because they doesn't store frames"
+            ));
+        };
+
+        self.fps = decoded.initial_fps;
+        let mut current_fps = self.fps;
+
+        for action in decoded.clicks {
+            let time = match action.location {
+                OLocation::Frame(frame) => frame as f32 / current_fps,
+                _ => {
+                    log::warn!("got xpos action while replay type is frame, skipping");
+                    continue;
+                }
+            };
+            match action.click_type {
+                OClickType::Player1Down => self.process_action_p1(time, true),
+                OClickType::Player1Up => self.process_action_p1(time, false),
+                OClickType::Player2Down => self.process_action_p2(time, true),
+                OClickType::Player2Up => self.process_action_p2(time, false),
+                OClickType::FpsChange(fps) => current_fps = fps,
+                OClickType::None => {}
+            }
+        }
+
+        Ok(())
     }
 
     fn parse_zbf(&mut self, data: &[u8]) -> Result<()> {
@@ -225,8 +307,8 @@ impl Macro {
                 .as_i64()
                 .context("failed to get p2 'click' field")?;
 
-            self.process_action_p1(time, p1 != 0);
-            self.process_action_p2(time, p2 != 0);
+            self.process_action_p1(time, p1 == 1);
+            self.process_action_p2(time, p2 == 1);
         }
 
         Ok(())

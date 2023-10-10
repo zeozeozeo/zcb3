@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use std::io::{BufWriter, Cursor};
 use std::time::{Duration, Instant};
@@ -20,6 +21,7 @@ pub struct AudioSegment {
     pub sample_rate: u32,
     /// Interleaved channel data. Always [`AudioSegment::NUM_CHANNELS`] channels.
     pub data: Vec<f32>,
+    pub pitch_table: Vec<AudioSegment>,
 }
 
 impl AudioSegment {
@@ -121,7 +123,11 @@ impl AudioSegment {
 
         log::info!("decoded in {:?}", start.elapsed());
 
-        Ok(Self { sample_rate, data })
+        Ok(Self {
+            sample_rate,
+            data,
+            pitch_table: vec![],
+        })
     }
 
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
@@ -132,6 +138,7 @@ impl AudioSegment {
         Self {
             sample_rate: rate,
             data: vec![0.0; time_to_sample(rate, 2, time)],
+            pitch_table: vec![],
         }
     }
 
@@ -266,6 +273,46 @@ impl AudioSegment {
         for sample in &mut self.data {
             *sample /= max;
         }
+    }
+
+    /// Generates a pitch table for an audiosegment (pitch ranges from `from` to `to` with step `step`).
+    pub fn make_pitch_table(&mut self, from: f32, to: f32, step: f32) {
+        let old_seg = self.clone();
+        let mut cur = from;
+        log::info!(
+            "generating pitch table; {from} => {to} (+= {step}, {} computations)",
+            ((to - from) / step) as usize
+        );
+
+        while cur < to {
+            // clone old segment without pitch table pitch by current value, push to
+            // this segmets pitch table
+            let mut seg = old_seg.clone();
+
+            log::debug!("cur: {cur}");
+            seg.resample((self.sample_rate as f32 * cur) as u32);
+            seg.sample_rate = self.sample_rate; // keep same sample rate
+            self.pitch_table.push(seg);
+
+            // add step
+            cur += step;
+        }
+    }
+
+    /// Does not clear the pitch table, only clears data
+    #[inline]
+    pub fn clear(&mut self) {
+        self.data = Vec::new();
+    }
+
+    /// Chooses random pitch from the pitch table. If pitch table is not generated,
+    /// returns [`self`]    
+    #[inline]
+    pub fn random_pitch(&self) -> &AudioSegment {
+        if self.pitch_table.is_empty() {
+            return self;
+        }
+        self.pitch_table.choose(&mut rand::thread_rng()).unwrap()
     }
 }
 
