@@ -61,7 +61,7 @@ struct Args {
 #[cfg(target_os = "windows")]
 fn hide_console_window() {
     // note that this does not hide the console window when running from a batch file
-    // unsafe { winapi::um::wincon::FreeConsole() };
+    unsafe { winapi::um::wincon::FreeConsole() };
 }
 
 fn main() {
