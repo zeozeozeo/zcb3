@@ -208,7 +208,7 @@ impl App {
             if ui.button("Select replay").clicked() {
                 // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
                 if let Some(file) = FileDialog::new()
-                    .add_filter("Replay file", &["json", "mhr.json", "zbf", "replay"])
+                    .add_filter("Replay file", &["json", "mhr.json", "zbf", "replay", "ybf"])
                     .pick_file()
                 {
                     log::info!("selected replay file: {file:?}");
@@ -262,7 +262,11 @@ impl App {
             ui.label(RichText::new("• Mega Hack Replay (.mhr.json)").strong());
             ui.label(RichText::new("• TASBOT Replay (.json)").strong());
             ui.label(RichText::new("• Zbot Replay (.zbf)").strong());
-            ui.label("...more coming in the next versions");
+            ui.label(RichText::new("• OmegaBot 2 Replay (.replay)").strong());
+            ui.label(
+                RichText::new("• Ybot Frame (no extension by default, rename to .ybf)").strong(),
+            );
+            ui.label("Suggest more macro formats in the Discord server");
         });
 
         // show dialog if there is one
@@ -285,7 +289,7 @@ impl App {
                 egui::Slider::new(&mut self.pitch_to, self.pitch_from..=50.0)
                     .text("Maxiumum pitch"),
             );
-            ui.add(egui::Slider::new(&mut self.pitch_step, 0.001..=1.0).text("Pitch step"));
+            ui.add(egui::Slider::new(&mut self.pitch_step, 0.0001..=1.0).text("Pitch step"));
         });
         ui.separator();
 

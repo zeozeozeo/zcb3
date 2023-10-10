@@ -104,6 +104,8 @@ pub enum MacroType {
     Zbot,
     /// .replay files
     Obot2,
+    /// Ybot frame files (no extension)
+    Ybotf,
 }
 
 impl MacroType {
@@ -119,11 +121,17 @@ impl MacroType {
                 return Ok(Self::TasBot); // probably tasbot
             }
         } else if filename.ends_with(".zbf") {
-            log::debug!("TODO: add .zbf file validation");
-            return Ok(Self::Zbot);
+            if Macro::parse(MacroType::Zbot, data, 0.0).is_ok() {
+                return Ok(Self::Zbot);
+            }
         } else if filename.ends_with(".replay") {
-            log::debug!("TODO: add obot .replay file validation");
-            return Ok(Self::Obot2);
+            if Macro::parse(MacroType::Obot2, data, 0.0).is_ok() {
+                return Ok(Self::Obot2);
+            }
+        } else if filename.ends_with(".ybf") {
+            if Macro::parse(MacroType::Ybotf, data, 0.0).is_ok() {
+                return Ok(Self::Ybotf);
+            }
         }
         Err(anyhow::anyhow!("failed to identify replay format"))
     }
@@ -140,6 +148,7 @@ impl Macro {
             MacroType::TasBot => replay.parse_tasbot(data)?,
             MacroType::Zbot => replay.parse_zbf(data)?,
             MacroType::Obot2 => replay.parse_obot2(data)?,
+            MacroType::Ybotf => replay.parse_ybotf(data)?,
         }
 
         if !replay.actions.is_empty() {
@@ -189,6 +198,31 @@ impl Macro {
         self.prev_time.1 = time;
         self.prev_action.1 = typ;
         self.actions.push(Action::new(time, Player::Two, typ))
+    }
+
+    fn parse_ybotf(&mut self, data: &[u8]) -> Result<()> {
+        // honestly i don't know if this works
+        use byteorder::{LittleEndian, ReadBytesExt};
+        let mut cursor = Cursor::new(data);
+
+        self.fps = cursor.read_f32::<LittleEndian>()?;
+        let num_actions = cursor.read_i32::<LittleEndian>()?;
+
+        for _ in (12..12 + num_actions * 8).step_by(8) {
+            let frame = cursor.read_u32::<LittleEndian>()?;
+            let what = cursor.read_u32::<LittleEndian>()?;
+            let down = (what & 0b10) == 2;
+            let p2 = (what & 0b01) == 1;
+            let time = frame as f32 / self.fps;
+
+            if p2 {
+                self.process_action_p2(time, down);
+            } else {
+                self.process_action_p1(time, down);
+            }
+        }
+
+        Ok(())
     }
 
     fn parse_obot2(&mut self, data: &[u8]) -> Result<()> {
