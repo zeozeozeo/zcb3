@@ -278,25 +278,21 @@ impl AudioSegment {
     /// Generates a pitch table for an audiosegment (pitch ranges from `from` to `to` with step `step`).
     pub fn make_pitch_table(&mut self, from: f32, to: f32, step: f32) {
         let old_seg = self.clone();
-        let mut cur = from;
         log::info!(
             "generating pitch table; {from} => {to} (+= {step}, {} computations)",
             ((to - from) / step) as usize
         );
 
-        while cur < to {
-            // clone old segment without pitch table pitch by current value, push to
-            // this segmets pitch table
-            let mut seg = old_seg.clone();
-
-            log::debug!("cur: {cur}");
-            seg.resample((self.sample_rate as f32 * cur) as u32);
-            seg.sample_rate = self.sample_rate; // keep same sample rate
-            self.pitch_table.push(seg);
-
-            // add step
-            cur += step;
-        }
+        self.pitch_table = vec![old_seg; ((to - from) / step) as usize];
+        self.pitch_table
+            .par_iter_mut()
+            .enumerate()
+            .for_each(|(i, seg)| {
+                let cur = from + (i as f32 * step);
+                log::debug!("resampling step: {cur}");
+                seg.resample((self.sample_rate as f32 * cur) as u32);
+                seg.sample_rate = self.sample_rate; // keep same sample rate
+            });
     }
 
     /// Does not clear the pitch table, only clears data
