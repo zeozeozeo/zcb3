@@ -399,7 +399,7 @@ impl Macro {
         self.fps = cursor.read_f32::<LittleEndian>()?;
         cursor.set_position(32);
 
-        for _ in (28..data.len()).step_by(32).enumerate() {
+        for _ in (32..data.len()).step_by(32).enumerate() {
             // skip 2 bytes
             cursor.set_position(cursor.position() + 2);
             let p1 = cursor.read_u8()? == 0;
