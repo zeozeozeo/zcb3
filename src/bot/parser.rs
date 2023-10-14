@@ -106,6 +106,8 @@ pub enum MacroType {
     Obot2,
     /// Ybot frame files (no extension)
     Ybotf,
+    /// .mhr files
+    MhrBin,
 }
 
 impl MacroType {
@@ -132,6 +134,10 @@ impl MacroType {
             if Macro::parse(MacroType::Ybotf, data, 0.0).is_ok() {
                 return Ok(Self::Ybotf);
             }
+        } else if filename.ends_with(".mhr") {
+            if Macro::parse(MacroType::MhrBin, data, 0.0).is_ok() {
+                return Ok(Self::MhrBin);
+            }
         }
         Err(anyhow::anyhow!("failed to identify replay format"))
     }
@@ -149,6 +155,7 @@ impl Macro {
             MacroType::Zbot => replay.parse_zbf(data)?,
             MacroType::Obot2 => replay.parse_obot2(data)?,
             MacroType::Ybotf => replay.parse_ybotf(data)?,
+            MacroType::MhrBin => replay.parse_mhrbin(data)?,
         }
 
         if !replay.actions.is_empty() {
@@ -377,6 +384,33 @@ impl Macro {
             // 'p2' always seems to be true if it exists, but we'll still query the value just to be safe
             if let Some(p2) = ev.get("p2") {
                 next_p2 = p2.as_bool().context("couldn't get 'p2' field")?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_mhrbin(&mut self, data: &[u8]) -> Result<()> {
+        // this needs testing
+        use byteorder::{LittleEndian, ReadBytesExt};
+        let mut cursor = Cursor::new(data);
+
+        cursor.set_position(12);
+        self.fps = cursor.read_f32::<LittleEndian>()?;
+        cursor.set_position(28);
+
+        for _ in (28..data.len()).step_by(32).enumerate() {
+            // skip 2 bytes
+            cursor.set_position(cursor.position() + 2);
+            let p1 = cursor.read_u8()? == 0;
+            let down = cursor.read_u8()? == 1;
+            let frame = cursor.read_u32::<LittleEndian>()?;
+            let time = frame as f32 / self.fps;
+
+            if p1 {
+                self.process_action_p1(time, down);
+            } else {
+                self.process_action_p2(time, down);
             }
         }
 
