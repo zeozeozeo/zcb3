@@ -406,6 +406,8 @@ impl Macro {
             let down = cursor.read_u8()? == 1;
             let frame = cursor.read_u32::<LittleEndian>()?;
             let time = frame as f32 / self.fps;
+            // skip 16 bytes
+            cursor.set_position(cursor.position() + 16);
 
             if p1 {
                 self.process_action_p1(time, down);
