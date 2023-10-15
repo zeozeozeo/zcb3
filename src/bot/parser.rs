@@ -391,17 +391,20 @@ impl Macro {
     }
 
     fn parse_mhrbin(&mut self, data: &[u8]) -> Result<()> {
-        // this needs testing
         use byteorder::{LittleEndian, ReadBytesExt};
         let mut cursor = Cursor::new(data);
 
         cursor.set_position(12);
         self.fps = cursor.read_f32::<LittleEndian>()?;
-        cursor.set_position(32);
+        cursor.set_position(28);
+        let num_actions = cursor.read_u32::<LittleEndian>()?;
 
-        for _ in (32..data.len()).step_by(32).enumerate() {
-            // skip 2 bytes
-            cursor.set_position(cursor.position() + 2);
+        for _ in (32..32 + num_actions * 32).step_by(32).enumerate() {
+            let format = cursor.read_u16::<LittleEndian>()?;
+            if format != 0x0002 {
+                log::error!("unknown mhrbin format: {}", format);
+                return Err(anyhow::anyhow!("unknown mhrbin format: {}", format));
+            }
             let p1 = cursor.read_u8()? == 0;
             let down = cursor.read_u8()? == 1;
             let frame = cursor.read_u32::<LittleEndian>()?;
