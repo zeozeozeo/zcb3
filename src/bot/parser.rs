@@ -108,6 +108,8 @@ pub enum MacroType {
     Ybotf,
     /// .mhr files
     MhrBin,
+    /// .echo files
+    EchoBin,
 }
 
 impl MacroType {
@@ -138,6 +140,10 @@ impl MacroType {
             if Macro::parse(MacroType::MhrBin, data, 0.0).is_ok() {
                 return Ok(Self::MhrBin);
             }
+        } else if filename.ends_with(".echo") {
+            if Macro::parse(MacroType::EchoBin, data, 0.0).is_ok() {
+                return Ok(Self::EchoBin);
+            }
         }
         Err(anyhow::anyhow!("failed to identify replay format"))
     }
@@ -156,6 +162,7 @@ impl Macro {
             MacroType::Obot2 => replay.parse_obot2(data)?,
             MacroType::Ybotf => replay.parse_ybotf(data)?,
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
+            MacroType::EchoBin => replay.parse_echobin(data)?,
         }
 
         if !replay.actions.is_empty() {
@@ -391,11 +398,17 @@ impl Macro {
     }
 
     fn parse_mhrbin(&mut self, data: &[u8]) -> Result<()> {
-        use byteorder::{LittleEndian, ReadBytesExt};
+        use byteorder::{LittleEndian, BigEndian, ReadBytesExt};
         let mut cursor = Cursor::new(data);
 
+        let magic = cursor.read_u32::<BigEndian>()?;
+        if magic != 0x4841434B {
+            log::error!("invalid mhrbin magic: {}", magic);
+            return Err(anyhow::anyhow!("unknown mhrbin magic: {}", magic));
+        }
+
         cursor.set_position(12);
-        self.fps = cursor.read_f32::<LittleEndian>()?;
+        self.fps = cursor.read_u32::<LittleEndian>()? as f32;
         cursor.set_position(28);
         let num_actions = cursor.read_u32::<LittleEndian>()?;
 
@@ -411,6 +424,43 @@ impl Macro {
             let time = frame as f32 / self.fps;
             // skip 24 bytes
             cursor.set_position(cursor.position() + 24);
+
+            if p1 {
+                self.process_action_p1(time, down);
+            } else {
+                self.process_action_p2(time, down);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_echobin(&mut self, data: &[u8]) -> Result<()> {
+        use byteorder::{LittleEndian, BigEndian, ReadBytesExt};
+        let mut cursor = Cursor::new(data);
+
+        let magic = cursor.read_u32::<BigEndian>()?;
+        if magic != 0x4D455441 {
+            log::error!("invalid echobin magic: {}", magic);
+            return Err(anyhow::anyhow!("unknown echobin magic: {}", magic));
+        }
+
+        let replay_type = cursor.read_u32::<BigEndian>()?;
+        let action_size;
+        if replay_type == 0x44424700 {
+            action_size = 24;
+        } else {
+            action_size = 6;
+        }
+        cursor.set_position(24);
+        self.fps = cursor.read_f32::<LittleEndian>()?;
+        cursor.set_position(48);
+
+        for _ in (48..data.len()).step_by(action_size).enumerate() {
+            let frame = cursor.read_u32::<LittleEndian>()?;
+            let down = cursor.read_u8()? == 1;
+            let p1 = cursor.read_u8()? == 0;
+            let time = frame as f32 / self.fps;
 
             if p1 {
                 self.process_action_p1(time, down);
