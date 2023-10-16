@@ -1,0 +1,19 @@
+[package]
+name = "bot"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.75"
+bincode = "1.3.3"
+byteorder = "1.5.0"
+hound = "3.5.1"
+log = "0.4.20"
+rand = "0.8.5"
+rayon = "1.8.0"
+rubato = "0.14.1"
+serde = { version = "1.0.189", features = ["derive"] }
+serde_json = "1.0.107"
+symphonia = { version = "0.5.3", features = ["all"] }

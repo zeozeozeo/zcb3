@@ -1,6 +1,5 @@
-mod bot;
 mod gui;
-pub use bot::*;
+use bot::*;
 
 use clap::Parser;
 use std::{

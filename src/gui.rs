@@ -1,5 +1,6 @@
-use crate::{built_info, Bot, Macro, MacroType};
+use crate::built_info;
 use anyhow::{Context, Result};
+use bot::{Bot, Macro, MacroType};
 use eframe::{
     egui::{self, RichText},
     IconData,

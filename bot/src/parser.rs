@@ -398,7 +398,7 @@ impl Macro {
     }
 
     fn parse_mhrbin(&mut self, data: &[u8]) -> Result<()> {
-        use byteorder::{LittleEndian, BigEndian, ReadBytesExt};
+        use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
         let mut cursor = Cursor::new(data);
 
         let magic = cursor.read_u32::<BigEndian>()?;
@@ -436,7 +436,7 @@ impl Macro {
     }
 
     fn parse_echobin(&mut self, data: &[u8]) -> Result<()> {
-        use byteorder::{LittleEndian, BigEndian, ReadBytesExt};
+        use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
         let mut cursor = Cursor::new(data);
 
         let magic = cursor.read_u32::<BigEndian>()?;
