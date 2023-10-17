@@ -60,3 +60,13 @@ If you run without any arguments, the GUI will start.
 
 * Translate to other languages
 * Progress bar for rendering audio and loading clickpacks
+
+# Donations 
+
+ZCB is completely free software. Donations are welcome! :D
+
+By donating you'll get a custom role on the Discord server (dm me) and early access to some of my future mods.
+
+* [Ko-fi](https://ko-fi.com/zeozeozeo)
+* [Liberapay](https://liberapay.com/zeo)
+  
