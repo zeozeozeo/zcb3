@@ -1,58 +1,105 @@
 use anyhow::{Context, Result};
+use rand::Rng;
 use serde_json::Value;
 use std::io::Cursor;
 
+use crate::{Timings, VolumeSettings};
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
-    /// Hard mouse click.
+    HardClick,
+    HardRelease,
     Click,
-    /// Hard mouse release.
     Release,
-    /// Softclick (happens after at least 2 consecutive clicks).
     SoftClick,
-    /// Soft release (happens after at least 2 consecutive releases).
     SoftRelease,
-    /// No action.
+    MicroClick,
+    MicroRelease,
     #[default]
     None,
 }
 
 impl ClickType {
-    #[inline]
-    pub fn is_soft(self) -> bool {
-        self == ClickType::SoftClick || self == ClickType::SoftRelease
-    }
+    /// * `time` - time between clicks
+    ///
+    /// # Returns
+    ///
+    /// The click type and the volume offset.
+    pub fn from_time(
+        time: f32,
+        timings: Timings,
+        is_click: bool,
+        vol: VolumeSettings,
+    ) -> (Self, f32) {
+        let rand_var = rand::thread_rng().gen_range(-vol.volume_var..=vol.volume_var);
+        let vol_offset =
+            if vol.enabled && time < vol.spam_time && !(!vol.change_releases_volume && !is_click) {
+                let offset = (vol.spam_time - time) * vol.spam_vol_offset_factor;
+                (offset.clamp(0.0, vol.max_spam_vol_offset) + rand_var) * vol.global_volume
+            } else {
+                rand_var * vol.global_volume
+            };
 
-    #[inline]
-    pub fn is_click(self) -> bool {
-        self == ClickType::Click || self == ClickType::SoftClick
-    }
-
-    #[inline]
-    pub fn is_release(self) -> bool {
-        self == ClickType::Release || self == ClickType::SoftRelease
-    }
-
-    pub fn hard_or_soft(time: f32, prev_time: f32, threshold: f32, down: bool, prev: Self) -> Self {
-        match down {
-            true => {
-                // if time between current and previous action < threshold, click is considered soft
-                if time - prev_time < threshold {
-                    ClickType::SoftClick
-                } else {
-                    ClickType::Click
-                }
+        let typ = if time > timings.hard {
+            if is_click {
+                Self::HardClick
+            } else {
+                Self::HardRelease
             }
-            false => {
-                // previous click has to be soft for the release to be considered soft
-                // TODO: maybe there's a formula to make this sound more realistic?
-                if prev.is_soft() {
-                    ClickType::SoftRelease
-                } else {
-                    ClickType::Release
-                }
+        } else if time > timings.regular {
+            if is_click {
+                Self::Click
+            } else {
+                Self::Release
             }
+        } else if time > timings.soft {
+            if is_click {
+                Self::SoftClick
+            } else {
+                Self::SoftRelease
+            }
+        } else {
+            if is_click {
+                Self::MicroClick
+            } else {
+                Self::MicroRelease
+            }
+        };
+        (typ, vol_offset)
+    }
+
+    /// Order of which clicks should be selected depending on the actual click type
+    #[rustfmt::skip]
+    pub fn preferred(self) -> [Self; 4] {
+        // import all enum variants to scope
+        use ClickType::*;
+
+        // this is perfect
+        match self {
+            HardClick =>    [HardClick,    Click,        SoftClick,   MicroClick  ],
+            HardRelease =>  [HardRelease,  Release,      SoftRelease, MicroRelease],
+            Click =>        [Click,        HardClick,    SoftClick,   MicroClick  ],
+            Release =>      [Release,      HardRelease,  SoftRelease, MicroRelease],
+            SoftClick =>    [SoftClick,    MicroClick,   Click,       HardClick   ],
+            SoftRelease =>  [SoftRelease,  MicroRelease, Release,     HardRelease ],
+            MicroClick =>   [MicroClick,   SoftClick,    Click,       HardClick   ],
+            MicroRelease => [MicroRelease, SoftRelease,  Release,     HardRelease ],
+            None =>         [None,         None,         None,        None        ],
         }
+    }
+
+    pub const fn is_release(self) -> bool {
+        matches!(
+            self,
+            ClickType::HardRelease
+                | ClickType::Release
+                | ClickType::SoftRelease
+                | ClickType::MicroRelease
+        )
+    }
+
+    pub const fn is_click(self) -> bool {
+        !self.is_release()
     }
 }
 #[derive(Clone, Copy, Debug, Default)]
@@ -63,14 +110,17 @@ pub struct Action {
     pub player: Player,
     /// Click type for this player.
     pub click: ClickType,
+    /// Volume offset of the action.
+    pub vol_offset: f32,
 }
 
 impl Action {
-    pub const fn new(time: f32, player: Player, click: ClickType) -> Self {
+    pub const fn new(time: f32, player: Player, click: ClickType, vol_offset: f32) -> Self {
         Self {
             time,
             player,
             click,
+            vol_offset,
         }
     }
 }
@@ -91,7 +141,8 @@ pub struct Macro {
 
     prev_action: (ClickType, ClickType),
     prev_time: (f32, f32),
-    soft_threshold: f32,
+    timings: Timings,
+    vol_settings: VolumeSettings,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -114,46 +165,47 @@ pub enum MacroType {
 
 impl MacroType {
     pub fn guess_format(data: &[u8], filename: &str) -> Result<Self> {
+        use MacroType::*;
         log::info!("guessing macro format, filename '{filename}'");
-        if filename.ends_with(".json") {
-            let v: Value = serde_json::from_slice(data)?;
 
-            if v.get("meta").is_some() && v.get("events").is_some() {
-                return Ok(Self::MegaHack); // probably mega hack replay
-            }
-            if v.get("macro").is_some() && v.get("fps").is_some() {
-                return Ok(Self::TasBot); // probably tasbot
-            }
-        } else if filename.ends_with(".zbf") {
-            if Macro::parse(MacroType::Zbot, data, 0.0).is_ok() {
-                return Ok(Self::Zbot);
-            }
-        } else if filename.ends_with(".replay") {
-            if Macro::parse(MacroType::Obot2, data, 0.0).is_ok() {
-                return Ok(Self::Obot2);
-            }
-        } else if filename.ends_with(".ybf") {
-            if Macro::parse(MacroType::Ybotf, data, 0.0).is_ok() {
-                return Ok(Self::Ybotf);
-            }
-        } else if filename.ends_with(".mhr") {
-            if Macro::parse(MacroType::MhrBin, data, 0.0).is_ok() {
-                return Ok(Self::MhrBin);
-            }
-        } else if filename.ends_with(".echo") {
-            if Macro::parse(MacroType::EchoBin, data, 0.0).is_ok() {
-                return Ok(Self::EchoBin);
+        for format in [
+            (".json", MegaHack),
+            (".json", TasBot),
+            (".zbf", Zbot),
+            (".replay", Obot2),
+            (".ybf", Ybotf),
+            (".mhr", MhrBin),
+            (".echo", EchoBin),
+        ] {
+            if filename.ends_with(format.0)
+                && Macro::parse(
+                    format.1,
+                    data,
+                    Timings::default(),
+                    VolumeSettings::default(),
+                )
+                .is_ok()
+            {
+                return Ok(format.1);
             }
         }
+
         Err(anyhow::anyhow!("failed to identify replay format"))
     }
 }
 
 impl Macro {
-    pub fn parse(typ: MacroType, data: &[u8], soft_threshold: f32) -> Result<Self> {
+    pub fn parse(
+        typ: MacroType,
+        data: &[u8],
+        timings: Timings,
+        vol_settings: VolumeSettings,
+    ) -> Result<Self> {
         log::info!("parsing replay, strlen {}, replay type {typ:?}", data.len());
+
         let mut replay = Self::default();
-        replay.soft_threshold = soft_threshold;
+        replay.timings = timings;
+        replay.vol_settings = vol_settings;
 
         match typ {
             MacroType::MegaHack => replay.parse_mhr(data)?,
@@ -179,39 +231,33 @@ impl Macro {
     }
 
     fn process_action_p1(&mut self, time: f32, down: bool) {
+        // if action is the same, skip it
         if down == self.prev_action.0.is_click() {
             return;
         }
 
-        let typ = ClickType::hard_or_soft(
-            time,
-            self.prev_time.0,
-            self.soft_threshold,
-            down,
-            self.prev_action.0,
-        );
+        let delta = time - self.prev_time.0;
+        let (typ, vol_offset) = ClickType::from_time(delta, self.timings, down, self.vol_settings);
 
         self.prev_time.0 = time;
         self.prev_action.0 = typ;
-        self.actions.push(Action::new(time, Player::One, typ))
+        self.actions
+            .push(Action::new(time, Player::One, typ, vol_offset))
     }
 
+    // .0 is changed to .1 here, because it's the second player
     fn process_action_p2(&mut self, time: f32, down: bool) {
         if down == self.prev_action.1.is_click() {
             return;
         }
 
-        let typ = ClickType::hard_or_soft(
-            time,
-            self.prev_time.1,
-            self.soft_threshold,
-            down,
-            self.prev_action.1,
-        );
+        let delta = time - self.prev_time.1;
+        let (typ, vol_offset) = ClickType::from_time(delta, self.timings, down, self.vol_settings);
 
         self.prev_time.1 = time;
         self.prev_action.1 = typ;
-        self.actions.push(Action::new(time, Player::Two, typ))
+        self.actions
+            .push(Action::new(time, Player::Two, typ, vol_offset))
     }
 
     fn parse_ybotf(&mut self, data: &[u8]) -> Result<()> {

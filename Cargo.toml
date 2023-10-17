@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.0.8"
+version = "3.0.9"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -15,13 +15,15 @@ clap = { version = "4.4.6", features = ["derive"] }
 eframe = "0.23.0"
 egui-modal = "0.2.5"
 env_logger = "0.10.0"
-image = "0.24.7"
+image = { version = "0.24.7", default-features = false, features = ["ico", "png"] }
 reqwest = { version = "0.11.22", features = ["blocking"] }
 rfd = "0.12.0"
 bot = { path = "bot" }
 serde_json = "1.0.107"
 log = "0.4.20"
 anyhow = "1.0.75"
+rayon = "1.8.0"
+egui_extras = { version = "0.23.0", features = ["image"] }
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]

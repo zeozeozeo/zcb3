@@ -21,20 +21,6 @@ struct Args {
     clicks: String,
     #[arg(
         long,
-        short = 't',
-        help = "Soft threshold for clicks (time between previous action and soft click in seconds)",
-        default_value_t = 0.15
-    )]
-    soft_threshold: f32,
-    #[arg(
-        long,
-        short = 'v',
-        help = "Maximum random volume variation (+/-) of each click",
-        default_value_t = 0.0
-    )]
-    volume_variation: f32,
-    #[arg(
-        long,
         short = 'n',
         help = "Whether to overlay the noise.* file in the clickpack directory",
         default_value_t = false
@@ -49,18 +35,72 @@ struct Args {
         default_value_t = false
     )]
     normalize: bool,
+
+    #[arg(
+        long,
+        help = "Whether pitch variation is enabled",
+        default_value_t = false
+    )]
+    pitch_enabled: bool,
     #[arg(long, help = "Minimum pitch value", default_value_t = 0.9)]
     pitch_from: f32,
     #[arg(long, help = "Maximum pitch value", default_value_t = 1.1)]
     pitch_to: f32,
-    #[arg(long, help = "Pitch table step", default_value_t = 0.01)]
+    #[arg(long, help = "Pitch table step", default_value_t = 0.005)]
     pitch_step: f32,
+
+    #[arg(long, help = "Hard click timing", default_value_t = 2.0)]
+    hard_timing: f32,
+    #[arg(long, help = "Regular click timing", default_value_t = 0.15)]
+    regular_timing: f32,
+    #[arg(
+        long,
+        help = "Soft click timing (anything below is microclicks)",
+        default_value_t = 0.025
+    )]
+    soft_timing: f32,
+
+    #[arg(long, help = "Enable spam volume changes", default_value_t = true)]
+    vol_enabled: bool,
+    #[arg(
+        long,
+        help = "Time between actions where clicks are considered spam clicks",
+        default_value_t = 0.3
+    )]
+    spam_time: f32,
+    #[arg(
+        long,
+        help = "The spam volume offset is multiplied by this value",
+        default_value_t = 0.9
+    )]
+    spam_vol_offset_factor: f32,
+    #[arg(
+        long,
+        help = "The spam volume offset is clamped by this value",
+        default_value_t = 0.3
+    )]
+    max_spam_vol_offset: f32,
+    #[arg(
+        long,
+        help = "Enable changing volume of release sounds",
+        default_value_t = false
+    )]
+    change_releases_volume: bool,
+    #[arg(long, help = "Global clickbot volume factor", default_value_t = 1.0)]
+    global_volume: f32,
+
+    #[arg(
+        long,
+        help = "Random variation in volume (+/-) for each click",
+        default_value_t = 0.2
+    )]
+    volume_var: f32,
 }
 
 #[cfg(target_os = "windows")]
 fn hide_console_window() {
     // note that this does not hide the console window when running from a batch file
-    unsafe { winapi::um::wincon::FreeConsole() };
+    // unsafe { winapi::um::wincon::FreeConsole() };
 }
 
 fn main() {
@@ -98,25 +138,46 @@ fn run_cli(mut args: Args) {
         .to_str()
         .unwrap();
 
+    let pitch = if args.pitch_enabled {
+        Pitch {
+            from: args.pitch_from,
+            to: args.pitch_to,
+            step: args.pitch_step,
+        }
+    } else {
+        Pitch::default()
+    };
+
+    let timings = Timings {
+        hard: args.hard_timing,
+        regular: args.regular_timing,
+        soft: args.soft_timing,
+    };
+
+    let vol_settings = VolumeSettings {
+        enabled: args.vol_enabled,
+        spam_time: args.spam_time,
+        spam_vol_offset_factor: args.spam_vol_offset_factor,
+        max_spam_vol_offset: args.max_spam_vol_offset,
+        change_releases_volume: args.change_releases_volume,
+        global_volume: args.global_volume,
+        volume_var: args.volume_var,
+    };
+
     // create bot (loads clickpack)
-    let mut bot = Bot::new(
-        PathBuf::from(args.clicks),
-        args.pitch_from,
-        args.pitch_to,
-        args.pitch_step,
-    )
-    .expect("failed to create bot");
+    let mut bot = Bot::new(PathBuf::from(args.clicks), pitch).expect("failed to create bot");
 
     // parse replay
     let replay = Macro::parse(
         MacroType::guess_format(&replay, replay_filename).unwrap(),
         &replay,
-        args.soft_threshold,
+        timings,
+        vol_settings,
     )
     .unwrap();
 
     // render output file
-    let segment = bot.render_macro(replay, args.noise, args.volume_variation, args.normalize);
+    let segment = bot.render_macro(&replay, args.noise, args.normalize, None);
 
     // save
     if args.output.is_empty() {
