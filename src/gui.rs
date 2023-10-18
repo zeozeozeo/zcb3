@@ -284,7 +284,9 @@ impl App {
                 if let Some(file) = FileDialog::new()
                     .add_filter(
                         "Replay file",
-                        &["json", "mhr.json", "mhr", "zbf", "replay", "ybf", "echo"],
+                        &[
+                            "json", "mhr.json", "mhr", "zbf", "replay", "ybf", "echo", "thyst",
+                        ],
                     )
                     .pick_file()
                 {
@@ -297,7 +299,7 @@ impl App {
                     let mut data = Vec::new();
                     f.read_to_end(&mut data).unwrap();
 
-                    let replay_type = MacroType::guess_format(&data, filename);
+                    let replay_type = MacroType::guess_format(filename);
 
                     if let Ok(replay_type) = replay_type {
                         let replay =

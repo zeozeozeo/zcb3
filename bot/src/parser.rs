@@ -161,36 +161,34 @@ pub enum MacroType {
     MhrBin,
     /// .echo files
     EchoBin,
+    /// .thyst files
+    Amethyst,
 }
 
 impl MacroType {
-    pub fn guess_format(data: &[u8], filename: &str) -> Result<Self> {
+    pub fn guess_format(filename: &str) -> Result<Self> {
         use MacroType::*;
-        log::info!("guessing macro format, filename '{filename}'");
+        let ext = filename
+            .split('.')
+            .last()
+            .context("replay file has no extension")?;
 
-        for format in [
-            (".json", MegaHack),
-            (".json", TasBot),
-            (".zbf", Zbot),
-            (".replay", Obot2),
-            (".ybf", Ybotf),
-            (".mhr", MhrBin),
-            (".echo", EchoBin),
-        ] {
-            if filename.ends_with(format.0)
-                && Macro::parse(
-                    format.1,
-                    data,
-                    Timings::default(),
-                    VolumeSettings::default(),
-                )
-                .is_ok()
-            {
-                return Ok(format.1);
+        Ok(match ext {
+            "json" => {
+                if filename.ends_with(".mhr.json") {
+                    MegaHack
+                } else {
+                    TasBot
+                }
             }
-        }
-
-        Err(anyhow::anyhow!("failed to identify replay format"))
+            "zbf" => Zbot,
+            "replay" => Obot2,
+            "ybf" => Ybotf,
+            "mhr" => MhrBin,
+            "echo" => EchoBin,
+            "thyst" => Amethyst,
+            _ => anyhow::bail!("unknown replay format"),
+        })
     }
 }
 
@@ -215,6 +213,7 @@ impl Macro {
             MacroType::Ybotf => replay.parse_ybotf(data)?,
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
             MacroType::EchoBin => replay.parse_echobin(data)?,
+            MacroType::Amethyst => replay.parse_amethyst(data)?,
         }
 
         if !replay.actions.is_empty() {
@@ -448,7 +447,8 @@ impl Macro {
         let mut cursor = Cursor::new(data);
 
         let magic = cursor.read_u32::<BigEndian>()?;
-        if magic != 0x4841434B { // HACK
+        if magic != 0x4841434B {
+            // HACK
             log::error!("invalid mhrbin magic: {}", magic);
             return Err(anyhow::anyhow!("unknown mhrbin magic: {}", magic));
         }
@@ -516,6 +516,53 @@ impl Macro {
                 self.process_action_p1(time, down);
             } else {
                 self.process_action_p2(time, down);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Amethyst stores macros like this:
+    ///
+    /// ```no_run
+    /// /* for player1 clicks */
+    /// {num actions}
+    /// {action time}...
+    /// /* for player1 releases */
+    /// {num actions}
+    /// {action time}...
+    /// /* for player2 clicks */
+    /// {num actions}
+    /// {action time}...
+    /// /* for player2 releases */
+    /// {num actions}
+    /// {action time}...
+    /// ```
+    fn parse_amethyst(&mut self, data: &[u8]) -> Result<()> {
+        let data = String::from_utf8(data.to_vec())?;
+        let mut lines = data.split('\n');
+
+        let mut get_times = |player, is_clicks| -> Result<Vec<(Player, bool, f32)>> {
+            let num: usize = lines.next().context("unexpected EOF")?.parse()?;
+            let mut times: Vec<(Player, bool, f32)> = Vec::with_capacity(num);
+            for _ in 0..num {
+                let time: f32 = lines.next().context("unexpected EOF")?.parse()?;
+                times.push((player, is_clicks, time));
+            }
+            Ok(times)
+        };
+
+        let mut actions = get_times(Player::One, true)?;
+        actions.extend(get_times(Player::One, false)?);
+        actions.extend(get_times(Player::Two, true)?);
+        actions.extend(get_times(Player::Two, false)?);
+        actions.sort_by(|a, b| a.2.total_cmp(&b.2)); // sort actions by time
+
+        for action in actions {
+            if action.0 == Player::One {
+                self.process_action_p1(action.2, action.1);
+            } else {
+                self.process_action_p2(action.2, action.1);
             }
         }
 

@@ -100,7 +100,7 @@ struct Args {
 #[cfg(target_os = "windows")]
 fn hide_console_window() {
     // note that this does not hide the console window when running from a batch file
-    // unsafe { winapi::um::wincon::FreeConsole() };
+    unsafe { winapi::um::wincon::FreeConsole() };
 }
 
 fn main() {
@@ -169,7 +169,7 @@ fn run_cli(mut args: Args) {
 
     // parse replay
     let replay = Macro::parse(
-        MacroType::guess_format(&replay, replay_filename).unwrap(),
+        MacroType::guess_format(replay_filename).unwrap(),
         &replay,
         timings,
         vol_settings,
