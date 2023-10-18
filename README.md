@@ -21,35 +21,11 @@ Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
 ZCB supports AAC, ADPCM, ALAC, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files.
 
-### Clickpacks have to be arranged like this (for two players):
+### Clickpack folder
 
-```
-.
-└── clickpack/
-    ├── player1/
-    │   ├── 1.mp3 (those can be named anyhow you like)
-    │   ├── 2.mp3
-    │   └── ...
-    ├── player2/
-    │   ├── 1.mp3
-    │   └── ...
-    └── noise.mp3 (optional noise file)
-```
+A clickpack can have `player1` and `player2` folders, which can have `hardclicks`, `hardreleases`, `clicks`, `releases`, `softclicks`, `softreleases`, `microclicks` and `microreleases` folders inside of them (which may have audio files in them). All of the folders are optional, and you don't have to record clicks for both players (but clicks will sound more realistic if you do).
 
-### ...or like this (for one player)
-
-(notice no separate player1 and player2 folders)
-
-```
-.
-└── clickpack/
-    ├── 1.mp3 (those can be named anyhow you like)
-    ├── 2.mp3
-    ├── ...
-    └── noise.mp3 (optional noise file)
-```
-
-### Note
+### Noise files
 
 The `noise.*` file can also be named `whitenoise.*` and it can be also be located in the `player1` or `player2` folder. The clickbot prefers the root clickpack directory rather than player1/player2 folders to search for this file.
 
