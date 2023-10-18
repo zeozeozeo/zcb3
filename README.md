@@ -72,4 +72,5 @@ By donating you'll get a custom role on the Discord server (dm me) and early acc
 
 * [Ko-fi](https://ko-fi.com/zeozeozeo)
 * [Liberapay](https://liberapay.com/zeo)
-  
+* [DonationAlerts](https://donationalerts.com/r/zeozeozeo)
+* [Boosty](https://boosty.to/zeozeozeo/donate)

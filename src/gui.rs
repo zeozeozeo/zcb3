@@ -235,6 +235,27 @@ impl App {
             );
             ui.hyperlink_to("Donate to me on Liberapay", "https://liberapay.com/zeo");
         });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::Image::new(egui::include_image!("assets/donationalerts_logo.png"))
+                    .max_width(32.0),
+            );
+            ui.hyperlink_to(
+                "Donate to me on DonationAlerts",
+                "https://donationalerts.com/r/zeozeozeo",
+            );
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::Image::new(egui::include_image!("assets/boosty_logo.png")).max_width(32.0),
+            );
+            ui.hyperlink_to(
+                "Donate to me on Boosty",
+                "https://boosty.to/zeozeozeo/donate",
+            );
+        });
     }
 
     fn show_replay_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
