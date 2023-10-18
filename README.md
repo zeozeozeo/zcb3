@@ -6,13 +6,16 @@ Free and easy to use Geometry Dash clickbot.
 
 # Supported replay formats
 
-* Mega Hack Replay (.mhr.json)
+* Mega Hack Replay JSON (.mhr.json)
+* Mega Hack Replay Binary (.mhr)
 * TASBOT Replay (.json)
-* Zbot (frame) (.zbf)
-* OmegaBot 2 (.replay)
+* Zbot Replay (.zbf)
+* OmegaBot 2 Replay (.replay)
 * Ybot Frame (no extension by default, rename to .ybf)
+* Echo Binary (.echo)
+* Amethyst Replay (.thyst)
 
-Suggest more formats in the Discord server
+Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
 # Clickpack format
 

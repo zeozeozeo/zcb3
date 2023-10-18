@@ -1,10 +1,7 @@
 use crate::built_info;
 use anyhow::{Context, Result};
 use bot::{Bot, Macro, MacroType, Pitch, Timings, VolumeSettings};
-use eframe::{
-    egui::{self, RichText},
-    IconData,
-};
+use eframe::{egui, IconData};
 use egui_modal::{Icon, Modal};
 use image::io::Reader as ImageReader;
 use rfd::FileDialog;
@@ -121,17 +118,6 @@ impl eframe::App for App {
             ui.add_space(2.0);
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                match self.stage {
-                    Stage::SelectReplay => self.show_replay_stage(ctx, ui),
-                    Stage::SelectClickpack => self.show_select_clickpack_stage(ctx, ui),
-                    Stage::Render => self.show_render_stage(ctx, ui),
-                    Stage::PweaseDonate => self.show_pwease_donate_stage(ctx, ui),
-                };
-            });
-        });
-
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             let mut dialog = Modal::new(ctx, "update_dialog");
 
@@ -157,6 +143,17 @@ impl eframe::App for App {
             });
 
             dialog.show_dialog();
+        });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
+                match self.stage {
+                    Stage::SelectReplay => self.show_replay_stage(ctx, ui),
+                    Stage::SelectClickpack => self.show_select_clickpack_stage(ctx, ui),
+                    Stage::Render => self.show_render_stage(ctx, ui),
+                    Stage::PweaseDonate => self.show_pwease_donate_stage(ctx, ui),
+                };
+            });
         });
     }
 }
@@ -337,16 +334,14 @@ impl App {
         });
 
         ui.collapsing("Supported file formats", |ui| {
-            ui.label(RichText::new("• Mega Hack Replay JSON (.mhr.json)").strong());
-            ui.label(RichText::new("• Mega Hack Replay Binary (.mhr)").strong());
-            ui.label(RichText::new("• TASBOT Replay (.json)").strong());
-            ui.label(RichText::new("• Zbot Replay (.zbf)").strong());
-            ui.label(RichText::new("• OmegaBot 2 Replay (.replay)").strong());
-            ui.label(
-                RichText::new("• Ybot Frame (no extension by default, rename to .ybf)").strong(),
-            );
-            ui.label(RichText::new("• Echo Binary (.echo)").strong());
-            ui.label("Suggest more macro formats in the Discord server");
+            ui.label("• Mega Hack Replay JSON (.mhr.json)");
+            ui.label("• Mega Hack Replay Binary (.mhr)");
+            ui.label("• TASBOT Replay (.json)");
+            ui.label("• Zbot Replay (.zbf)");
+            ui.label("• OmegaBot 2 Replay (.replay)");
+            ui.label("• Ybot Frame (no extension by default, rename to .ybf)");
+            ui.label("• Echo Binary (.echo)");
+            ui.label("• Amethyst Replay (.thyst)");
         });
 
         // show dialog if there is one
