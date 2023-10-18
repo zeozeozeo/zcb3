@@ -448,24 +448,28 @@ impl Macro {
         let mut cursor = Cursor::new(data);
 
         let magic = cursor.read_u32::<BigEndian>()?;
-        if magic != 0x4841434B {
+        if magic != 0x4841434B { // HACK
             log::error!("invalid mhrbin magic: {}", magic);
             return Err(anyhow::anyhow!("unknown mhrbin magic: {}", magic));
         }
 
         cursor.set_position(12);
         self.fps = cursor.read_u32::<LittleEndian>()? as f32;
+        log::debug!("fps: {}", self.fps);
         cursor.set_position(28);
         let num_actions = cursor.read_u32::<LittleEndian>()?;
+        log::debug!("num_actions: {}", num_actions);
 
-        for _ in (32..32 + num_actions * 32).step_by(32).enumerate() {
+        for _ in 0..num_actions {
             let format = cursor.read_u16::<LittleEndian>()?;
             if format != 0x0002 {
-                log::error!("unknown mhrbin format: {}", format);
-                return Err(anyhow::anyhow!("unknown mhrbin format: {}", format));
+                log::error!("xpos replays not supported, because they don't store frames");
+                return Err(anyhow::anyhow!(
+                    "xpos replays not supported, because they don't store frames"
+                ));
             }
-            let p1 = cursor.read_u8()? == 0;
             let down = cursor.read_u8()? == 1;
+            let p1 = cursor.read_u8()? == 0;
             let frame = cursor.read_u32::<LittleEndian>()?;
             let time = frame as f32 / self.fps;
             // skip 24 bytes
