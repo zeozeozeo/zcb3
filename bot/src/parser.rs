@@ -461,13 +461,14 @@ impl Macro {
         log::debug!("num_actions: {}", num_actions);
 
         for _ in 0..num_actions {
-            let format = cursor.read_u16::<LittleEndian>()?;
-            if format != 0x0002 {
-                log::error!("xpos replays not supported, because they don't store frames");
-                return Err(anyhow::anyhow!(
-                    "xpos replays not supported, because they don't store frames"
-                ));
-            }
+            // let format = cursor.read_u16::<LittleEndian>()?;
+            // if format != 0x0002 {
+            //     log::error!("xpos replays not supported, because they don't store frames");
+            //     return Err(anyhow::anyhow!(
+            //         "xpos replays not supported, because they don't store frames"
+            //     ));
+            // }
+            cursor.set_position(cursor.position() + 2);
             let down = cursor.read_u8()? == 1;
             let p1 = cursor.read_u8()? == 0;
             let frame = cursor.read_u32::<LittleEndian>()?;
