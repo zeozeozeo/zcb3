@@ -469,13 +469,14 @@ impl Macro {
         log::debug!("num_actions: {}", num_actions);
 
         for _ in 0..num_actions {
-            let format = cursor.read_u16::<LittleEndian>()?;
-            if format != 0x0002 {
-                log::error!("xpos replays not supported, because they don't store frames");
-                return Err(anyhow::anyhow!(
-                    "xpos replays not supported, because they don't store frames"
-                ));
-            }
+            // let format = cursor.read_u16::<LittleEndian>()?;
+            // if format != 0x0002 {
+            //     log::error!("xpos replays not supported, because they don't store frames");
+            //     return Err(anyhow::anyhow!(
+            //         "xpos replays not supported, because they don't store frames"
+            //     ));
+            // }
+            cursor.set_position(cursor.position() + 2);
             let down = cursor.read_u8()? == 1;
             let p1 = cursor.read_u8()? == 0;
             let frame = cursor.read_u32::<LittleEndian>()?;
@@ -603,7 +604,7 @@ impl Macro {
             cursor.set_position(cursor.position() + str_len);
         }
 
-        cursor.set_position(cursor.position() + 20); // skip 8 bytes
+        cursor.set_position(cursor.position() + 19);
         let mods = cursor.read_i32::<LittleEndian>()?;
         let speed;
         if mods & (1 << 6) != 0 {
@@ -646,10 +647,14 @@ impl Macro {
             let params = entry.split('|');
             let vec_params = params.collect::<Vec<&str>>();
             let delta_time = vec_params[0].parse::<i64>()?;
+            if delta_time == -12345 {
+                // -12345 is reserved for the rng seed of the replay
+                continue;
+            }
             current_time += delta_time;
-            let time = (current_time as f32 * speed) / self.fps;
+            let time = current_time as f32 / self.fps / speed;
 
-            let keys = vec_params[1].parse::<i32>()?;
+            let keys = vec_params[3].parse::<i32>()?;
 
             if keys & (1 << 0) != 0 {
                 // m1
