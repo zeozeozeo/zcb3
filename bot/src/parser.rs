@@ -2,8 +2,6 @@ use anyhow::{Context, Result};
 use rand::Rng;
 use serde_json::Value;
 use std::io::Cursor;
-use lzma;
-use leb128;
 
 use crate::{Timings, VolumeSettings};
 
@@ -198,6 +196,10 @@ impl MacroType {
 }
 
 impl Macro {
+    pub const SUPPORTED_EXTENSIONS: &[&'static str] = &[
+        "json", "mhr.json", "mhr", "zbf", "replay", "ybf", "echo", "thyst", "osr",
+    ];
+
     pub fn parse(
         typ: MacroType,
         data: &[u8],
@@ -605,11 +607,14 @@ impl Macro {
         cursor.set_position(cursor.position() + 20); // skip 8 bytes
         let mods = cursor.read_i32::<LittleEndian>()?;
         let speed;
-        if mods & (1<<6) != 0 { // dt
+        if mods & (1 << 6) != 0 {
+            // dt
             speed = 1.5;
-        } else if mods & (1<<8) != 0 { // ht
+        } else if mods & (1 << 8) != 0 {
+            // ht
             speed = 0.75;
-        } else { // nm
+        } else {
+            // nm
             speed = 1.0;
         }
 
@@ -622,9 +627,17 @@ impl Macro {
         cursor.set_position(cursor.position() + 8); // skip 8 bytes
 
         let data_len = cursor.read_u32::<LittleEndian>()?;
-        let data = &data[cursor.position() as usize..(cursor.position() + data_len as u64) as usize];
+        let data =
+            &data[cursor.position() as usize..(cursor.position() + data_len as u64) as usize];
 
-        let decompressed_data = lzma::decompress(data)?;
+        let mut decompressed_data = Vec::new();
+
+        // try to decompress with lzma or lzma2
+        if lzma_rs::lzma_decompress(&mut Cursor::new(data), &mut decompressed_data).is_err() {
+            decompressed_data.clear();
+            lzma_rs::lzma2_decompress(&mut Cursor::new(data), &mut decompressed_data)?;
+        }
+
         let data_str = String::from_utf8(decompressed_data)?;
 
         let entries = data_str.split(',');
@@ -638,11 +651,13 @@ impl Macro {
             let time = (current_time as f32 * speed) / self.fps;
 
             let keys = vec_params[1].parse::<i32>()?;
-            
-            if keys & (1<<0) != 0 { // m1
+
+            if keys & (1 << 0) != 0 {
+                // m1
                 self.process_action_p1(time, true);
             }
-            if keys & (1<<1) != 0 { // m2
+            if keys & (1 << 1) != 0 {
+                // m2
                 self.process_action_p2(time, true);
             }
         }
