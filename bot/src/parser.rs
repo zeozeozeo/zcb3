@@ -2,6 +2,8 @@ use anyhow::{Context, Result};
 use rand::Rng;
 use serde_json::Value;
 use std::io::Cursor;
+use lzma;
+use leb128;
 
 use crate::{Timings, VolumeSettings};
 
@@ -163,6 +165,8 @@ pub enum MacroType {
     EchoBin,
     /// .thyst files
     Amethyst,
+    /// .osr files
+    OsuReplay,
 }
 
 impl MacroType {
@@ -187,6 +191,7 @@ impl MacroType {
             "mhr" => MhrBin,
             "echo" => EchoBin,
             "thyst" => Amethyst,
+            "osr" => OsuReplay,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -214,6 +219,7 @@ impl Macro {
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
             MacroType::EchoBin => replay.parse_echobin(data)?,
             MacroType::Amethyst => replay.parse_amethyst(data)?,
+            MacroType::OsuReplay => replay.parse_osr(data)?,
         }
 
         if !replay.actions.is_empty() {
@@ -564,6 +570,80 @@ impl Macro {
                 self.process_action_p1(action.2, action.1);
             } else {
                 self.process_action_p2(action.2, action.1);
+            }
+        }
+
+        Ok(())
+    }
+
+    // https://osu.ppy.sh/wiki/en/Client/File_formats/osr_%28file_format%29
+    fn parse_osr(&mut self, data: &[u8]) -> Result<()> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        let mut cursor = Cursor::new(data);
+
+        self.fps = 1000.0;
+
+        cursor.set_position(5);
+        let bm_md5_exists = cursor.read_u8()? == 0x0b;
+        if bm_md5_exists {
+            let str_len = leb128::read::unsigned(&mut cursor)?;
+            cursor.set_position(cursor.position() + str_len);
+        }
+
+        let player_name_exists = cursor.read_u8()? == 0x0b;
+        if player_name_exists {
+            let str_len = leb128::read::unsigned(&mut cursor)?;
+            cursor.set_position(cursor.position() + str_len);
+        }
+
+        let replay_md5_exists = cursor.read_u8()? == 0x0b;
+        if replay_md5_exists {
+            let str_len = leb128::read::unsigned(&mut cursor)?;
+            cursor.set_position(cursor.position() + str_len);
+        }
+
+        cursor.set_position(cursor.position() + 20); // skip 8 bytes
+        let mods = cursor.read_i32::<LittleEndian>()?;
+        let speed;
+        if mods & (1<<6) != 0 { // dt
+            speed = 1.5;
+        } else if mods & (1<<8) != 0 { // ht
+            speed = 0.75;
+        } else { // nm
+            speed = 1.0;
+        }
+
+        let life_graph_exists = cursor.read_u8()? == 0x0b;
+        if life_graph_exists {
+            let str_len = leb128::read::unsigned(&mut cursor)?;
+            cursor.set_position(cursor.position() + str_len);
+        }
+
+        cursor.set_position(cursor.position() + 8); // skip 8 bytes
+
+        let data_len = cursor.read_u32::<LittleEndian>()?;
+        let data = &data[cursor.position() as usize..(cursor.position() + data_len as u64) as usize];
+
+        let decompressed_data = lzma::decompress(data)?;
+        let data_str = String::from_utf8(decompressed_data)?;
+
+        let entries = data_str.split(',');
+        let mut current_time = 0;
+
+        for entry in entries {
+            let params = entry.split('|');
+            let vec_params = params.collect::<Vec<&str>>();
+            let delta_time = vec_params[0].parse::<i64>()?;
+            current_time += delta_time;
+            let time = (current_time as f32 * speed) / self.fps;
+
+            let keys = vec_params[1].parse::<i32>()?;
+            
+            if keys & (1<<0) != 0 { // m1
+                self.process_action_p1(time, true);
+            }
+            if keys & (1<<1) != 0 { // m2
+                self.process_action_p2(time, true);
             }
         }
 
