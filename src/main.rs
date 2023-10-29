@@ -1,4 +1,3 @@
-mod autocutter;
 mod gui;
 use bot::*;
 
