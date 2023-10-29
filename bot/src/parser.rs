@@ -604,7 +604,7 @@ impl Macro {
             cursor.set_position(cursor.position() + str_len);
         }
 
-        cursor.set_position(cursor.position() + 20); // skip 8 bytes
+        cursor.set_position(cursor.position() + 19);
         let mods = cursor.read_i32::<LittleEndian>()?;
         let speed;
         if mods & (1 << 6) != 0 {
@@ -647,10 +647,14 @@ impl Macro {
             let params = entry.split('|');
             let vec_params = params.collect::<Vec<&str>>();
             let delta_time = vec_params[0].parse::<i64>()?;
+            if delta_time == -12345 {
+                // -12345 is reserved for the rng seed of the replay
+                continue;
+            }
             current_time += delta_time;
-            let time = (current_time as f32 * speed) / self.fps;
+            let time = current_time as f32 / self.fps / speed;
 
-            let keys = vec_params[1].parse::<i32>()?;
+            let keys = vec_params[3].parse::<i32>()?;
 
             if keys & (1 << 0) != 0 {
                 // m1
