@@ -428,12 +428,7 @@ impl App {
             if ui.button("Select replay").clicked() {
                 // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
                 if let Some(file) = FileDialog::new()
-                    .add_filter(
-                        "Replay file",
-                        &[
-                            "json", "mhr.json", "mhr", "zbf", "replay", "ybf", "echo", "thyst",
-                        ],
-                    )
+                    .add_filter("Replay file", Macro::SUPPORTED_EXTENSIONS)
                     .pick_file()
                 {
                     log::info!("selected replay file: {file:?}");
