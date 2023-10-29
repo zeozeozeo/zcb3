@@ -1,16 +1,15 @@
 use crate::built_info;
 use anyhow::{Context, Result};
 use bot::{Bot, Macro, MacroType, Pitch, Timings, VolumeSettings};
-use eframe::{egui, IconData};
+use eframe::{
+    egui::{self, Key},
+    IconData,
+};
 use egui_modal::{Icon, Modal};
 use image::io::Reader as ImageReader;
 use rfd::FileDialog;
 use serde_json::Value;
-use std::{
-    io::Cursor,
-    sync::{Arc, Mutex},
-    time::Instant,
-};
+use std::{io::Cursor, time::Instant};
 use std::{io::Read, path::PathBuf};
 
 pub fn run_gui() -> Result<(), eframe::Error> {
@@ -45,7 +44,9 @@ enum Stage {
     SelectReplay,
     SelectClickpack,
     Render,
+    // AutoCutter,
     PweaseDonate,
+    Secret,
 }
 
 impl Stage {
@@ -58,11 +59,11 @@ impl Stage {
     }
 }
 
-#[derive(Debug)]
+// #[derive(Debug)]
 struct App {
     stage: Stage,
-    replay: Arc<Mutex<Macro>>,
-    bot: Arc<Mutex<Bot>>,
+    replay: Macro,
+    bot: Bot,
     output: Option<PathBuf>,
     volume_var: f32,
     noise: bool,
@@ -71,18 +72,18 @@ struct App {
     pitch: Pitch,
     timings: Timings,
     vol_settings: VolumeSettings,
-    render_progress: Arc<Mutex<usize>>,
-    /// Title and body of any rendering error (if any). The first
-    /// `bool` determines whether it's an error or success.
-    render_msg: Arc<Mutex<Option<(bool, String, String)>>>,
+    // autocutter: AutoCutter,
+    last_chars: [Key; 9],
+    char_idx: u8,
+    litematic_export_releases: bool,
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
             stage: Stage::default(),
-            replay: Arc::new(Mutex::new(Macro::default())),
-            bot: Arc::new(Mutex::new(Bot::default())),
+            replay: Macro::default(),
+            bot: Bot::default(),
             output: None,
             volume_var: 0.20,
             noise: false,
@@ -99,21 +100,53 @@ impl Default for App {
                 soft: 0.025,
             },
             vol_settings: VolumeSettings::default(),
-            render_progress: Arc::new(Mutex::new(0)),
-            render_msg: Arc::new(Mutex::new(None)),
+            // autocutter: AutoCutter::default(),
+            last_chars: [Key::A; 9],
+            char_idx: 0,
+            litematic_export_releases: false,
         }
     }
 }
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.input(|i| {
+            const BOYKISSER: [Key; 9] = [
+                Key::B,
+                Key::O,
+                Key::Y,
+                Key::K,
+                Key::I,
+                Key::S,
+                Key::S,
+                Key::E,
+                Key::R,
+            ];
+            for key in BOYKISSER {
+                if i.key_pressed(key) {
+                    self.last_chars[self.char_idx as usize] = key;
+                    self.char_idx += 1;
+                    self.char_idx %= BOYKISSER.len() as u8;
+                    break;
+                }
+            }
+            if self.last_chars == BOYKISSER {
+                self.last_chars = [Key::A; BOYKISSER.len()];
+                self.stage = Stage::Secret;
+            }
+        });
+
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.stage, Stage::SelectReplay, "Replay");
                 ui.selectable_value(&mut self.stage, Stage::SelectClickpack, "Clickpack");
                 ui.selectable_value(&mut self.stage, Stage::Render, "Render");
+                // ui.selectable_value(&mut self.stage, Stage::AutoCutter, "AutoCutter");
                 ui.selectable_value(&mut self.stage, Stage::PweaseDonate, "Donate");
+                if self.stage == Stage::Secret {
+                    ui.selectable_value(&mut self.stage, Stage::Secret, "Secret");
+                }
             });
             ui.add_space(2.0);
         });
@@ -121,25 +154,27 @@ impl eframe::App for App {
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             let mut dialog = Modal::new(ctx, "update_dialog");
 
-            ui.add_space(2.0);
-            ui.horizontal(|ui| {
-                if self.stage != self.stage.previous() {
+            egui::ScrollArea::horizontal().show(ui, |ui| {
+                ui.add_space(2.0);
+                ui.horizontal(|ui| {
+                    if self.stage != self.stage.previous() {
+                        if ui
+                            .button("Back")
+                            .on_hover_text("Go back to the previous stage")
+                            .clicked()
+                        {
+                            self.stage = self.stage.previous();
+                        }
+                    }
                     if ui
-                        .button("Back")
-                        .on_hover_text("Go back to the previous stage")
+                        .button("Check for updates")
+                        .on_hover_text("Check if your ZCB version is up-to-date")
                         .clicked()
                     {
-                        self.stage = self.stage.previous();
+                        self.do_update_check(&dialog);
                     }
-                }
-                if ui
-                    .button("Check for updates")
-                    .on_hover_text("Check if your ZCB version is up-to-date")
-                    .clicked()
-                {
-                    self.do_update_check(&dialog);
-                }
-                ui.hyperlink_to("Join the discord server", "https://discord.gg/b4kBQyXYZT");
+                    ui.hyperlink_to("Join the discord server", "https://discord.gg/b4kBQyXYZT");
+                });
             });
 
             dialog.show_dialog();
@@ -151,7 +186,9 @@ impl eframe::App for App {
                     Stage::SelectReplay => self.show_replay_stage(ctx, ui),
                     Stage::SelectClickpack => self.show_select_clickpack_stage(ctx, ui),
                     Stage::Render => self.show_render_stage(ctx, ui),
+                    // Stage::AutoCutter => self.autocutter.show_ui(ctx, ui),
                     Stage::PweaseDonate => self.show_pwease_donate_stage(ctx, ui),
+                    Stage::Secret => self.show_secret_stage(ctx, ui),
                 };
             });
         });
@@ -215,6 +252,97 @@ impl App {
             );
             return;
         }
+    }
+
+    fn export_litematic(&self) {
+        use rustmatica::{
+            block_state::types::{HorizontalDirection::*, Instrument},
+            util::{UVec3, Vec3},
+            BlockState, Region,
+        };
+        let mut blocks: Vec<(BlockState, bool)> = vec![];
+
+        // 1 repeater tick = 2 game ticks, or 0.1 seconds
+        let mut prev_time = 0.;
+        for action in &self.replay.actions {
+            if !self.litematic_export_releases && action.click.is_release() {
+                continue;
+            }
+
+            let mut delay = (action.time - prev_time) / 1.42; // 142% speed makes it align a bit better
+            if self.litematic_export_releases {
+                delay /= 1.42;
+            }
+            prev_time = action.time;
+
+            let ticks = delay / 0.1;
+            // repeaters can have 4 ticks max, so we need to duplicate
+            // some repeaters if the action delay is more than 0.4s
+            let repeaters = ((ticks / 4.).round() as usize).max(1);
+            let last_ticks = ((ticks % 4.).round() as usize).clamp(0, 3) as u8 + 1;
+
+            for i in 0..repeaters {
+                let block = BlockState::Repeater {
+                    delay: if i != repeaters - 1 { 4 } else { last_ticks },
+                    facing: West, // points to east
+                    locked: false,
+                    powered: false,
+                };
+                blocks.push((block, false));
+            }
+
+            // now, we need to add the note block
+            blocks.push((
+                BlockState::NoteBlock {
+                    instrument: if action.click.is_release() {
+                        Instrument::Basedrum
+                    } else {
+                        Instrument::Hat
+                    },
+                    note: 0,
+                    powered: false,
+                },
+                action.click.is_release(),
+            ))
+        }
+
+        let mut region = Region::new(
+            "omagah".into(),
+            UVec3::new(0, 0, 0),
+            Vec3::new(blocks.len() as i32, 2, 1),
+        );
+
+        for (x, block) in blocks.iter().enumerate() {
+            let is_release = block.1;
+            region.set_block(
+                UVec3::new(x, 0, 0),
+                if is_release {
+                    BlockState::Stone
+                } else {
+                    BlockState::Glass
+                },
+            );
+            region.set_block(UVec3::new(x, 1, 0), block.0.clone());
+        }
+
+        let litematic = region.as_litematic("Made with ZCB3".into(), "zeozeozeo".into());
+        let _ = litematic.write_file("omagah.litematic");
+    }
+
+    fn show_secret_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
+        // this is so epic
+        ui.add_enabled_ui(!self.replay.actions.is_empty(), |ui| {
+            ui.horizontal(|ui| {
+                if ui
+                    .button("Export replay to .litematic")
+                    .on_disabled_hover_text("You have to load a replay first")
+                    .clicked()
+                {
+                    self.export_litematic();
+                }
+                ui.checkbox(&mut self.litematic_export_releases, "Export releases");
+            });
+        });
     }
 
     fn show_pwease_donate_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -323,7 +451,7 @@ impl App {
                         let replay =
                             Macro::parse(replay_type, &data, self.timings, self.vol_settings);
                         if let Ok(replay) = replay {
-                            self.replay = Arc::new(Mutex::new(replay));
+                            self.replay = replay;
                             self.stage = Stage::SelectClickpack;
                         } else if let Err(e) = replay {
                             dialog.open_dialog(
@@ -348,7 +476,7 @@ impl App {
                 }
             }
 
-            let num_actions = self.replay.lock().unwrap().actions.len();
+            let num_actions = self.replay.actions.len();
             if num_actions > 0 {
                 ui.label(format!("Number of actions in macro: {}", num_actions));
             }
@@ -395,7 +523,7 @@ impl App {
                 };
 
                 if let Ok(bot) = bot {
-                    self.bot = Arc::new(Mutex::new(bot));
+                    self.bot = bot;
                     self.stage = Stage::Render;
                 } else if let Err(e) = bot {
                     dialog.open_dialog(
@@ -428,56 +556,47 @@ impl App {
         dialog.show_dialog();
     }
 
-    fn render_macro(
-        bot: Arc<Mutex<Bot>>,
-        replay: Arc<Mutex<Macro>>,
-        noise: bool,
-        normalize: bool,
-        output: PathBuf,
-        render_progress: Arc<Mutex<usize>>,
-        render_msg: Arc<Mutex<Option<(bool, String, String)>>>,
-    ) {
-        rayon::spawn(move || {
-            let start = Instant::now();
-            let segment = bot.lock().unwrap().render_macro(
-                &replay.lock().unwrap(),
-                noise,
-                normalize,
-                Some(render_progress),
-            );
-            let end = start.elapsed();
-            log::info!("rendered in {end:?}");
+    fn render_replay(&mut self, dialog: &Modal) {
+        let start = Instant::now();
+        let segment = self
+            .bot
+            .render_macro(&self.replay, self.noise, self.normalize, None);
+        let end = start.elapsed();
+        log::info!("rendered in {end:?}");
 
-            let f = std::fs::File::create(output.clone());
+        let output = self
+            .output
+            .clone()
+            .unwrap_or(PathBuf::from("you_shouldnt_see_this.wav"));
+        let f = std::fs::File::create(output.clone());
 
-            if let Ok(f) = f {
-                if let Err(e) = segment.export_wav(f) {
-                    *render_msg.lock().unwrap() = Some((
-                        true,
-                        "Failed to write output file!".to_string(),
-                        format!("{e}. Try running the program as administrator."),
-                    ));
-                }
-            } else if let Err(e) = f {
-                *render_msg.lock().unwrap() = Some((
-                    true,
-                    "Failed to open output file!".to_string(),
-                    format!("{e}. Try running the program as administrator."),
-                ));
+        if let Ok(f) = f {
+            if let Err(e) = segment.export_wav(f) {
+                dialog.open_dialog(
+                    Some("Failed to write output file!"),
+                    Some(format!("{e}. Try running the program as administrator.")),
+                    Some(Icon::Error),
+                );
             }
+        } else if let Err(e) = f {
+            dialog.open_dialog(
+                Some("Failed to open output file!"),
+                Some(format!("{e}. Try running the program as administrator.")),
+                Some(Icon::Error),
+            );
+        }
 
-            let num_actions = replay.lock().unwrap().actions.len();
-            let filename = output.file_name().unwrap().to_str().unwrap();
+        let num_actions = self.replay.actions.len();
+        let filename = output.file_name().unwrap().to_str().unwrap();
 
-            *render_msg.lock().unwrap() = Some((
-                false,
-                "Done!".to_string(),
-                format!(
-                    "Successfully exported '{filename}' in {end:?} (~{} actions/second)",
-                    num_actions as f32 / end.as_secs_f32()
-                ),
-            ));
-        });
+        dialog.open_dialog(
+            Some("Done!"),
+            Some(format!(
+                "Successfully exported '{filename}' in {end:?} (~{} actions/second)",
+                num_actions as f32 / end.as_secs_f32()
+            )),
+            Some(Icon::Success),
+        );
     }
 
     fn show_render_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -524,7 +643,7 @@ impl App {
         });
 
         // overlay noise checkbox
-        ui.add_enabled_ui(self.bot.lock().unwrap().has_noise(), |ui| {
+        ui.add_enabled_ui(self.bot.has_noise(), |ui| {
             ui.checkbox(&mut self.noise, "Overlay noise")
                 .on_disabled_hover_text("Your clickpack doesn't have a noise file.")
                 .on_hover_text("Overlays the noise file that's in the clickpack directory.");
@@ -536,43 +655,29 @@ impl App {
 
         ui.separator();
 
-        let render_msg = self.render_msg.lock().unwrap().clone();
-
-        ui.add_enabled_ui(self.output.is_some() && render_msg.is_none(), |ui| {
-            if ui
-                .button("Render!")
-                .on_disabled_hover_text("Please select an output file.")
-                .on_hover_text("Start rendering the macro.\nThis might take some time!")
-                .clicked()
-            {
-                // start render task (everything is wrapped in an Arc<Mutex<>>)
-                // FIXME: for some reason this still freezes
-                Self::render_macro(
-                    self.bot.clone(),
-                    self.replay.clone(),
-                    self.noise,
-                    self.normalize,
-                    self.output.clone().unwrap(),
-                    self.render_progress.clone(),
-                    self.render_msg.clone(),
-                );
-            }
-        });
-
-        if render_msg.is_some() {
-            let error = render_msg.as_ref().unwrap().0;
-            let title = render_msg.as_ref().unwrap().1.clone();
-            let body = render_msg.as_ref().unwrap().2.clone();
-
-            dialog.open_dialog(
-                Some(title),
-                Some(body),
-                Some(if error { Icon::Error } else { Icon::Success }),
-            );
-
-            // we displayed the message, clear it
-            *self.render_msg.lock().unwrap() = None;
-        }
+        let has_output = self.output.is_some();
+        let has_clicks = self.bot.has_clicks();
+        ui.add_enabled_ui(
+            has_output && has_clicks && !self.replay.actions.is_empty(),
+            |ui| {
+                if ui
+                    .button("Render!")
+                    .on_disabled_hover_text(if !has_output {
+                        "Please select an output file"
+                    } else if !has_clicks {
+                        "Please select a clickpack"
+                    } else {
+                        "Please load a replay"
+                    })
+                    .on_hover_text("Start rendering the replay.\nThis might take some time!")
+                    .clicked()
+                {
+                    // start render task (everything is wrapped in an Arc<Mutex<>>)
+                    // FIXME: for some reason this still freezes
+                    self.render_replay(&dialog);
+                }
+            },
+        );
 
         dialog.show_dialog();
     }
