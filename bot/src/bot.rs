@@ -24,6 +24,27 @@ pub struct PlayerClicks {
     prev_click_typ: Option<ClickType>,
 }
 
+impl PlayerClicks {
+    #[inline]
+    pub fn has_clicks(&self) -> bool {
+        for clicks in [
+            &self.hardclicks,
+            &self.hardreleases,
+            &self.clicks,
+            &self.releases,
+            &self.softclicks,
+            &self.softreleases,
+            &self.microclicks,
+            &self.microreleases,
+        ] {
+            if !clicks.is_empty() {
+                return true;
+            }
+        }
+        false
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Pitch {
     pub from: f32,
@@ -171,7 +192,7 @@ impl PlayerClicks {
                 SoftRelease => !self.softreleases.is_empty(),
                 MicroClick => !self.microclicks.is_empty(),
                 MicroRelease => !self.microreleases.is_empty(),
-                None => break,
+                _ => continue,
             };
             if has_clicks {
                 return match typ {
@@ -183,7 +204,7 @@ impl PlayerClicks {
                     SoftRelease => get_click!(self.softreleases, typ),
                     MicroClick => get_click!(self.microclicks, typ),
                     MicroRelease => get_click!(self.microreleases, typ),
-                    None => break,
+                    _ => continue,
                 };
             }
         }
@@ -355,5 +376,10 @@ impl Bot {
 
         log::info!("rendered in {:?}", start.elapsed());
         segment
+    }
+
+    #[inline]
+    pub fn has_clicks(&self) -> bool {
+        self.player.0.has_clicks() || self.player.1.has_clicks()
     }
 }

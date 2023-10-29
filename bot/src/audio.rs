@@ -27,6 +27,11 @@ pub struct AudioSegment {
 impl AudioSegment {
     pub const NUM_CHANNELS: usize = 2;
 
+    pub fn extend_with(&mut self, data: &[f32], channels: usize) {
+        self.data
+            .extend_from_slice(&Self::convert_channels(data, channels));
+    }
+
     fn convert_channels(audio: &[f32], channels: usize) -> Vec<f32> {
         if channels < Self::NUM_CHANNELS {
             // duplicate channels
@@ -310,6 +315,49 @@ impl AudioSegment {
         }
         self.pitch_table.choose(&mut rand::thread_rng()).unwrap()
     }
+
+    pub fn get_sample_index_which_was_a_duration_ago(&self, ago: Duration) -> usize {
+        if self.duration() < ago {
+            return 0;
+        }
+        let time = self.duration() - ago;
+        let idx = self.time_to_sample(time.as_secs_f32());
+        idx
+    }
+
+    #[inline(always)]
+    pub fn samples_after_index(&self, idx: usize) -> usize {
+        self.data.len() - idx
+    }
+
+    pub fn get_preview_data(&self, displayed_samples: usize, time: Duration) -> Vec<f32> {
+        let start = self.get_sample_index_which_was_a_duration_ago(time);
+        let samples_after = self.samples_after_index(start);
+        let mut step = samples_after / displayed_samples;
+        // make sure step is aligned to NUM_CHANNELS
+        step -= step % Self::NUM_CHANNELS;
+
+        self.data[start..]
+            .iter()
+            .step_by(step)
+            .map(|s| *s)
+            .collect()
+    }
+
+    /*
+    pub fn find_peaks(&self, threshold: f32) {
+        const CHUNK_SIZE: usize = 44100 / 4; // 11025
+        use itertools::Itertools;
+
+        for chunk in self.data.chunks(CHUNK_SIZE) {
+            let mut vol = 0.;
+            for (l, r) in chunk.iter().tuples() {
+                let avg = (l + r) / 2.;
+                vol += avg.abs() / (chunk.len() / 2) as f32;
+            }
+        }
+    }
+    */
 }
 
 #[cfg(test)]
