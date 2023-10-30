@@ -8,6 +8,10 @@ build = "build.rs"
 [profile.release]
 lto = true
 
+# rubato is *super* slow in debug builds, so we always build it with O3
+[profile.dev.package.rubato]
+opt-level = 3
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]

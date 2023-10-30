@@ -1,9 +1,8 @@
+use crate::{Timings, VolumeSettings};
 use anyhow::{Context, Result};
 use rand::Rng;
 use serde_json::Value;
 use std::io::Cursor;
-
-use crate::{Timings, VolumeSettings};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
@@ -159,12 +158,14 @@ pub enum MacroType {
     Ybotf,
     /// .mhr files
     MhrBin,
-    /// .echo files
-    EchoBin,
+    /// .echo files (new and old formats)
+    Echo,
     /// .thyst files
     Amethyst,
     /// .osr files
     OsuReplay,
+    /// GDMegaOverlay .macro files
+    Gdmo,
 }
 
 impl MacroType {
@@ -187,9 +188,10 @@ impl MacroType {
             "replay" => Obot2,
             "ybf" => Ybotf,
             "mhr" => MhrBin,
-            "echo" => EchoBin,
+            "echo" => Echo,
             "thyst" => Amethyst,
             "osr" => OsuReplay,
+            "macro" => Gdmo,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -197,7 +199,7 @@ impl MacroType {
 
 impl Macro {
     pub const SUPPORTED_EXTENSIONS: &[&'static str] = &[
-        "json", "mhr.json", "mhr", "zbf", "replay", "ybf", "echo", "thyst", "osr",
+        "json", "mhr.json", "mhr", "zbf", "replay", "ybf", "echo", "thyst", "osr", "macro",
     ];
 
     pub fn parse(
@@ -219,9 +221,10 @@ impl Macro {
             MacroType::Obot2 => replay.parse_obot2(data)?,
             MacroType::Ybotf => replay.parse_ybotf(data)?,
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
-            MacroType::EchoBin => replay.parse_echobin(data)?,
+            MacroType::Echo => replay.parse_echo(data)?,
             MacroType::Amethyst => replay.parse_amethyst(data)?,
             MacroType::OsuReplay => replay.parse_osr(data)?,
+            MacroType::Gdmo => replay.parse_gdmo(data)?,
         }
 
         if !replay.actions.is_empty() {
@@ -494,6 +497,7 @@ impl Macro {
         Ok(())
     }
 
+    /// Parses the new Echo macro format.
     fn parse_echobin(&mut self, data: &[u8]) -> Result<()> {
         use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
         let mut cursor = Cursor::new(data);
@@ -528,6 +532,40 @@ impl Macro {
             }
         }
 
+        Ok(())
+    }
+
+    /// Parses .echo files (both old json and new binary formats).
+    fn parse_echo(&mut self, data: &[u8]) -> Result<()> {
+        let Ok(v) = serde_json::from_slice::<Value>(data) else {
+            return self.parse_echobin(data);
+        };
+
+        self.fps = v["FPS"].as_f64().context("couldn't get 'FPS' field")? as f32;
+        let starting_frame = v["Starting Frame"].as_u64().unwrap_or(0);
+
+        for action in v["Echo Replay"]
+            .as_array()
+            .context("couldn't get 'Echo Replay' field")?
+        {
+            let frame = action["Frame"]
+                .as_u64()
+                .context("couldn't get 'Frame' field")?
+                + starting_frame;
+            let time = frame as f32 / self.fps;
+            let p2 = action["Player 2"]
+                .as_bool()
+                .context("couldn't get 'Player 2' field")?;
+            let down = action["Hold"]
+                .as_bool()
+                .context("couldn't get 'Hold' field")?;
+
+            if p2 {
+                self.process_action_p2(time, down);
+            } else {
+                self.process_action_p1(time, down);
+            }
+        }
         Ok(())
     }
 
@@ -663,6 +701,44 @@ impl Macro {
             if keys & (1 << 1) != 0 {
                 // m2
                 self.process_action_p2(time, true);
+            }
+        }
+
+        Ok(())
+    }
+
+    // https://github.com/maxnut/GDMegaOverlay/blob/3bc9c191e3fcdde838b0f69f8411af782afa3ba7/src/Replay.cpp#L124-L140
+    fn parse_gdmo(&mut self, data: &[u8]) -> Result<()> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        use std::io::Read;
+        use std::mem::size_of;
+
+        let mut cursor = Cursor::new(data);
+        self.fps = cursor.read_f32::<LittleEndian>()?;
+
+        let num_actions = cursor.read_u32::<LittleEndian>()?;
+        let _num_frame_captures = cursor.read_u32::<LittleEndian>()?;
+
+        #[repr(C)]
+        struct GdmoAction {
+            press: bool,
+            player2: bool,
+            frame: u32,
+            _y_accel: f64,
+            _px: f32,
+            _py: f32,
+        }
+
+        for _ in 0..num_actions {
+            let mut buf = [0; size_of::<GdmoAction>()];
+            cursor.read_exact(&mut buf)?;
+            let action: GdmoAction = unsafe { std::mem::transmute(buf) };
+
+            let time = action.frame as f32 / self.fps;
+            if action.player2 {
+                self.process_action_p2(time, action.press);
+            } else {
+                self.process_action_p1(time, action.press);
             }
         }
 
