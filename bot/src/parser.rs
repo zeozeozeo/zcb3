@@ -67,23 +67,42 @@ impl ClickType {
         (typ, vol_offset)
     }
 
+    /// Returns the opposite click type. For example, every click will be translated to a release,
+    /// and every release will be translated into a click.
+    ///
+    /// None will always be translated to None.
+    #[inline]
+    pub fn opposite(self) -> Self {
+        use ClickType::*;
+        match self {
+            HardClick => HardRelease,
+            Click => Release,
+            SoftClick => SoftRelease,
+            MicroClick => MicroRelease,
+            HardRelease => HardClick,
+            Release => Click,
+            SoftRelease => SoftClick,
+            MicroRelease => MicroClick,
+            None => None,
+        }
+    }
+
     /// Order of which clicks should be selected depending on the actual click type
     #[rustfmt::skip]
-    pub fn preferred(self) -> [Self; 4] {
-        // import all enum variants to scope
+    pub fn preferred(self) -> [Self; 8] {
         use ClickType::*;
 
         // this is perfect
         match self {
-            HardClick =>    [HardClick,    Click,        SoftClick,   MicroClick  ],
-            HardRelease =>  [HardRelease,  Release,      SoftRelease, MicroRelease],
-            Click =>        [Click,        HardClick,    SoftClick,   MicroClick  ],
-            Release =>      [Release,      HardRelease,  SoftRelease, MicroRelease],
-            SoftClick =>    [SoftClick,    MicroClick,   Click,       HardClick   ],
-            SoftRelease =>  [SoftRelease,  MicroRelease, Release,     HardRelease ],
-            MicroClick =>   [MicroClick,   SoftClick,    Click,       HardClick   ],
-            MicroRelease => [MicroRelease, SoftRelease,  Release,     HardRelease ],
-            None =>         [None,         None,         None,        None        ],
+            HardClick =>    [HardClick,    Click,        SoftClick,   MicroClick  , HardRelease,  Release,      SoftRelease, MicroRelease],
+            HardRelease =>  [HardRelease,  Release,      SoftRelease, MicroRelease, HardRelease,  Release,      SoftRelease, MicroRelease],
+            Click =>        [Click,        HardClick,    SoftClick,   MicroClick  , Release,      HardRelease,  SoftRelease, MicroRelease],
+            Release =>      [Release,      HardRelease,  SoftRelease, MicroRelease, Release,      HardRelease,  SoftRelease, MicroRelease],
+            SoftClick =>    [SoftClick,    MicroClick,   Click,       HardClick   , SoftRelease,  MicroRelease, Release,     HardRelease ],
+            SoftRelease =>  [SoftRelease,  MicroRelease, Release,     HardRelease , SoftRelease,  MicroRelease, Release,     HardRelease ],
+            MicroClick =>   [MicroClick,   SoftClick,    Click,       HardClick   , MicroRelease, SoftRelease,  Release,     HardRelease ],
+            MicroRelease => [MicroRelease, SoftRelease,  Release,     HardRelease , MicroRelease, SoftRelease,  Release,     HardRelease ],
+            None =>         [None,         None,         None,        None        , None,         None,         None,        None        ],
         }
     }
 
@@ -166,6 +185,8 @@ pub enum MacroType {
     OsuReplay,
     /// GDMegaOverlay .macro files
     Gdmo,
+    /// ReplayBot .replay files (rename to .replaybot)
+    ReplayBot,
 }
 
 impl MacroType {
@@ -192,6 +213,7 @@ impl MacroType {
             "thyst" => Amethyst,
             "osr" => OsuReplay,
             "macro" => Gdmo,
+            "replaybot" => ReplayBot,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -199,7 +221,17 @@ impl MacroType {
 
 impl Macro {
     pub const SUPPORTED_EXTENSIONS: &[&'static str] = &[
-        "json", "mhr.json", "mhr", "zbf", "replay", "ybf", "echo", "thyst", "osr", "macro",
+        "json",
+        "mhr.json",
+        "mhr",
+        "zbf",
+        "replay",
+        "ybf",
+        "echo",
+        "thyst",
+        "osr",
+        "macro",
+        "replaybot",
     ];
 
     pub fn parse(
@@ -225,6 +257,7 @@ impl Macro {
             MacroType::Amethyst => replay.parse_amethyst(data)?,
             MacroType::OsuReplay => replay.parse_osr(data)?,
             MacroType::Gdmo => replay.parse_gdmo(data)?,
+            MacroType::ReplayBot => replay.parse_replaybot(data)?,
         }
 
         if !replay.actions.is_empty() {
@@ -336,9 +369,7 @@ impl Macro {
 
         if decoded.replay_type == OReplayType::XPos {
             log::error!("xpos replays not supported, because they doesn't store frames");
-            return Err(anyhow::anyhow!(
-                "xpos replays not supported, because they doesn't store frames"
-            ));
+            anyhow::bail!("xpos replays not supported, because they doesn't store frames")
         };
 
         self.fps = decoded.initial_fps;
@@ -461,7 +492,7 @@ impl Macro {
         if magic != 0x4841434B {
             // HACK
             log::error!("invalid mhrbin magic: {}", magic);
-            return Err(anyhow::anyhow!("unknown mhrbin magic: {}", magic));
+            anyhow::bail!("unknown mhrbin magic: {}", magic)
         }
 
         cursor.set_position(12);
@@ -505,7 +536,7 @@ impl Macro {
         let magic = cursor.read_u32::<BigEndian>()?;
         if magic != 0x4D455441 {
             log::error!("invalid echobin magic: {}", magic);
-            return Err(anyhow::anyhow!("unknown echobin magic: {}", magic));
+            anyhow::bail!("unknown echobin magic: {}", magic)
         }
 
         let replay_type = cursor.read_u32::<BigEndian>()?;
@@ -737,6 +768,48 @@ impl Macro {
                 self.process_action_p2(time, action.press);
             } else {
                 self.process_action_p1(time, action.press);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_replaybot(&mut self, data: &[u8]) -> Result<()> {
+        const REPLAYBOT_MAGIC: [u8; 4] = ['R' as u8, 'P' as u8, 'L' as u8, 'Y' as u8];
+        use byteorder::{LittleEndian, ReadBytesExt};
+        use std::io::Read;
+
+        let mut cursor = Cursor::new(data);
+        let mut magic = [0u8; 4];
+        cursor.read_exact(&mut magic)?;
+
+        // check if its a version 2 frame macro
+        if magic != REPLAYBOT_MAGIC {
+            anyhow::bail!(
+                "old replaybot macro format is not supported, as it does not store frames"
+            )
+        }
+        let version = cursor.read_u8()?;
+        if version != 2 {
+            anyhow::bail!("unsupported replaybot version {version} (only v2 is supported, because v1 doesn't store frames)")
+        }
+        if cursor.read_u8()? != 1 {
+            anyhow::bail!("only frame replays are supported")
+        }
+
+        self.fps = cursor.read_f32::<LittleEndian>()?;
+        cursor.set_position(cursor.position() + 4); // skip 4 bytes
+        for _ in (10..data.len()).step_by(5) {
+            let frame = cursor.read_u32::<LittleEndian>()?;
+            let time = frame as f32 / self.fps;
+            let state = cursor.read_u8()?;
+            let down = state & 0x1 != 0;
+            let player2 = state >> 1 != 0;
+
+            if player2 {
+                self.process_action_p2(time, down);
+            } else {
+                self.process_action_p1(time, down);
             }
         }
 

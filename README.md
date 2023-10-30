@@ -16,6 +16,7 @@ Free and easy to use Geometry Dash clickbot.
 * Amethyst Replay (.thyst)
 * osu! replay (.osr)
 * GDMO Replay (.macro)
+* ReplayBot (.replay, rename to .replaybot)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 

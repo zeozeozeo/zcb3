@@ -488,6 +488,7 @@ impl App {
             ui.label("• Amethyst Replay (.thyst)");
             ui.label("• osu! replay (.osr)");
             ui.label("• GDMO Replay (.macro)");
+            ui.label("• ReplayBot Replay (.replay, rename to .replaybot)");
         });
 
         // show dialog if there is one
@@ -537,7 +538,7 @@ impl App {
                 )
             }
         }
-        
+
         ui.collapsing("Info", |ui| {
             ui.label("The clickpack should either have player1 and/or player2 folders inside it, or just audio files.");
             ui.label("Optionally you can put a noise.* or whitenoise.* file inside the clickpack folder to have an option to overlay background noise.");

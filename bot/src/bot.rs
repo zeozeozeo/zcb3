@@ -215,10 +215,14 @@ impl PlayerClicks {
     pub fn longest_click(&self) -> f32 {
         let mut max = 0.0f32;
         for segments in [
+            &self.hardclicks,
+            &self.hardreleases,
             &self.clicks,
             &self.releases,
             &self.softclicks,
             &self.softreleases,
+            &self.microclicks,
+            &self.microreleases,
         ] {
             for segment in segments {
                 max = max.max(segment.duration().as_secs_f32());
@@ -239,9 +243,9 @@ impl Bot {
     pub fn new(clickpack_dir: PathBuf, pitch: Pitch) -> Result<Self> {
         let mut bot = Self::default();
         bot.load_clickpack(clickpack_dir, pitch);
-        if bot.player.0.clicks.is_empty() && bot.player.1.clicks.is_empty() {
+        if !bot.player.0.has_clicks() && !bot.player.1.has_clicks() {
             return Err(anyhow::anyhow!(
-                "couldn't find any clicks, did you choose the right folder?"
+                "couldn't find any sounds, did you choose the right folder?"
             ));
         }
         Ok(bot)
