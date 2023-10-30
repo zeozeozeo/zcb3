@@ -537,8 +537,7 @@ impl App {
                 )
             }
         }
-
-        ui.separator();
+        
         ui.collapsing("Info", |ui| {
             ui.label("The clickpack should either have player1 and/or player2 folders inside it, or just audio files.");
             ui.label("Optionally you can put a noise.* or whitenoise.* file inside the clickpack folder to have an option to overlay background noise.");

@@ -684,24 +684,22 @@ impl Macro {
         for entry in entries {
             let params = entry.split('|');
             let vec_params = params.collect::<Vec<&str>>();
+            if vec_params.len() != 4 {
+                continue; // this is probably the last action
+            }
             let delta_time = vec_params[0].parse::<i64>()?;
             if delta_time == -12345 {
-                // -12345 is reserved for the rng seed of the replay
-                continue;
+                continue; // -12345 is reserved for the rng seed of the replay
             }
             current_time += delta_time;
             let time = current_time as f32 / self.fps / speed;
 
             let keys = vec_params[3].parse::<i32>()?;
 
-            if keys & (1 << 0) != 0 {
-                // m1
-                self.process_action_p1(time, true);
-            }
-            if keys & (1 << 1) != 0 {
-                // m2
-                self.process_action_p2(time, true);
-            }
+            // bit 1 = M1 in standard, left kan in taiko, k1 in mania
+            // bit 2 = M2 in standard, left kat in taiko, k2 in mania
+            self.process_action_p1(time, keys & (1 << 0) != 0);
+            self.process_action_p2(time, keys & (1 << 1) != 0);
         }
 
         Ok(())
