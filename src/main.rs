@@ -7,6 +7,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+// load i18n macro
+use rust_i18n::i18n;
+i18n!("locales");
+
 pub mod built_info {
     // the file has been placed there by the build script.
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
