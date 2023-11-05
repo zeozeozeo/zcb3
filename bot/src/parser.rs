@@ -57,12 +57,10 @@ impl ClickType {
             } else {
                 Self::SoftRelease
             }
+        } else if is_click {
+            Self::MicroClick
         } else {
-            if is_click {
-                Self::MicroClick
-            } else {
-                Self::MicroRelease
-            }
+            Self::MicroRelease
         };
         (typ, vol_offset)
     }
@@ -315,9 +313,11 @@ impl Macro {
     ) -> Result<Self> {
         log::info!("parsing replay, strlen {}, replay type {typ:?}", data.len());
 
-        let mut replay = Self::default();
-        replay.timings = timings;
-        replay.vol_settings = vol_settings;
+        let mut replay = Macro {
+            timings,
+            vol_settings,
+            ..Default::default()
+        };
 
         match typ {
             MacroType::Mhr => replay.parse_mhr(data)?,
@@ -521,12 +521,10 @@ impl Macro {
                 } else {
                     ObotClickType::Player2Up
                 }
+            } else if action.down {
+                ObotClickType::Player1Down
             } else {
-                if action.down {
-                    ObotClickType::Player1Down
-                } else {
-                    ObotClickType::Player1Up
-                }
+                ObotClickType::Player1Up
             };
             if let Some(prev_click_type) = prev_click_type {
                 if prev_click_type == click_type {
@@ -745,7 +743,7 @@ impl Macro {
             fps: i32,
         }
         fn is_false(b: &bool) -> bool {
-            *b == false
+            !b
         }
         #[derive(Serialize)]
         struct MhrEvent {
@@ -839,12 +837,7 @@ impl Macro {
         }
 
         let replay_type = cursor.read_u32::<BigEndian>()?;
-        let action_size;
-        if replay_type == 0x44424700 {
-            action_size = 24;
-        } else {
-            action_size = 6;
-        }
+        let action_size = if replay_type == 0x44424700 { 24 } else { 6 };
         cursor.set_position(24);
         self.fps = cursor.read_f32::<LittleEndian>()?;
         cursor.set_position(48);
@@ -857,10 +850,10 @@ impl Macro {
 
             if p1 {
                 self.process_action_p1(time, down);
-                self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
+                self.extended_p1(down, frame, 0., 0., 0., 0.);
             } else {
                 self.process_action_p2(time, down);
-                self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
+                self.extended_p2(down, frame, 0., 0., 0., 0.);
             }
         }
 
@@ -1171,7 +1164,7 @@ impl Macro {
     }
 
     fn parse_replaybot(&mut self, data: &[u8]) -> Result<()> {
-        const REPLAYBOT_MAGIC: [u8; 4] = ['R' as u8, 'P' as u8, 'L' as u8, 'Y' as u8];
+        const REPLAYBOT_MAGIC: &[u8; 4] = b"RPLY";
         use byteorder::{LittleEndian, ReadBytesExt};
         use std::io::Read;
 
@@ -1180,7 +1173,7 @@ impl Macro {
         cursor.read_exact(&mut magic)?;
 
         // check if its a version 2 frame macro
-        if magic != REPLAYBOT_MAGIC {
+        if magic != *REPLAYBOT_MAGIC {
             anyhow::bail!(
                 "old replaybot macro format is not supported, as it does not store frames"
             )

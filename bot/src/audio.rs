@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
+use std::cmp::Ordering;
 use std::io::{BufWriter, Cursor};
 use std::time::{Duration, Instant};
 use symphonia::core::audio::SampleBuffer;
@@ -33,26 +34,28 @@ impl AudioSegment {
     }
 
     fn convert_channels(audio: &[f32], channels: usize) -> Vec<f32> {
-        if channels < Self::NUM_CHANNELS {
-            // duplicate channels
-            let mut new: Vec<f32> = Vec::with_capacity(audio.len() * Self::NUM_CHANNELS);
-            for s in audio {
-                for _ in 0..=Self::NUM_CHANNELS - channels {
-                    new.push(*s);
-                }
+        match channels.cmp(&Self::NUM_CHANNELS) {
+            Ordering::Greater => {
+                // remove channels (TODO idk if this is correct)
+                let mut new = vec![0.0f32; (audio.len() / channels) * Self::NUM_CHANNELS];
+                new.iter_mut().enumerate().for_each(|(i, s)| {
+                    for k in 0..channels - 1 {
+                        *s = audio[i * k];
+                    }
+                });
+                new
             }
-            new
-        } else if channels > Self::NUM_CHANNELS {
-            // remove channels (TODO idk if this is correct)
-            let mut new = vec![0.0f32; (audio.len() / channels) * Self::NUM_CHANNELS];
-            new.iter_mut().enumerate().for_each(|(i, s)| {
-                for k in 0..channels - 1 {
-                    *s = audio[i * k];
+            Ordering::Less => {
+                // duplicate channels
+                let mut new: Vec<f32> = Vec::with_capacity(audio.len() * Self::NUM_CHANNELS);
+                for s in audio {
+                    for _ in 0..=Self::NUM_CHANNELS - channels {
+                        new.push(*s);
+                    }
                 }
-            });
-            new
-        } else {
-            audio.to_vec()
+                new
+            }
+            Ordering::Equal => audio.to_vec(),
         }
     }
 
@@ -185,7 +188,7 @@ impl AudioSegment {
         self.data[start..end]
             .par_iter_mut() // run in parallel
             .zip(&other.data)
-            .for_each(|(s, o)| *s = *s + o);
+            .for_each(|(s, o)| *s += o);
     }
 
     #[inline]
@@ -197,7 +200,7 @@ impl AudioSegment {
         self.data[start..end]
             .par_iter_mut() // run in parallel
             .zip(&other.data)
-            .for_each(|(s, o)| *s = *s + (o * volume));
+            .for_each(|(s, o)| *s += o * volume);
     }
 
     /// Returns the duration of the audio segment.
@@ -259,8 +262,8 @@ impl AudioSegment {
 
         // interleave audio and convert to f32
         for i in 0..resampled[0].len() {
-            for channel in 0..2 {
-                self.data.push(resampled[channel][i] as f32);
+            for channel_data in resampled.iter().take(2) {
+                self.data.push(channel_data[i] as f32);
             }
         }
 
@@ -321,8 +324,7 @@ impl AudioSegment {
             return 0;
         }
         let time = self.duration() - ago;
-        let idx = self.time_to_sample(time.as_secs_f32());
-        idx
+        self.time_to_sample(time.as_secs_f32())
     }
 
     #[inline(always)]
@@ -337,11 +339,7 @@ impl AudioSegment {
         // make sure step is aligned to NUM_CHANNELS
         step -= step % Self::NUM_CHANNELS;
 
-        self.data[start..]
-            .iter()
-            .step_by(step)
-            .map(|s| *s)
-            .collect()
+        self.data[start..].iter().step_by(step).copied().collect()
     }
 
     /*

@@ -157,14 +157,11 @@ impl eframe::App for App {
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
-                    if self.stage != self.stage.previous() {
-                        if ui
+                    if self.stage != self.stage.previous() && ui
                             .button("Back")
                             .on_hover_text("Go back to the previous stage")
-                            .clicked()
-                        {
-                            self.stage = self.stage.previous();
-                        }
+                            .clicked() {
+                        self.stage = self.stage.previous();
                     }
                     if ui
                         .button("Check for updates")
@@ -213,12 +210,12 @@ fn get_latest_tag() -> Result<usize> {
     Ok(name
         .as_str()
         .context("tag name is not a string")?
-        .replace(".", "")
+        .replace('.', "")
         .parse()?)
 }
 
 fn get_current_tag() -> usize {
-    built_info::PKG_VERSION.replace(".", "").parse().unwrap()
+    built_info::PKG_VERSION.replace('.', "").parse().unwrap()
 }
 
 impl App {
@@ -239,7 +236,7 @@ impl App {
             } else {
                 dialog.open_dialog(
                     Some("You are up-to-date!"),                                 // title
-                    Some(format!("You are running the latest version of ZCB.\nYou can always download new versions on GitHub or on the Discord server.")), // body
+                    Some("You are running the latest version of ZCB.\nYou can always download new versions on GitHub or on the Discord server.".to_string()), // body
                     Some(Icon::Success),                                         // icon
                 );
             }
