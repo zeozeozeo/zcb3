@@ -6,20 +6,20 @@ Free and easy to use Geometry Dash clickbot.
 
 # Supported replay formats
 
-* Mega Hack Replay JSON (.mhr.json)"
-* Mega Hack Replay Binary (.mhr)"
-* TASBOT Replay (.json)"
-* Zbot Replay (.zbf)"
-* OmegaBot 2 Replay (.replay)"
-* Ybot Frame (no extension by default, rename to .ybf)"
-* Echo (.echo)"
-* Amethyst Replay (.thyst)"
-* osu! replay (.osr)"
-* GDMO Replay (.macro)"
-* ReplayBot Replay (.replay, rename to .replaybot)"
-* KDBOT Replay (.kd)"
-* Rush Replay (.rsh)"
-* TXT Replay (.txt, generated from mat's macro converter)"
+* Mega Hack Replay JSON (.mhr.json)
+* Mega Hack Replay Binary (.mhr)
+* TASBOT Replay (.json)
+* Zbot Replay (.zbf)
+* OmegaBot 2 Replay (.replay)
+* Ybot Frame (no extension by default, rename to .ybf)
+* Echo (.echo)
+* Amethyst Replay (.thyst)
+* osu! replay (.osr)
+* GDMO Replay (.macro)
+* ReplayBot Replay (.replay, rename to .replaybot)
+* KDBOT Replay (.kd)
+* Rush Replay (.rsh)
+* TXT Replay (.txt, generated from mat's macro converter)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
