@@ -157,10 +157,12 @@ impl eframe::App for App {
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
-                    if self.stage != self.stage.previous() && ui
+                    if self.stage != self.stage.previous()
+                        && ui
                             .button("Back")
                             .on_hover_text("Go back to the previous stage")
-                            .clicked() {
+                            .clicked()
+                    {
                         self.stage = self.stage.previous();
                     }
                     if ui
@@ -486,6 +488,9 @@ impl App {
             ui.label("• osu! replay (.osr)");
             ui.label("• GDMO Replay (.macro)");
             ui.label("• ReplayBot Replay (.replay, rename to .replaybot)");
+            ui.label("• KDBOT Replay (.kd)");
+            ui.label("• Rush Replay (.rsh)");
+            ui.label("• TXT Replay (.txt, generated from mat's macro converter)");
         });
 
         // show dialog if there is one
