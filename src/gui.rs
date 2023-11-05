@@ -483,7 +483,7 @@ impl App {
             ui.label("• Zbot Replay (.zbf)");
             ui.label("• OmegaBot 2 Replay (.replay)");
             ui.label("• Ybot Frame (no extension by default, rename to .ybf)");
-            ui.label("• Echo (.echo)");
+            ui.label("• Echo (.echo, old and new formats)");
             ui.label("• Amethyst Replay (.thyst)");
             ui.label("• osu! replay (.osr)");
             ui.label("• GDMO Replay (.macro)");

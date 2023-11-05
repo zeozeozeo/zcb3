@@ -12,7 +12,7 @@ Free and easy to use Geometry Dash clickbot.
 * Zbot Replay (.zbf)
 * OmegaBot 2 Replay (.replay)
 * Ybot Frame (no extension by default, rename to .ybf)
-* Echo (.echo)
+* Echo (.echo, old and new formats)
 * Amethyst Replay (.thyst)
 * osu! replay (.osr)
 * GDMO Replay (.macro)
