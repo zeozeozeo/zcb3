@@ -254,17 +254,17 @@ impl MacroType {
 use serde::{Deserialize, Serialize};
 
 // structs that are serialized by obot using [`bincode`]
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize)]
 pub enum ObotLocation {
     XPos(u32),
     Frame(u32),
 }
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq)]
 enum ObotReplayType {
     XPos,
     Frame,
 }
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, PartialEq, Clone, Copy)]
 enum ObotClickType {
     None,
     FpsChange(f32),
@@ -273,12 +273,12 @@ enum ObotClickType {
     Player2Down,
     Player2Up,
 }
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize)]
 struct ObotClick {
     location: ObotLocation,
     click_type: ObotClickType,
 }
-#[derive(Serialize, Deserialize, Debug, Clone)]
+#[derive(Serialize, Deserialize)]
 struct ObotReplay {
     initial_fps: f32,
     current_fps: f32,
