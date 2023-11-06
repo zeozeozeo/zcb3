@@ -105,9 +105,9 @@ replay.file_format_1:
 replay.file_format_2:
     en: • Mega Hack Replay Binary (.mhr)
 replay.file_format_3:
-    en: • TASBOT Replay (.json)
+    en: • TASbot Replay (.json)
 replay.file_format_4:
-    en: • Zbot Replay (.zbf)
+    en: • zBot Frame (.zbf)
 replay.file_format_5:
     en: • OmegaBot 2 Replay (.replay)
 replay.file_format_6:
@@ -123,8 +123,8 @@ replay.file_format_10:
 replay.file_format_11:
     en: • ReplayBot Replay (.replay, rename to .replaybot)
 replay.file_format_12:
-    en: • KDBOT Replay (.kd)
+    en: • KD-BOT Replay (.kd)
 replay.file_format_13:
     en: • Rush Replay (.rsh)
 replay.file_format_14:
-    en: • TXT Replay (.txt, generated from mat's macro converter)
+    en: • Plaintext Replay (.txt, generated from mat's macro converter)
