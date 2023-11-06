@@ -696,7 +696,19 @@ impl Macro {
     }
 
     fn parse_mhr(&mut self, data: &[u8]) -> Result<()> {
-        let v: Value = serde_json::from_slice(data)?;
+        let v: serde_json::Result<Value> = serde_json::from_slice(data);
+
+        // if we can't parse the JSON, try parsing the binary format
+        if v.is_err() && self.parse_mhrbin(data).is_ok() {
+            return Ok(());
+        } else {
+            // failed to parse binary format
+            self.actions.clear();
+            self.extended.clear();
+        }
+
+        let v = v?;
+
         self.fps = v["meta"]["fps"]
             .as_f64()
             .context("couldn't get 'fps' field (does 'meta' exist?)")? as f32;
@@ -789,6 +801,11 @@ impl Macro {
     }
 
     fn parse_mhrbin(&mut self, data: &[u8]) -> Result<()> {
+        // if it's a json macro, load from json instead
+        if serde_json::from_slice::<Value>(data).is_ok() {
+            return self.parse_mhr(data);
+        }
+
         use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
         let mut cursor = Cursor::new(data);
 
