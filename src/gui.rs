@@ -79,6 +79,7 @@ struct App {
     last_chars: [Key; 9],
     char_idx: u8,
     litematic_export_releases: bool,
+    sample_rate: u32,
 }
 
 impl Default for App {
@@ -107,8 +108,19 @@ impl Default for App {
             last_chars: [Key::A; 9],
             char_idx: 0,
             litematic_export_releases: false,
+            sample_rate: 44100,
         }
     }
+}
+
+// terrible ux but who cares
+fn u32_edit_field(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
+    let mut tmp_value = format!("{}", value);
+    let res = ui.text_edit_singleline(&mut tmp_value);
+    if let Ok(result) = tmp_value.parse::<u32>() {
+        *value = result.max(1);
+    }
+    res
 }
 
 impl eframe::App for App {
@@ -529,14 +541,20 @@ impl App {
         });
         ui.separator();
 
+        // samplerate edit field
+        ui.horizontal(|ui| {
+            u32_edit_field(ui, &mut self.sample_rate);
+            ui.label("Sample rate");
+        });
+
         if ui.button("Select clickpack").clicked() {
             if let Some(dir) = FileDialog::new().pick_folder() {
                 log::info!("selected clickpack folder: {dir:?}");
 
                 let bot = if self.pitch_enabled {
-                    Bot::new(dir, self.pitch)
+                    Bot::new(dir, self.pitch, self.sample_rate)
                 } else {
-                    Bot::new(dir, Pitch::default())
+                    Bot::new(dir, Pitch::default(), self.sample_rate)
                 };
 
                 if let Ok(bot) = bot {
@@ -576,7 +594,7 @@ impl App {
         let start = Instant::now();
         let segment = self
             .bot
-            .render_macro(&self.replay, self.noise, self.normalize, None);
+            .render_macro(&self.replay, self.noise, self.normalize);
         let end = start.elapsed();
         log::info!("rendered in {end:?}");
 

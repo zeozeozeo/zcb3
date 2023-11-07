@@ -3,11 +3,8 @@ use anyhow::Result;
 use rand::Rng;
 use std::{
     path::PathBuf,
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
-
-const SAMPLE_RATE: u32 = 48000;
 
 #[derive(Debug, Clone, Default)]
 pub struct PlayerClicks {
@@ -95,7 +92,7 @@ impl Default for VolumeSettings {
     }
 }
 
-fn read_clicks_in_directory(dir: PathBuf, pitch: Pitch) -> Vec<AudioSegment> {
+fn read_clicks_in_directory(dir: PathBuf, pitch: Pitch, sample_rate: u32) -> Vec<AudioSegment> {
     log::debug!(
         "loading clicks from directory {}",
         dir.to_str().unwrap_or("")
@@ -118,7 +115,7 @@ fn read_clicks_in_directory(dir: PathBuf, pitch: Pitch) -> Vec<AudioSegment> {
                 log::error!("failed to decode file '{path:?}'");
                 continue;
             };
-            segment.resample(SAMPLE_RATE); // make sure samplerate is equal to SAMPLE_RATE
+            segment.resample(sample_rate);
             segment.make_pitch_table(pitch.from, pitch.to, pitch.step);
             segments.push(segment);
         }
@@ -127,7 +124,7 @@ fn read_clicks_in_directory(dir: PathBuf, pitch: Pitch) -> Vec<AudioSegment> {
 }
 
 impl PlayerClicks {
-    pub fn from_path(mut path: PathBuf, pitch: Pitch) -> Self {
+    pub fn from_path(mut path: PathBuf, pitch: Pitch, sample_rate: u32) -> Self {
         let mut player = PlayerClicks::default();
 
         for (dir, clicks) in [
@@ -141,7 +138,7 @@ impl PlayerClicks {
             ("microreleases", &mut player.microreleases),
         ] {
             path.push(dir);
-            *clicks = read_clicks_in_directory(path.clone(), pitch);
+            *clicks = read_clicks_in_directory(path.clone(), pitch, sample_rate);
             path.pop();
         }
 
@@ -237,11 +234,15 @@ pub struct Bot {
     pub player: (PlayerClicks, PlayerClicks),
     pub longest_click: f32,
     pub noise: Option<AudioSegment>,
+    pub sample_rate: u32,
 }
 
 impl Bot {
-    pub fn new(clickpack_dir: PathBuf, pitch: Pitch) -> Result<Self> {
-        let mut bot = Self::default();
+    pub fn new(clickpack_dir: PathBuf, pitch: Pitch, sample_rate: u32) -> Result<Self> {
+        let mut bot = Bot {
+            sample_rate,
+            ..Default::default()
+        };
         bot.load_clickpack(clickpack_dir, pitch);
         if !bot.player.0.has_clicks() && !bot.player.1.has_clicks() {
             return Err(anyhow::anyhow!(
@@ -256,6 +257,7 @@ impl Bot {
     }
 
     fn load_clickpack(&mut self, clickpack_dir: PathBuf, pitch: Pitch) {
+        assert!(self.sample_rate > 0);
         let mut player1_path = clickpack_dir.clone();
         player1_path.push("player1");
         let mut player2_path = clickpack_dir.clone();
@@ -264,7 +266,7 @@ impl Bot {
         // check if the clickpack has player1/player2 folders
         if !player1_path.exists() && !player2_path.exists() {
             log::warn!("clickpack directory doesn't have player1/player2 folders");
-            let clicks = PlayerClicks::from_path(clickpack_dir.clone(), pitch);
+            let clicks = PlayerClicks::from_path(clickpack_dir.clone(), pitch, self.sample_rate);
             self.player = (clicks.clone(), clicks);
             self.load_noise(clickpack_dir); // try to load noise
             return;
@@ -272,8 +274,8 @@ impl Bot {
 
         // load clicks from player1 and player2 folders
         self.player = (
-            PlayerClicks::from_path(player1_path.clone(), pitch),
-            PlayerClicks::from_path(player2_path.clone(), pitch),
+            PlayerClicks::from_path(player1_path.clone(), pitch, self.sample_rate),
+            PlayerClicks::from_path(player2_path.clone(), pitch, self.sample_rate),
         );
 
         // find longest click (will be used to ensure that the end doesn't get cut off)
@@ -304,7 +306,7 @@ impl Bot {
                 log::info!("found noise file {path:?}");
                 let f = std::fs::File::open(path.clone()).unwrap();
                 self.noise = if let Ok(mut noise) = AudioSegment::from_media_source(Box::new(f)) {
-                    noise.resample(SAMPLE_RATE);
+                    noise.resample(self.sample_rate);
                     Some(noise)
                 } else {
                     None
@@ -336,19 +338,14 @@ impl Bot {
     }
 
     /// Always outputs files with sample rate of 48000.
-    pub fn render_macro(
-        &mut self,
-        replay: &Macro,
-        noise: bool,
-        normalize: bool,
-        render_progress: Option<Arc<Mutex<usize>>>,
-    ) -> AudioSegment {
+    pub fn render_macro(&mut self, replay: &Macro, noise: bool, normalize: bool) -> AudioSegment {
         log::info!(
             "starting render, {} actions, noise: {noise}",
             replay.actions.len()
         );
 
-        let mut segment = AudioSegment::silent(SAMPLE_RATE, replay.duration + self.longest_click);
+        let mut segment =
+            AudioSegment::silent(self.sample_rate, replay.duration + self.longest_click);
         let start = Instant::now();
 
         for action in &replay.actions {
@@ -358,10 +355,6 @@ impl Bot {
 
             // overlay
             segment.overlay_at_vol(action.time, click, 1.0 + action.vol_offset);
-
-            if let Some(progress) = render_progress.as_ref() {
-                *progress.lock().unwrap() += 1;
-            }
         }
 
         if noise && self.noise.is_some() {

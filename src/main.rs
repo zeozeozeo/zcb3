@@ -99,6 +99,8 @@ struct Args {
         default_value_t = 0.2
     )]
     volume_var: f32,
+    #[arg(long, help = "Audio framerate", default_value_t = 44100)]
+    sample_rate: u32,
 }
 
 #[cfg(target_os = "windows")]
@@ -169,7 +171,8 @@ fn run_cli(mut args: Args) {
     };
 
     // create bot (loads clickpack)
-    let mut bot = Bot::new(PathBuf::from(args.clicks), pitch).expect("failed to create bot");
+    let mut bot = Bot::new(PathBuf::from(args.clicks), pitch, args.sample_rate)
+        .expect("failed to create bot");
 
     // parse replay
     let replay = Macro::parse(
@@ -181,7 +184,7 @@ fn run_cli(mut args: Args) {
     .unwrap();
 
     // render output file
-    let segment = bot.render_macro(&replay, args.noise, args.normalize, None);
+    let segment = bot.render_macro(&replay, args.noise, args.normalize);
 
     // save
     if args.output.is_empty() {
