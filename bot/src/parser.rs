@@ -289,9 +289,8 @@ struct Obot2Replay {
 
 // structs that are serialized by obot3 using [`dlhn`]
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default, Debug)]
+#[derive(Serialize, Deserialize)]
 enum Obot3ClickType {
-    #[default]
     None,
     Player1Down,
     Player1Up,
@@ -300,13 +299,13 @@ enum Obot3ClickType {
     FpsChange(f32),
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[derive(Serialize, Deserialize)]
 struct Obot3Click {
     frame: u32,
     click_type: Obot3ClickType,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize)]
 struct Obot3Replay {
     initial_fps: f32,
     current_fps: f32,
