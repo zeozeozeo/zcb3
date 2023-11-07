@@ -158,6 +158,7 @@ pub struct ExtendedAction {
     pub y: f32,
     pub y_accel: f32,
     pub rot: f32,
+    pub fps_change: Option<f32>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -190,10 +191,8 @@ pub enum MacroType {
     TasBot,
     /// .zbf files
     Zbot,
-    /// .replay files
-    Obot2,
-    /// .replay files (new obot3 format, but the parser will also handle the old one)
-    /// Obot3,
+    /// OmegaBot 3 and OmegaBot 2 .replay files
+    Obot,
     /// Ybot frame files (no extension)
     Ybotf,
     /// .mhr files
@@ -235,7 +234,7 @@ impl MacroType {
                 }
             }
             "zbf" => Zbot,
-            "replay" => Obot2,
+            "replay" => Obot,
             "ybf" => Ybotf,
             "mhr" => MhrBin,
             "echo" => EchoBin, // the parser will also handle the old echo format
@@ -253,19 +252,20 @@ impl MacroType {
 
 use serde::{Deserialize, Serialize};
 
-// structs that are serialized by obot using [`bincode`]
+// structs that are serialized by obot2 using [`bincode`]
+
 #[derive(Serialize, Deserialize)]
-pub enum ObotLocation {
+pub enum Obot2Location {
     XPos(u32),
     Frame(u32),
 }
 #[derive(Serialize, Deserialize, PartialEq)]
-enum ObotReplayType {
+enum Obot2ReplayType {
     XPos,
     Frame,
 }
 #[derive(Serialize, Deserialize, PartialEq, Clone, Copy)]
-enum ObotClickType {
+enum Obot2ClickType {
     None,
     FpsChange(f32),
     Player1Down,
@@ -274,17 +274,43 @@ enum ObotClickType {
     Player2Up,
 }
 #[derive(Serialize, Deserialize)]
-struct ObotClick {
-    location: ObotLocation,
-    click_type: ObotClickType,
+struct Obot2Click {
+    location: Obot2Location,
+    click_type: Obot2ClickType,
 }
 #[derive(Serialize, Deserialize)]
-struct ObotReplay {
+struct Obot2Replay {
     initial_fps: f32,
     current_fps: f32,
-    replay_type: ObotReplayType,
+    replay_type: Obot2ReplayType,
     current_click: usize,
-    clicks: Vec<ObotClick>,
+    clicks: Vec<Obot2Click>,
+}
+
+// structs that are serialized by obot3 using [`dlhn`]
+
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default, Debug)]
+enum Obot3ClickType {
+    #[default]
+    None,
+    Player1Down,
+    Player1Up,
+    Player2Down,
+    Player2Up,
+    FpsChange(f32),
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+struct Obot3Click {
+    frame: u32,
+    click_type: Obot3ClickType,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct Obot3Replay {
+    initial_fps: f32,
+    current_fps: f32,
+    clicks: Vec<Obot3Click>,
 }
 
 impl Macro {
@@ -323,7 +349,7 @@ impl Macro {
             MacroType::Mhr => replay.parse_mhr(data)?,
             MacroType::TasBot => replay.parse_tasbot(data)?,
             MacroType::Zbot => replay.parse_zbf(data)?,
-            MacroType::Obot2 => replay.parse_obot2(data)?,
+            MacroType::Obot => replay.parse_obot3(data)?,
             MacroType::Ybotf => replay.parse_ybotf(data)?,
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
             MacroType::EchoBin | MacroType::Echo => replay.parse_echo(data)?,
@@ -354,7 +380,7 @@ impl Macro {
             MacroType::Mhr => self.write_mhr(writer)?,
             MacroType::TasBot => self.write_tasbot(writer)?,
             MacroType::Zbot => self.write_zbf(writer)?,
-            MacroType::Obot2 => self.write_obot2(writer)?,
+            MacroType::Obot => self.write_obot2(writer)?,
             MacroType::Ybotf => self.write_ybotf(writer)?,
             MacroType::Echo => self.write_echo(writer)?,
             MacroType::Amethyst => self.write_amethyst(writer)?,
@@ -407,6 +433,7 @@ impl Macro {
                 y,
                 y_accel,
                 rot,
+                fps_change: None,
             });
         }
     }
@@ -421,7 +448,15 @@ impl Macro {
                 y,
                 y_accel,
                 rot,
+                fps_change: None,
             });
+        }
+    }
+
+    #[inline]
+    fn fps_change(&mut self, fps_change: f32) {
+        if let Some(last) = self.extended.last_mut() {
+            last.fps_change = Some(fps_change);
         }
     }
 
@@ -467,9 +502,11 @@ impl Macro {
     }
 
     fn parse_obot2(&mut self, data: &[u8]) -> Result<()> {
-        let decoded: ObotReplay = bincode::deserialize(data)?;
+        let Ok(decoded) = bincode::deserialize::<Obot2Replay>(data) else {
+            return self.parse_obot3(data);
+        };
 
-        if decoded.replay_type == ObotReplayType::XPos {
+        if decoded.replay_type == Obot2ReplayType::XPos {
             log::error!("xpos replays not supported, because they doesn't store frames");
             anyhow::bail!("xpos replays not supported, because they doesn't store frames")
         };
@@ -479,7 +516,7 @@ impl Macro {
 
         for action in decoded.clicks {
             let frame = match action.location {
-                ObotLocation::Frame(frame) => frame,
+                Obot2Location::Frame(frame) => frame,
                 _ => {
                     log::warn!("got xpos action while replay type is frame, skipping");
                     continue;
@@ -487,24 +524,27 @@ impl Macro {
             };
             let time = frame as f32 / current_fps;
             match action.click_type {
-                ObotClickType::Player1Down => {
+                Obot2ClickType::Player1Down => {
                     self.process_action_p1(time, true);
                     self.extended_p1(true, frame, 0., 0., 0., 0.)
                 }
-                ObotClickType::Player1Up => {
+                Obot2ClickType::Player1Up => {
                     self.process_action_p1(time, false);
                     self.extended_p1(false, frame, 0., 0., 0., 0.)
                 }
-                ObotClickType::Player2Down => {
+                Obot2ClickType::Player2Down => {
                     self.process_action_p2(time, true);
                     self.extended_p2(true, frame, 0., 0., 0., 0.)
                 }
-                ObotClickType::Player2Up => {
+                Obot2ClickType::Player2Up => {
                     self.process_action_p2(time, false);
                     self.extended_p2(false, frame, 0., 0., 0., 0.)
                 }
-                ObotClickType::FpsChange(fps) => current_fps = fps,
-                ObotClickType::None => {}
+                Obot2ClickType::FpsChange(fps) => {
+                    current_fps = fps;
+                    self.fps_change(fps)
+                }
+                Obot2ClickType::None => {}
             }
         }
 
@@ -517,14 +557,14 @@ impl Macro {
         for action in &self.extended {
             let click_type = if action.player2 {
                 if action.down {
-                    ObotClickType::Player2Down
+                    Obot2ClickType::Player2Down
                 } else {
-                    ObotClickType::Player2Up
+                    Obot2ClickType::Player2Up
                 }
             } else if action.down {
-                ObotClickType::Player1Down
+                Obot2ClickType::Player1Down
             } else {
-                ObotClickType::Player1Up
+                Obot2ClickType::Player1Up
             };
             if let Some(prev_click_type) = prev_click_type {
                 if prev_click_type == click_type {
@@ -532,15 +572,15 @@ impl Macro {
                 }
             }
             prev_click_type = Some(click_type);
-            clicks.push(ObotClick {
-                location: ObotLocation::Frame(action.frame),
+            clicks.push(Obot2Click {
+                location: Obot2Location::Frame(action.frame),
                 click_type,
             })
         }
-        let replay = ObotReplay {
+        let replay = Obot2Replay {
             initial_fps: self.fps,
             current_fps: self.fps,
-            replay_type: ObotReplayType::Frame,
+            replay_type: Obot2ReplayType::Frame,
             current_click: 0,
             clicks,
         };
@@ -1292,6 +1332,45 @@ impl Macro {
             } else {
                 self.process_action_p1(time, down);
                 self.extended_p1(down, frame_or_xpos as u32, 0., 0., 0., 0.);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_obot3(&mut self, mut data: &[u8]) -> Result<()> {
+        let mut deserializer = dlhn::Deserializer::new(&mut data);
+        let Ok(replay) = Obot3Replay::deserialize(&mut deserializer) else {
+            return self.parse_obot2(data);
+        };
+
+        self.fps = replay.initial_fps;
+        let mut current_fps = self.fps;
+
+        for action in replay.clicks {
+            let time = action.frame as f32 / current_fps;
+            match action.click_type {
+                Obot3ClickType::Player1Down => {
+                    self.process_action_p1(time, true);
+                    self.extended_p1(true, action.frame, 0., 0., 0., 0.);
+                }
+                Obot3ClickType::Player1Up => {
+                    self.process_action_p1(time, false);
+                    self.extended_p1(false, action.frame, 0., 0., 0., 0.);
+                }
+                Obot3ClickType::Player2Down => {
+                    self.process_action_p2(time, true);
+                    self.extended_p2(true, action.frame, 0., 0., 0., 0.);
+                }
+                Obot3ClickType::Player2Up => {
+                    self.process_action_p2(time, false);
+                    self.extended_p2(false, action.frame, 0., 0., 0., 0.);
+                }
+                Obot3ClickType::FpsChange(fps) => {
+                    current_fps = fps;
+                    self.fps_change(fps);
+                }
+                Obot3ClickType::None => {}
             }
         }
 
