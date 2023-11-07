@@ -577,11 +577,15 @@ impl App {
         }
 
         ui.collapsing("Info", |ui| {
-            ui.label("The clickpack should either have player1 and/or player2 folders inside it, or just audio files.");
-            ui.label("Optionally you can put a noise.* or whitenoise.* file inside the clickpack folder to have an option to overlay background noise.");
-            ui.label("All audio files will be resampled to 48kHz.");
+            ui.label("The clickpack should either have player1 and/or player2 folders inside it, \
+                    or just audio files. You can add hardclicks, clicks, softclicks, microclicks, \
+                    hardreleases, releases, softreleases and microreleases as directories.");
+            ui.label("Optionally you can put a noise.* or whitenoise.* file inside the clickpack \
+                    folder to have an option to overlay background noise.");
+            ui.label("All audio files will be resampled to the selected sample rate.");
             ui.label("Loading the clickpack may take a while, please be patient.");
-            ui.label("Pitch step is the step between pitch changes in the pitch table. The lower it is, the more random the pitch is. Pitch 1.0 = no pitch.");
+            ui.label("Pitch step is the step between pitch changes in the pitch table. The lower it is, \
+                    the more random the pitch is. Pitch 1.0 = no pitch.");
         });
         ui.collapsing("Supported audio formats", |ui| {
             ui.label("AAC, ADPCM, ALAC, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files.");
