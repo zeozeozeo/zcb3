@@ -11,7 +11,7 @@ Free and easy to use Geometry Dash clickbot.
 * Mega Hack Replay JSON (.mhr.json)
 * Mega Hack Replay Binary (.mhr)
 * TASbot Replay (.json)
-* zBot Replay (.zbf)
+* zBot Frame Replay (.zbf)
 * OmegaBot 2 & 3 Replay (.replay)
 * Ybot Frame (no extension by default, rename to .ybf)
 * Echo (.echo, old and new formats)
