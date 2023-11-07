@@ -7,6 +7,7 @@ build = "build.rs"
 
 [profile.release]
 lto = true
+strip = true
 
 # rubato is *super* slow in debug builds, so we always build it with O3
 [profile.dev.package.rubato]
