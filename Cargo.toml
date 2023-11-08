@@ -20,7 +20,7 @@ members = [".", "bot"]
 
 [dependencies]
 clap = { version = "4.4.6", features = ["derive"] }
-eframe = "0.23.0"
+eframe = { version = "0.23.0", features = ["wgpu"] }
 egui-modal = "0.2.5"
 env_logger = "0.10.0"
 image = { version = "0.24.7", default-features = false, features = ["ico", "png"] }
