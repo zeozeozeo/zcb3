@@ -197,9 +197,7 @@ pub enum MacroType {
     Ybotf,
     /// .mhr files
     MhrBin,
-    /// .echo files (new format, but the parser will also handle the old one)
-    EchoBin,
-    /// .echo files (old json format, but the parser will also handle the new one)
+    /// .echo files (new and format)
     Echo,
     /// .thyst files
     Amethyst,
@@ -237,7 +235,7 @@ impl MacroType {
             "replay" => Obot,
             "ybf" => Ybotf,
             "mhr" => MhrBin,
-            "echo" => EchoBin, // the parser will also handle the old echo format
+            "echo" => Echo, // the parser will also handle the old echo format
             "thyst" => Amethyst,
             "osr" => OsuReplay,
             "macro" => Gdmo,
@@ -351,7 +349,7 @@ impl Macro {
             MacroType::Obot => replay.parse_obot2(data)?, // will also handle obot3 replays
             MacroType::Ybotf => replay.parse_ybotf(data)?,
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
-            MacroType::EchoBin | MacroType::Echo => replay.parse_echo(data)?,
+            MacroType::Echo => replay.parse_echo(data)?,
             MacroType::Amethyst => replay.parse_amethyst(data)?,
             MacroType::OsuReplay => replay.parse_osr(data)?,
             MacroType::Gdmo => replay.parse_gdmo(data)?,
