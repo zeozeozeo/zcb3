@@ -23,6 +23,7 @@ Free and easy to use Geometry Dash clickbot.
 * Rush Replay (.rsh)
 * Plaintext Replay (.txt, generated from mat's macro converter)
 * ReplayEngine Replay (.re)
+* DDHOR Replay (.ddhor, old frame format)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 

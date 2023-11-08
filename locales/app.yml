@@ -130,3 +130,5 @@ replay.file_format_14:
     en: • Plaintext Replay (.txt, generated from mat's macro converter)
 replay.file_format_15:
     en: • ReplayEngine Replay (.re)
+replay.file_format_16:
+    en: • DDHOR Replay (.ddhor, old frame format)

@@ -216,6 +216,8 @@ pub enum MacroType {
     Txt,
     /// ReplayEngine .re files
     ReplayEngine,
+    /// DDHOR .ddhor files
+    Ddhor,
 }
 
 impl MacroType {
@@ -247,6 +249,7 @@ impl MacroType {
             "kd" => Kdbot,
             "txt" => Txt,
             "re" => ReplayEngine,
+            "ddhor" => Ddhor,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -331,6 +334,7 @@ impl Macro {
         "kd",
         "txt",
         "re",
+        "ddhor",
     ];
 
     pub fn parse(
@@ -363,6 +367,7 @@ impl Macro {
             MacroType::Kdbot => replay.parse_kdbot(data)?,
             MacroType::Txt => replay.parse_txt(data)?,
             MacroType::ReplayEngine => replay.parse_re(data)?,
+            MacroType::Ddhor => replay.parse_ddhor(data)?,
         }
 
         if let Some(last) = replay.actions.last() {
@@ -1372,6 +1377,7 @@ impl Macro {
     }
 
     fn parse_re(&mut self, data: &[u8]) -> Result<()> {
+        use std::mem::size_of;
         let mut cursor = Cursor::new(data);
 
         self.fps = cursor.read_f32::<LittleEndian>()?;
@@ -1395,19 +1401,21 @@ impl Macro {
         }
 
         // read action data
-        cursor.set_position(num_actions as u64 * std::mem::size_of::<FrameData>() as u64);
+        let prev_pos = cursor.position();
+        cursor.set_position(num_actions as u64 * size_of::<FrameData>() as u64);
         let mut actions: Vec<ActionData> =
-            Vec::with_capacity(num_actions2 as usize * std::mem::size_of::<ActionData>());
+            Vec::with_capacity(num_actions2 as usize * size_of::<ActionData>());
 
         for _ in 0..num_actions2 {
-            let mut buf = [0; std::mem::size_of::<ActionData>()];
+            let mut buf = [0; size_of::<ActionData>()];
             cursor.read_exact(&mut buf)?;
             actions.push(unsafe { std::mem::transmute(buf) });
         }
 
         // read frame data
+        cursor.set_position(prev_pos);
         for _ in 0..num_actions {
-            let mut buf = [0; std::mem::size_of::<FrameData>()];
+            let mut buf = [0; size_of::<FrameData>()];
             cursor.read_exact(&mut buf)?;
             let data: FrameData = unsafe { std::mem::transmute(buf) };
 
@@ -1439,6 +1447,42 @@ impl Macro {
                     data.y_accel as f32,
                     data.rot,
                 );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_ddhor(&mut self, data: &[u8]) -> Result<()> {
+        const DDHOR_MAGIC: &[u8; 4] = b"DDHR";
+
+        let mut cursor = Cursor::new(data);
+        let mut magicbuf = [0; DDHOR_MAGIC.len()];
+        cursor.read_exact(&mut magicbuf)?;
+
+        if magicbuf != *DDHOR_MAGIC {
+            anyhow::bail!(
+                "ddhor json is not supported, as it doesn't store frames.\n\
+                           try using an older ddhor version with frame mode"
+            );
+        }
+
+        self.fps = cursor.read_i16::<LittleEndian>()? as f32;
+        let num_p1 = cursor.read_i32::<LittleEndian>()?; // num p1 actions
+        let _num_p2 = cursor.read_i32::<LittleEndian>()?; // num p2 actions
+
+        for i in (14..data.len()).step_by(5) {
+            let frame = cursor.read_f32::<LittleEndian>()?;
+            let time = frame / self.fps;
+            let down = cursor.read_u8()? == 0;
+            let p2 = i - 14 >= num_p1 as usize * 5;
+
+            if p2 {
+                self.process_action_p2(time, down);
+                self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
+            } else {
+                self.process_action_p1(time, down);
+                self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             }
         }
 
