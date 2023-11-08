@@ -22,6 +22,7 @@ Free and easy to use Geometry Dash clickbot.
 * KD-BOT Replay (.kd)
 * Rush Replay (.rsh)
 * Plaintext Replay (.txt, generated from mat's macro converter)
+* ReplayEngine Replay (.re)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
