@@ -348,7 +348,7 @@ impl Macro {
             MacroType::Mhr => replay.parse_mhr(data)?,
             MacroType::TasBot => replay.parse_tasbot(data)?,
             MacroType::Zbot => replay.parse_zbf(data)?,
-            MacroType::Obot => replay.parse_obot3(data)?,
+            MacroType::Obot => replay.parse_obot2(data)?, // will also handle obot3 replays
             MacroType::Ybotf => replay.parse_ybotf(data)?,
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
             MacroType::EchoBin | MacroType::Echo => replay.parse_echo(data)?,
@@ -500,6 +500,7 @@ impl Macro {
         Ok(())
     }
 
+    /// Will also handle obot3 replays.
     fn parse_obot2(&mut self, data: &[u8]) -> Result<()> {
         let Ok(decoded) = bincode::deserialize::<Obot2Replay>(data) else {
             return self.parse_obot3(data);
@@ -1337,6 +1338,7 @@ impl Macro {
         Ok(())
     }
 
+    /// Will also handle obot2 replays.
     fn parse_obot3(&mut self, mut data: &[u8]) -> Result<()> {
         let mut deserializer = dlhn::Deserializer::new(&mut data);
         let Ok(replay) = Obot3Replay::deserialize(&mut deserializer) else {
