@@ -218,6 +218,8 @@ pub enum MacroType {
     ReplayEngine,
     /// DDHOR .ddhor files
     Ddhor,
+    /// Xbot Frame .xbot files
+    Xbot,
 }
 
 impl MacroType {
@@ -250,6 +252,7 @@ impl MacroType {
             "txt" => Txt,
             "re" => ReplayEngine,
             "ddhor" => Ddhor,
+            "xbot" => Xbot,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -335,6 +338,7 @@ impl Macro {
         "txt",
         "re",
         "ddhor",
+        "xbot",
     ];
 
     pub fn parse(
@@ -368,6 +372,7 @@ impl Macro {
             MacroType::Txt => replay.parse_txt(data)?,
             MacroType::ReplayEngine => replay.parse_re(data)?,
             MacroType::Ddhor => replay.parse_ddhor(data)?,
+            MacroType::Xbot => replay.parse_xbot(data)?,
         }
 
         if let Some(last) = replay.actions.last() {
@@ -1483,6 +1488,56 @@ impl Macro {
             } else {
                 self.process_action_p1(time, down);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_xbot(&mut self, data: &[u8]) -> Result<()> {
+        let text = String::from_utf8(data.to_vec())?;
+        let mut lines = text.split('\n');
+
+        self.fps = lines
+            .next()
+            .context("first fps line doesn't exist, did you select an empty file?")?
+            .trim()
+            .parse::<u64>()? as f32;
+
+        if lines.next().context("second line doesn't exist")?.trim() != "frames" {
+            anyhow::bail!("the xBot parser only supports xBot Frame macros");
+        }
+
+        for (i, line) in lines.enumerate() {
+            if line.trim().is_empty() {
+                continue;
+            }
+            let i = i + 1;
+            let mut splitted = line.trim().split(' ');
+            let state: u8 = splitted
+                .next()
+                .context(format!("failed to get input state at line {i}"))?
+                .parse()?;
+            let frame: u32 = splitted
+                .next()
+                .context(format!("failed to get raw position at line {i}"))?
+                .parse()?;
+
+            // state:
+            // 0 - release
+            // 1 - down
+            // 2 - p2 release
+            // 3 - p2 down
+            let player2 = state > 1;
+            let down = state % 2 == 1;
+            let time = frame as f32 / self.fps;
+
+            if player2 {
+                self.process_action_p2(time, down);
+                self.extended_p2(down, frame, 0., 0., 0., 0.);
+            } else {
+                self.process_action_p1(time, down);
+                self.extended_p1(down, frame, 0., 0., 0., 0.);
             }
         }
 

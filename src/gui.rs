@@ -522,6 +522,7 @@ impl App {
             ui.label(t!("replay.file_format_14"));
             ui.label(t!("replay.file_format_15"));
             ui.label(t!("replay.file_format_16"));
+            ui.label(t!("replay.file_format_17"));
         });
 
         // show dialog if there is one

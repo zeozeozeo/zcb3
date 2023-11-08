@@ -132,3 +132,5 @@ replay.file_format_15:
     en: • ReplayEngine Replay (.re)
 replay.file_format_16:
     en: • DDHOR Replay (.ddhor, old frame format)
+replay.file_format_17:
+    en: • xBot Frame (.xbot)
