@@ -19,13 +19,12 @@ pub mod built_info {
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Run without any arguments to launch GUI.", long_about = None)]
 struct Args {
-    #[arg(long, short = 'r', help = "Path to replay file")]
+    #[arg(long, help = "Path to replay file")]
     replay: String,
-    #[arg(long, short = 'c', help = "Path to clickpack folder")]
+    #[arg(long, help = "Path to clickpack folder")]
     clicks: String,
     #[arg(
         long,
-        short = 'n',
         help = "Whether to overlay the noise.* file in the clickpack directory",
         default_value_t = false
     )]
@@ -34,7 +33,6 @@ struct Args {
     output: String,
     #[arg(
         long,
-        short = 'm',
         help = "Whether to normalize the output audio (make all samples to be in range of 0-1)",
         default_value_t = false
     )]
