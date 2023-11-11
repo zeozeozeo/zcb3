@@ -97,7 +97,7 @@ replay.no_file_title:
 replay.no_file_body:
     en: Please select a file
 replay.num_actions:
-    en: "Number of actions in macro: %{num_actions}"
+    en: "Number of actions in macro: %{num_actions} / %{num_extended_actions}"
 replay.supported_file_formats_collapsing:
     en: Supported file formats
 replay.file_format_1:

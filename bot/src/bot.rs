@@ -382,6 +382,19 @@ impl Bot {
         Ok(val)
     }
 
+    /// Returns the minimum and maximum values for the volume expression.
+    pub fn expr_range(&mut self, replay: &Macro) -> (f64, f64) {
+        let mut min = f64::MAX;
+        let mut max = f64::MIN;
+        for action in &replay.extended {
+            self.update_namespace(action, replay.last_frame(), replay.fps.into());
+            let val = self.eval_expr().unwrap_or(0.);
+            min = min.min(val);
+            max = max.max(val);
+        }
+        (min, max)
+    }
+
     pub fn render_macro(
         &mut self,
         replay: &Macro,

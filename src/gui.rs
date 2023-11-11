@@ -532,8 +532,13 @@ impl App {
             }
 
             let num_actions = self.replay.actions.len();
+            let num_extended = self.replay.extended.len();
             if num_actions > 0 {
-                ui.label(t!("replay.num_actions", num_actions = num_actions));
+                ui.label(t!(
+                    "replay.num_actions",
+                    num_actions = num_actions,
+                    num_extended_actions = num_extended
+                ));
             }
         });
 
@@ -741,6 +746,7 @@ impl App {
                     accel (player y acceleration), down (whether the mouse is down, 1 or 0), \
                     fps (frames per second), time (in seconds)",
             );
+            ui.label("Some variables may not be set due to different macro formats");
             ui.label("x = action index");
             ui.label("Example expression: sqrt(p) + sin(p) / 10");
             ui.separator();
