@@ -4,6 +4,8 @@ Free and easy to use Geometry Dash clickbot.
 
 ![ZCB 3](https://github.com/zeozeozeo/zcb3/blob/master/screenshots/0.png?raw=true)
 
+![Volume expressions](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/1.png?raw=true)
+
 # [Join the discord server (click me)](https://discord.gg/b4kBQyXYZT)
 
 # Supported replay formats
