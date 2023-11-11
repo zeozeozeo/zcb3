@@ -245,6 +245,8 @@ impl MacroType {
             "json" => {
                 if filename.ends_with(".mhr.json") {
                     Mhr
+                } else if filename.ends_with(".echo.json") {
+                    Echo
                 } else {
                     TasBot
                 }
@@ -341,6 +343,7 @@ impl Macro {
         "replay",
         "ybf",
         "echo",
+        "echo.json",
         "thyst",
         "osr",
         "macro",
@@ -378,7 +381,7 @@ impl Macro {
             MacroType::Obot => replay.parse_obot2(data)?, // will also handle obot3 replays
             MacroType::Ybotf => replay.parse_ybotf(data)?,
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
-            MacroType::Echo => replay.parse_echo(data)?, // will handle both replay versions
+            MacroType::Echo => replay.parse_echo(data)?, // will handle all 3 replay versions
             MacroType::Amethyst => replay.parse_amethyst(data)?,
             MacroType::OsuReplay => replay.parse_osr(data)?,
             MacroType::Gdmo => replay.parse_gdmo(data)?,
@@ -1069,6 +1072,7 @@ impl Macro {
             self.extended.clear();
         }
 
+        // parse new json format
         self.fps = v["fps"].as_f64().context("no 'fps' field")? as f32;
         for action in v["inputs"].as_array().context("no 'inputs' field")? {
             let frame = action["frame"].as_u64().context("no 'frame' field")?;
