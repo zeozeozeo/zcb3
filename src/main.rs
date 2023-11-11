@@ -103,12 +103,20 @@ struct Args {
     sample_rate: u32,
     #[arg(long, help = "Sort actions by time / frame", default_value_t = true)]
     sort_actions: bool,
+    #[arg(long, help = "Volume variation expression", default_value_t = String::new())]
+    volume_expr: String,
+    #[arg(
+        long,
+        help = "Change volume value instead of variation",
+        default_value_t = false
+    )]
+    expr_change_volume: bool,
 }
 
 #[cfg(target_os = "windows")]
 fn hide_console_window() {
     // note that this does not hide the console window when running from a batch file
-    // unsafe { winapi::um::wincon::FreeConsole() };
+    unsafe { winapi::um::wincon::FreeConsole() };
 }
 
 fn main() {
@@ -187,8 +195,28 @@ fn run_cli(mut args: Args) {
     )
     .unwrap();
 
+    // try to compile volume expression to check for errors
+    if !args.volume_expr.is_empty() {
+        bot.compile_expression(&args.volume_expr)
+            .expect("failed to compile volume expression");
+
+        // check for undefined vars
+        bot.update_namespace(
+            &ExtendedAction::default(),
+            replay.last_frame(),
+            replay.fps as _,
+        );
+        bot.eval_expr().expect("failed to evaluate expression");
+    }
+
     // render output file
-    let segment = bot.render_macro(&replay, args.noise, args.normalize, false, false);
+    let segment = bot.render_macro(
+        &replay,
+        args.noise,
+        args.normalize,
+        !args.volume_expr.is_empty(),
+        args.expr_change_volume,
+    );
 
     // save
     if args.output.is_empty() {
