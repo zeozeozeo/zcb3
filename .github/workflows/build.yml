@@ -2,6 +2,11 @@ on:
   release:
     types: [created]
 
+env:
+  CRATE_NAME: zcb3
+  GITHUB_TOKEN: ${{ github.token }}
+  RUST_BACKTRACE: 1
+
 jobs:
   release:
     name: Release - ${{ matrix.platform.release_for }}
@@ -22,23 +27,29 @@ jobs:
             name: zcb3-Darwin-x86_64.tar.gz
             command: both
           
-          # - release_for: Linux-x86_64
-          #   os: ubuntu-20.04
-          #   target: x86_64-unknown-linux-musl
-          #   bin: zcb3
-          #   name: zcb3-Linux-x86_64-musl.tar.gz
+          - release_for: Linux-x86_64
+            os: ubuntu-20.04
+            target: x86_64-unknown-linux-musl
+            bin: zcb3
+            name: zcb3-Linux-x86_64-musl.tar.gz
 
-          # - release_for: FreeBSD-x86_64
-          #   os: ubuntu-20.04
-          #   target: x86_64-unknown-freebsd
-          #   bin: zcb3
-          #   name: zcb3-FreeBSD-x86_64.tar.gz
-          #   command: build
+          - release_for: FreeBSD-x86_64
+            os: ubuntu-20.04
+            target: x86_64-unknown-freebsd
+            bin: zcb3
+            name: zcb3-FreeBSD-x86_64.tar.gz
+            command: build
 
     runs-on: ${{ matrix.platform.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+      - name: Install musl-tools on Linux
+        run: sudo apt-get update --yes && sudo apt-get install --yes musl-tools
+        if: contains(matrix.platform.name, 'musl')
+      - name: Install build-essential on Linux
+        run: sudo apt-get install --yes build-essential
+        if: contains(matrix.platform.name, 'musl')
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v0
         with:
@@ -46,3 +57,16 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: "--locked --release"
           strip: true
+      - name: Publish release artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: zcb3-${{ matrix.platform.target }}
+          path: "target/${{ matrix.platform.target }}/zcb3*"
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: target/${{ matrix.platform.target }}/zcb3*
+          asset_name: zcb3
+          tag: ${{ github.ref }}
+          overwrite: true
