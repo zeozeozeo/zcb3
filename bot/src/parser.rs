@@ -485,6 +485,7 @@ impl Macro {
     fn extended_p2(&mut self, down: bool, frame: u32, x: f32, y: f32, y_accel: f32, rot: f32) {
         if self.extended_data {
             // if x is 0.0, try to get the x position from the first player
+            // FIXME: we probably shouldn't do this for converting replays
             let x = if x == 0. {
                 if let Some(last) = self.get_last_extended(Player::One) {
                     last.x
@@ -517,6 +518,18 @@ impl Macro {
             return Some(*action);
         }
         None
+    }
+
+    pub fn filter_actions<F>(&self, player: Player, func: F)
+    where
+        F: FnMut(&ExtendedAction),
+    {
+        self.extended
+            .iter()
+            .filter(|a| {
+                (a.player2 && player == Player::Two) || (!a.player2 && player == Player::One)
+            })
+            .for_each(func)
     }
 
     /// Returns the last frame in the macro. If extended actions are disabled, this

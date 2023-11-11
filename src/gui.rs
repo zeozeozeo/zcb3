@@ -100,6 +100,7 @@ struct App {
     expr_error: String,
     volume_variable: VolumeVariable,
     sort_actions: bool,
+    plot_data_aspect: f32,
 }
 
 impl Default for App {
@@ -133,6 +134,7 @@ impl Default for App {
             expr_error: String::new(),
             volume_variable: VolumeVariable::Variation,
             sort_actions: true,
+            plot_data_aspect: 20.0,
         }
     }
 }
@@ -744,7 +746,8 @@ impl App {
                 "Defined variables: frame, x (xpos), y (ypos), p (% in level, 0 to 1), \
                     player2 (1 if player 2, 0 if player 1), rot (player rotation), \
                     accel (player y acceleration), down (whether the mouse is down, 1 or 0), \
-                    fps (frames per second), time (in seconds)",
+                    fps (frames per second), time (in seconds), frames (total frames in macro), \
+                    level_time (total time in level)",
             );
             ui.label("Some variables may not be set due to different macro formats");
             ui.label("x = action index");
@@ -803,7 +806,7 @@ impl App {
                 ui.label(
                     egui::RichText::new("NOTE: You don't have a replay loaded")
                         .strong()
-                        .color(Color32::LIGHT_RED),
+                        .color(Color32::YELLOW),
                 );
             }
 
@@ -822,7 +825,18 @@ impl App {
                 );
             });
 
+            // plot data aspect
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::Slider::new(&mut self.plot_data_aspect, 0.001..=30.0).text("Data aspect"),
+                );
+                if ui.button("Reset").clicked() {
+                    self.plot_data_aspect = 20.;
+                }
+            });
+
             let line = Line::new(PlotPoints::from_parametric_callback(
+                // we can use `self.bot` here because it is an Rc<RefCell<>>
                 |t| {
                     if num_actions == 0 {
                         return (0., 0.);
@@ -846,10 +860,12 @@ impl App {
             ))
             .name(self.volume_variable.to_string());
 
+            ui.add_space(4.);
+
             ui.add_enabled_ui(self.expr_error.is_empty() && num_actions > 0, |ui| {
                 let plot = Plot::new("volume_multiplier_plot")
                     .legend(Legend::default())
-                    .data_aspect(1.0)
+                    .data_aspect(self.plot_data_aspect)
                     .y_axis_width(4);
                 plot.show(ui, |plot_ui| {
                     plot_ui.line(line);

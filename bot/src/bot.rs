@@ -374,6 +374,9 @@ impl Bot {
         self.ns.insert("rot".to_string(), a.rot as _);
         self.ns.insert("accel".to_string(), a.y_accel as _);
         self.ns.insert("down".to_string(), a.down as u8 as _);
+        self.ns.insert("frames".to_string(), total_frames as _);
+        self.ns
+            .insert("level_time".to_string(), total_frames as f64 / fps);
     }
 
     pub fn eval_expr(&mut self) -> Result<f64> {
