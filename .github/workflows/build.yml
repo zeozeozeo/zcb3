@@ -17,6 +17,11 @@ jobs:
           - target: x86_64-apple-darwin
             archive: zip
     steps:
+      - uses: actions/checkout@v2
+      - name: Change permissions for prebuild.sh
+        run: |
+          chmod +x ./prebuild.sh
+
       - uses: actions/checkout@master
       - name: Compile and release
         uses: rust-build/rust-build.action@v1.4.3
