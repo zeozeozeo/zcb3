@@ -7,9 +7,12 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.75"
+base64 = "0.21.5"
 bincode = "1.3.3"
 byteorder = "1.5.0"
 dlhn = "0.1.6"
+fasteval = { git = "https://github.com/zeozeozeo/fasteval.git", branch = "sqrt-func" }
+flate2 = "1.0.28"
 hound = "3.5.1"
 leb128 = "0.2.5"
 log = "0.4.20"

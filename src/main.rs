@@ -101,12 +101,14 @@ struct Args {
     volume_var: f32,
     #[arg(long, help = "Audio framerate", default_value_t = 44100)]
     sample_rate: u32,
+    #[arg(long, help = "Sort actions by time / frame", default_value_t = true)]
+    sort_actions: bool,
 }
 
 #[cfg(target_os = "windows")]
 fn hide_console_window() {
     // note that this does not hide the console window when running from a batch file
-    unsafe { winapi::um::wincon::FreeConsole() };
+    // unsafe { winapi::um::wincon::FreeConsole() };
 }
 
 fn main() {
@@ -180,11 +182,13 @@ fn run_cli(mut args: Args) {
         &replay,
         timings,
         vol_settings,
+        false,
+        args.sort_actions,
     )
     .unwrap();
 
     // render output file
-    let segment = bot.render_macro(&replay, args.noise, args.normalize);
+    let segment = bot.render_macro(&replay, args.noise, args.normalize, false, false);
 
     // save
     if args.output.is_empty() {

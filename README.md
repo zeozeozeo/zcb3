@@ -51,6 +51,12 @@ If you run without any arguments, the GUI will start.
 * Translate to other languages
 * Progress bar for rendering audio and loading clickpacks
 
+# Building
+
+To build, clone the repository (or download zip and extract) and run `cargo build` for debug builds and `cargo build --release` for release builds. Note that release builds take a lot of time to build, because they use LTO, stripping debug symbols and only use one codegen unit (to enable some optimizations that are not possible in parallel). You can disable this by commenting the `codegen-units = 1` line in `Cargo.toml`.
+
+TODO: should we compile with `RUSTFLAGS="--emit=asm"`?
+
 # Donations 
 
 ZCB is completely free software. Donations are welcome! :D

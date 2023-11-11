@@ -8,6 +8,7 @@ build = "build.rs"
 [profile.release]
 lto = true
 strip = true
+codegen-units = 1 # only use 1 codegen unit for the fastest possible executable
 
 # rubato is *super* slow in debug builds, so we always build it with O3
 [profile.dev.package.rubato]
@@ -34,6 +35,7 @@ rayon = "1.8.0"
 egui_extras = { version = "0.23.0", features = ["image"] }
 rustmatica = "0.1.1"
 rust-i18n = "2.2.1"
+egui_plot = "0.23.0"
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]

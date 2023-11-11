@@ -1,8 +1,9 @@
 use crate::built_info;
 use anyhow::{Context, Result};
-use bot::{Bot, Macro, MacroType, Pitch, Timings, VolumeSettings};
+use bot::{Bot, ExtendedAction, Macro, MacroType, Pitch, Timings, VolumeSettings};
 use eframe::{
     egui::{self, Key},
+    epaint::Color32,
     IconData,
 };
 use egui_modal::{Icon, Modal};
@@ -10,7 +11,7 @@ use image::io::Reader as ImageReader;
 use rfd::FileDialog;
 use rust_i18n::t;
 use serde_json::Value;
-use std::{io::Cursor, time::Instant};
+use std::{cell::RefCell, io::Cursor, rc::Rc, time::Instant};
 use std::{io::Read, path::PathBuf};
 
 pub fn run_gui() -> Result<(), eframe::Error> {
@@ -62,11 +63,26 @@ impl Stage {
     }
 }
 
+#[derive(PartialEq)]
+enum VolumeVariable {
+    Variation,
+    Value,
+}
+
+impl ToString for VolumeVariable {
+    fn to_string(&self) -> String {
+        match self {
+            Self::Variation => "Volume variation".to_string(),
+            Self::Value => "Volume value".to_string(),
+        }
+    }
+}
+
 // #[derive(Debug)]
 struct App {
     stage: Stage,
     replay: Macro,
-    bot: Bot,
+    bot: Rc<RefCell<Bot>>,
     output: Option<PathBuf>,
     volume_var: f32,
     noise: bool,
@@ -80,6 +96,10 @@ struct App {
     char_idx: u8,
     litematic_export_releases: bool,
     sample_rate: u32,
+    expr_text: String,
+    expr_error: String,
+    volume_variable: VolumeVariable,
+    sort_actions: bool,
 }
 
 impl Default for App {
@@ -87,7 +107,7 @@ impl Default for App {
         Self {
             stage: Stage::default(),
             replay: Macro::default(),
-            bot: Bot::default(),
+            bot: Rc::new(RefCell::new(Bot::default())),
             output: None,
             volume_var: 0.20,
             noise: false,
@@ -109,6 +129,10 @@ impl Default for App {
             char_idx: 0,
             litematic_export_releases: false,
             sample_rate: 44100,
+            expr_text: String::new(),
+            expr_error: String::new(),
+            volume_variable: VolumeVariable::Variation,
+            sort_actions: true,
         }
     }
 }
@@ -449,6 +473,8 @@ impl App {
 
         ui.separator();
 
+        ui.checkbox(&mut self.sort_actions, "Sort actions");
+
         ui.horizontal(|ui| {
             if ui.button(t!("replay.select_replay")).clicked() {
                 // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
@@ -471,8 +497,14 @@ impl App {
                     let replay_type = MacroType::guess_format(filename);
 
                     if let Ok(replay_type) = replay_type {
-                        let replay =
-                            Macro::parse(replay_type, &data, self.timings, self.vol_settings);
+                        let replay = Macro::parse(
+                            replay_type,
+                            &data,
+                            self.timings,
+                            self.vol_settings,
+                            true,
+                            self.sort_actions,
+                        );
                         if let Ok(replay) = replay {
                             self.replay = replay;
                             self.stage = Stage::SelectClickpack;
@@ -561,7 +593,7 @@ impl App {
                 };
 
                 if let Ok(bot) = bot {
-                    self.bot = bot;
+                    self.bot = Rc::new(RefCell::new(bot));
                     self.stage = Stage::Render;
                 } else if let Err(e) = bot {
                     dialog.open_dialog(
@@ -599,9 +631,13 @@ impl App {
 
     fn render_replay(&mut self, dialog: &Modal) {
         let start = Instant::now();
-        let segment = self
-            .bot
-            .render_macro(&self.replay, self.noise, self.normalize);
+        let segment = self.bot.borrow_mut().render_macro(
+            &self.replay,
+            self.noise,
+            self.normalize,
+            !self.expr_text.is_empty() && self.expr_error.is_empty(),
+            self.volume_variable == VolumeVariable::Value,
+        );
         let end = start.elapsed();
         log::info!("rendered in {end:?}");
 
@@ -684,7 +720,7 @@ impl App {
         });
 
         // overlay noise checkbox
-        ui.add_enabled_ui(self.bot.has_noise(), |ui| {
+        ui.add_enabled_ui(self.bot.borrow().has_noise(), |ui| {
             ui.checkbox(&mut self.noise, "Overlay noise")
                 .on_disabled_hover_text("Your clickpack doesn't have a noise file.")
                 .on_hover_text("Overlays the noise file that's in the clickpack directory.");
@@ -694,10 +730,131 @@ impl App {
                 "Whether to normalize the output audio\n(make all samples to be in range of 0-1)",
             );
 
+        ui.collapsing("Advanced", |ui| {
+            ui.label(
+                "Input a mathematical expression to change the volume multiplier \
+                    depending on some variables.",
+            );
+            ui.label(
+                "Defined variables: frame, x (xpos), y (ypos), p (% in level, 0 to 1), \
+                    player2 (1 if player 2, 0 if player 1), rot (player rotation), \
+                    accel (player y acceleration), down (whether the mouse is down, 1 or 0), \
+                    fps (frames per second), time (in seconds)",
+            );
+            ui.label("x = action index");
+            ui.label("Example expression: sqrt(p) + sin(p) / 10");
+            ui.separator();
+
+            ui.horizontal(|ui| {
+                ui.label("y =");
+
+                // save current expression if the new expression on this frame is invalid
+                let prev_expr = self.expr_text.clone();
+
+                if ui.text_edit_singleline(&mut self.expr_text).changed() {
+                    // recompile expression, check for compile errors
+                    let mut bot = self.bot.borrow_mut();
+                    if let Err(e) = bot.compile_expression(&self.expr_text) {
+                        self.expr_error = e.to_string();
+                    } else {
+                        self.expr_error.clear(); // clear errors
+
+                        // update namespace so we can check for undefined variables
+                        bot.update_namespace(
+                            &ExtendedAction::default(),
+                            self.replay.last_frame(),
+                            self.replay.fps as _,
+                        );
+
+                        if let Err(e) = bot.eval_expr() {
+                            self.expr_error = e.to_string();
+                        }
+                    }
+
+                    // if an error has occured, use the expression from the previous changed() event
+                    // FIXME: this won't work if the previous event also had an invalid expression
+                    if !self.expr_error.is_empty() {
+                        let _ = bot.compile_expression(&prev_expr);
+                    }
+                }
+            });
+
+            // display error message if any
+            if !self.expr_error.is_empty() {
+                ui.add_space(4.);
+                ui.label(
+                    egui::RichText::new(format!("ERROR: {}", self.expr_error))
+                        .strong()
+                        .color(Color32::LIGHT_RED),
+                );
+            }
+
+            // display plot
+            use egui_plot::{Legend, Line, Plot, PlotPoints};
+
+            let num_actions = self.replay.extended.len();
+            if num_actions == 0 {
+                ui.label(
+                    egui::RichText::new("NOTE: You don't have a replay loaded")
+                        .strong()
+                        .color(Color32::LIGHT_RED),
+                );
+            }
+
+            // what variable to change
+            ui.horizontal(|ui| {
+                ui.label("Change:");
+                ui.radio_value(
+                    &mut self.volume_variable,
+                    VolumeVariable::Variation,
+                    VolumeVariable::Variation.to_string(),
+                );
+                ui.radio_value(
+                    &mut self.volume_variable,
+                    VolumeVariable::Value,
+                    VolumeVariable::Value.to_string(),
+                );
+            });
+
+            let line = Line::new(PlotPoints::from_parametric_callback(
+                |t| {
+                    if num_actions == 0 {
+                        return (0., 0.);
+                    }
+
+                    let idx = (t as usize).min(num_actions - 1);
+                    let action = self.replay.extended[idx];
+
+                    // update namespace
+                    self.bot.borrow_mut().update_namespace(
+                        &action,
+                        self.replay.last_frame(),
+                        self.replay.fps as _,
+                    );
+
+                    // compute the expression for this action
+                    (t, self.bot.borrow_mut().eval_expr().unwrap_or(0.))
+                },
+                0.0..num_actions as f64,
+                num_actions,
+            ))
+            .name(self.volume_variable.to_string());
+
+            ui.add_enabled_ui(self.expr_error.is_empty() && num_actions > 0, |ui| {
+                let plot = Plot::new("volume_multiplier_plot")
+                    .legend(Legend::default())
+                    .data_aspect(1.0)
+                    .y_axis_width(4);
+                plot.show(ui, |plot_ui| {
+                    plot_ui.line(line);
+                });
+            });
+        });
+
         ui.separator();
 
         let has_output = self.output.is_some();
-        let has_clicks = self.bot.has_clicks();
+        let has_clicks = self.bot.borrow().has_clicks();
         ui.add_enabled_ui(
             has_output && has_clicks && !self.replay.actions.is_empty(),
             |ui| {
@@ -713,9 +870,7 @@ impl App {
                     .on_hover_text("Start rendering the replay.\nThis might take some time!")
                     .clicked()
                 {
-                    // start render task (everything is wrapped in an Arc<Mutex<>>)
-                    // FIXME: for some reason this still freezes
-                    self.render_replay(&dialog);
+                    self.render_replay(&dialog); // TODO: run this on a separate thread
                 }
             },
         );

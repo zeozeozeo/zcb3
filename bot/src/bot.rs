@@ -1,7 +1,9 @@
-use crate::{AudioSegment, ClickType, Macro, Player};
+use crate::{AudioSegment, ClickType, ExtendedAction, Macro, Player};
 use anyhow::Result;
+use fasteval::Compiler;
 use rand::Rng;
 use std::{
+    collections::BTreeMap,
     path::PathBuf,
     time::{Duration, Instant},
 };
@@ -229,12 +231,20 @@ impl PlayerClicks {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct Bot {
+    /// Clicks/releases for player 1 and player 2.
     pub player: (PlayerClicks, PlayerClicks),
+    /// The longest sound (in seconds, not counting the noise sound).
     pub longest_click: f32,
+    /// Noise audio file. Will be resampled to `sample_rate`.
     pub noise: Option<AudioSegment>,
+    /// Output sample rate. Clicks will be sinc-resampled to this rate.
     pub sample_rate: u32,
+    /// Expression evaluator namespace. Updated with default variables every action.
+    pub ns: BTreeMap<String, f64>,
+    slab: fasteval::Slab,
+    pub compiled_expr: fasteval::Instruction,
 }
 
 impl Bot {
@@ -337,8 +347,49 @@ impl Bot {
         }
     }
 
-    /// Always outputs files with sample rate of 48000.
-    pub fn render_macro(&mut self, replay: &Macro, noise: bool, normalize: bool) -> AudioSegment {
+    pub fn compile_expression(&mut self, expr: &str) -> Result<()> {
+        let parser = fasteval::Parser::new();
+        // a [`fasteval::Slab`] can't be cloned, so we wrap it in a refcell
+        self.slab = fasteval::Slab::new();
+        self.ns = BTreeMap::new();
+
+        // try to compile expr
+        self.compiled_expr = parser
+            .parse(expr, &mut self.slab.ps)?
+            .from(&self.slab.ps)
+            .compile(&self.slab.ps, &mut self.slab.cs);
+        Ok(())
+    }
+
+    /// Updates the volume variation expressions' namespace.
+    pub fn update_namespace(&mut self, a: &ExtendedAction, total_frames: u32, fps: f64) {
+        self.ns.insert("frame".to_string(), a.frame as _);
+        self.ns.insert("fps".to_string(), fps);
+        self.ns.insert("time".to_string(), a.frame as f64 / fps);
+        self.ns.insert("x".to_string(), a.x as _);
+        self.ns.insert("y".to_string(), a.y as _);
+        self.ns
+            .insert("p".to_string(), a.frame as f64 / total_frames as f64);
+        self.ns.insert("player2".to_string(), a.player2 as u8 as _);
+        self.ns.insert("rot".to_string(), a.rot as _);
+        self.ns.insert("accel".to_string(), a.y_accel as _);
+        self.ns.insert("down".to_string(), a.down as u8 as _);
+    }
+
+    pub fn eval_expr(&mut self) -> Result<f64> {
+        use fasteval::Evaler;
+        let val = self.compiled_expr.eval(&self.slab, &mut self.ns)?;
+        Ok(val)
+    }
+
+    pub fn render_macro(
+        &mut self,
+        replay: &Macro,
+        noise: bool,
+        normalize: bool,
+        use_expr: bool,
+        expr_change_volume_value: bool,
+    ) -> AudioSegment {
         log::info!(
             "starting render, {} actions, noise: {noise}",
             replay.actions.len()
@@ -349,12 +400,36 @@ impl Bot {
         let start = Instant::now();
 
         for action in &replay.actions {
+            // calculate the volume from the expression if needed
+            let expr_vol = if use_expr {
+                // get extended action
+                let extended = replay
+                    .extended
+                    .binary_search_by(|a| a.frame.cmp(&action.frame))
+                    .unwrap_or(usize::MAX);
+                let extended = replay
+                    .extended
+                    .get(extended)
+                    .copied()
+                    .unwrap_or(ExtendedAction::default());
+
+                self.update_namespace(&extended, replay.last_frame(), replay.fps.into());
+                let vol = self.eval_expr().unwrap_or(0.) as f32;
+                if expr_change_volume_value {
+                    vol
+                } else {
+                    rand::thread_rng().gen_range(0.0..=vol)
+                }
+            } else {
+                0.
+            };
+
             let click = self
                 .get_random_click(action.player, action.click)
                 .random_pitch(); // if no pitch table is generated, returns self
 
             // overlay
-            segment.overlay_at_vol(action.time, click, 1.0 + action.vol_offset);
+            segment.overlay_at_vol(action.time, click, 1.0 + action.vol_offset + expr_vol);
         }
 
         if noise && self.noise.is_some() {

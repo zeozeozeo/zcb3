@@ -130,15 +130,24 @@ pub struct Action {
     pub click: ClickType,
     /// Volume offset of the action.
     pub vol_offset: f32,
+    /// Frame.
+    pub frame: u32,
 }
 
 impl Action {
-    pub const fn new(time: f32, player: Player, click: ClickType, vol_offset: f32) -> Self {
+    pub const fn new(
+        time: f32,
+        player: Player,
+        click: ClickType,
+        vol_offset: f32,
+        frame: u32,
+    ) -> Self {
         Self {
             time,
             player,
             click,
             vol_offset,
+            frame,
         }
     }
 }
@@ -220,6 +229,8 @@ pub enum MacroType {
     Ddhor,
     /// Xbot Frame .xbot files
     Xbot,
+    // GatoBot .gatobot files
+    // GatoBot,
 }
 
 impl MacroType {
@@ -253,6 +264,7 @@ impl MacroType {
             "re" => ReplayEngine,
             "ddhor" => Ddhor,
             "xbot" => Xbot,
+            // "gatobot" => GatoBot,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -339,6 +351,7 @@ impl Macro {
         "re",
         "ddhor",
         "xbot",
+        // "gatobot",
     ];
 
     pub fn parse(
@@ -346,12 +359,15 @@ impl Macro {
         data: &[u8],
         timings: Timings,
         vol_settings: VolumeSettings,
+        extended: bool,
+        sort_actions: bool,
     ) -> Result<Self> {
         log::info!("parsing replay, strlen {}, replay type {typ:?}", data.len());
 
         let mut replay = Macro {
             timings,
             vol_settings,
+            extended_data: extended,
             ..Default::default()
         };
 
@@ -362,7 +378,7 @@ impl Macro {
             MacroType::Obot => replay.parse_obot2(data)?, // will also handle obot3 replays
             MacroType::Ybotf => replay.parse_ybotf(data)?,
             MacroType::MhrBin => replay.parse_mhrbin(data)?,
-            MacroType::Echo => replay.parse_echo(data)?,
+            MacroType::Echo => replay.parse_echo(data)?, // will handle both replay versions
             MacroType::Amethyst => replay.parse_amethyst(data)?,
             MacroType::OsuReplay => replay.parse_osr(data)?,
             MacroType::Gdmo => replay.parse_gdmo(data)?,
@@ -373,6 +389,12 @@ impl Macro {
             MacroType::ReplayEngine => replay.parse_re(data)?,
             MacroType::Ddhor => replay.parse_ddhor(data)?,
             MacroType::Xbot => replay.parse_xbot(data)?,
+            // MacroType::GatoBot => replay.parse_gatobot(data)?,
+        }
+
+        // sort actions by time / frame
+        if sort_actions {
+            replay.sort_actions();
         }
 
         if let Some(last) = replay.actions.last() {
@@ -386,6 +408,12 @@ impl Macro {
         );
 
         Ok(replay)
+    }
+
+    /// Sorts actions by time / frame.
+    pub fn sort_actions(&mut self) {
+        self.actions.sort_by(|a, b| a.time.total_cmp(&b.time));
+        self.extended.sort_by(|a, b| a.frame.cmp(&b.frame));
     }
 
     pub fn write<W: Write>(&self, typ: MacroType, writer: W) -> Result<()> {
@@ -402,7 +430,7 @@ impl Macro {
         Ok(())
     }
 
-    fn process_action_p1(&mut self, time: f32, down: bool) {
+    fn process_action_p1(&mut self, time: f32, down: bool, frame: u32) {
         // if action is the same, skip it
         if let Some(typ) = self.prev_action.0 {
             if down == typ.is_click() {
@@ -416,11 +444,11 @@ impl Macro {
         self.prev_time.0 = time;
         self.prev_action.0 = Some(typ);
         self.actions
-            .push(Action::new(time, Player::One, typ, vol_offset))
+            .push(Action::new(time, Player::One, typ, vol_offset, frame))
     }
 
     // .0 is changed to .1 here, because it's the second player
-    fn process_action_p2(&mut self, time: f32, down: bool) {
+    fn process_action_p2(&mut self, time: f32, down: bool, frame: u32) {
         if let Some(typ) = self.prev_action.1 {
             if down == typ.is_click() {
                 return;
@@ -433,7 +461,7 @@ impl Macro {
         self.prev_time.1 = time;
         self.prev_action.1 = Some(typ);
         self.actions
-            .push(Action::new(time, Player::Two, typ, vol_offset))
+            .push(Action::new(time, Player::Two, typ, vol_offset, frame))
     }
 
     fn extended_p1(&mut self, down: bool, frame: u32, x: f32, y: f32, y_accel: f32, rot: f32) {
@@ -453,6 +481,17 @@ impl Macro {
 
     fn extended_p2(&mut self, down: bool, frame: u32, x: f32, y: f32, y_accel: f32, rot: f32) {
         if self.extended_data {
+            // if x is 0.0, try to get the x position from the first player
+            let x = if x == 0. {
+                if let Some(last) = self.get_last_extended(Player::One) {
+                    last.x
+                } else {
+                    x
+                }
+            } else {
+                x
+            };
+
             self.extended.push(ExtendedAction {
                 player2: true,
                 down,
@@ -463,6 +502,28 @@ impl Macro {
                 rot,
                 fps_change: None,
             });
+        }
+    }
+
+    fn get_last_extended(&self, player: Player) -> Option<ExtendedAction> {
+        // iterate from the back and find the last action for this player
+        for action in self.extended.iter().rev() {
+            if player != Player::Two && action.player2 {
+                continue;
+            }
+            return Some(*action);
+        }
+        None
+    }
+
+    /// Returns the last frame in the macro. If extended actions are disabled, this
+    /// always returns 0.
+    #[inline]
+    pub fn last_frame(&self) -> u32 {
+        if let Some(last) = self.extended.last() {
+            last.frame
+        } else {
+            0
         }
     }
 
@@ -488,10 +549,10 @@ impl Macro {
             let time = frame as f32 / self.fps;
 
             if p2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame);
                 self.extended_p2(down, frame, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.);
             }
         }
@@ -537,24 +598,24 @@ impl Macro {
             let time = frame as f32 / current_fps;
             match action.click_type {
                 Obot2ClickType::Player1Down => {
-                    self.process_action_p1(time, true);
-                    self.extended_p1(true, frame, 0., 0., 0., 0.)
+                    self.process_action_p1(time, true, frame);
+                    self.extended_p1(true, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::Player1Up => {
-                    self.process_action_p1(time, false);
-                    self.extended_p1(false, frame, 0., 0., 0., 0.)
+                    self.process_action_p1(time, false, frame);
+                    self.extended_p1(false, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::Player2Down => {
-                    self.process_action_p2(time, true);
-                    self.extended_p2(true, frame, 0., 0., 0., 0.)
+                    self.process_action_p2(time, true, frame);
+                    self.extended_p2(true, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::Player2Up => {
-                    self.process_action_p2(time, false);
-                    self.extended_p2(false, frame, 0., 0., 0., 0.)
+                    self.process_action_p2(time, false, frame);
+                    self.extended_p2(false, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::FpsChange(fps) => {
                     current_fps = fps;
-                    self.fps_change(fps)
+                    self.fps_change(fps);
                 }
                 Obot2ClickType::None => {}
             }
@@ -619,10 +680,10 @@ impl Macro {
             let time = frame as f32 / self.fps;
 
             if p1 {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -661,8 +722,8 @@ impl Macro {
                 .as_i64()
                 .context("failed to get p2 'click' field")?;
 
-            self.process_action_p1(time, p1 == 1);
-            self.process_action_p2(time, p2 == 1);
+            self.process_action_p1(time, p1 == 1, frame as _);
+            self.process_action_p2(time, p2 == 1, frame as _);
 
             self.extended_p1(
                 p1 == 1,
@@ -788,10 +849,10 @@ impl Macro {
             let rot = ev["r"].as_f64().unwrap_or(0.) as f32;
 
             if p2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame as _);
                 self.extended_p2(down, frame as u32, x, y, y_accel, rot)
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame as _);
                 self.extended_p1(down, frame as u32, x, y, y_accel, rot)
             }
         }
@@ -883,9 +944,11 @@ impl Macro {
             cursor.set_position(cursor.position() + 24);
 
             if p1 {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame);
+                self.extended_p1(down, frame, 0., 0., 0., 0.); // TODO: parse all vars
             } else {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame);
+                self.extended_p2(down, frame, 0., 0., 0., 0.); // TODO: parse all vars
             }
         }
 
@@ -916,10 +979,10 @@ impl Macro {
             let time = frame as f32 / self.fps;
 
             if p1 {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.);
             } else {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame);
                 self.extended_p2(down, frame, 0., 0., 0., 0.);
             }
         }
@@ -958,10 +1021,10 @@ impl Macro {
             let rot = action["Rotation"].as_f64().unwrap_or(0.) as f32;
 
             if p2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame as _);
                 self.extended_p2(down, frame as u32, x, y, y_accel, rot);
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame as _);
                 self.extended_p1(down, frame as u32, x, y, y_accel, rot);
             }
         }
@@ -1062,10 +1125,10 @@ impl Macro {
 
         for action in actions {
             if action.0 == Player::One {
-                self.process_action_p1(action.2, action.1);
+                self.process_action_p1(action.2, action.1, (action.2 * self.fps) as _);
                 self.extended_p1(action.1, (action.2 * self.fps) as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p2(action.2, action.1);
+                self.process_action_p2(action.2, action.1, (action.2 * self.fps) as _);
                 self.extended_p2(action.1, (action.2 * self.fps) as u32, 0., 0., 0., 0.);
             }
         }
@@ -1166,8 +1229,8 @@ impl Macro {
             // bit 2 = M2 in standard, left kat in taiko, k2 in mania
             let p1_down = keys & (1 << 0) != 0;
             let p2_down = keys & (1 << 1) != 0;
-            self.process_action_p1(time, p1_down);
-            self.process_action_p2(time, p2_down);
+            self.process_action_p1(time, p1_down, (time * self.fps) as _);
+            self.process_action_p2(time, p2_down, (time * self.fps) as _);
             self.extended_p1(p1_down, (time * self.fps) as u32, 0., 0., 0., 0.);
             self.extended_p2(p2_down, (time * self.fps) as u32, 0., 0., 0., 0.);
         }
@@ -1202,7 +1265,7 @@ impl Macro {
 
             let time = action.frame as f32 / self.fps;
             if action.player2 {
-                self.process_action_p2(time, action.press);
+                self.process_action_p2(time, action.press, action.frame);
                 self.extended_p2(
                     action.press,
                     action.frame,
@@ -1212,7 +1275,7 @@ impl Macro {
                     0.,
                 );
             } else {
-                self.process_action_p1(time, action.press);
+                self.process_action_p1(time, action.press, action.frame);
                 self.extended_p1(
                     action.press,
                     action.frame,
@@ -1258,10 +1321,10 @@ impl Macro {
             let player2 = state >> 1 != 0;
 
             if player2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame);
                 self.extended_p2(down, frame, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.);
             }
         }
@@ -1281,10 +1344,10 @@ impl Macro {
             let p2 = (state >> 1) != 0;
 
             if p2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -1303,10 +1366,10 @@ impl Macro {
             let p2 = cursor.read_u8()? == 1;
 
             if p2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -1330,10 +1393,10 @@ impl Macro {
             let p2 = split.next().unwrap().parse::<u8>()? == 1;
 
             if p2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame_or_xpos as _);
                 self.extended_p2(down, frame_or_xpos as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame_or_xpos as _);
                 self.extended_p1(down, frame_or_xpos as u32, 0., 0., 0., 0.);
             }
         }
@@ -1355,19 +1418,19 @@ impl Macro {
             let time = action.frame as f32 / current_fps;
             match action.click_type {
                 Obot3ClickType::Player1Down => {
-                    self.process_action_p1(time, true);
+                    self.process_action_p1(time, true, action.frame);
                     self.extended_p1(true, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::Player1Up => {
-                    self.process_action_p1(time, false);
+                    self.process_action_p1(time, false, action.frame);
                     self.extended_p1(false, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::Player2Down => {
-                    self.process_action_p2(time, true);
+                    self.process_action_p2(time, true, action.frame);
                     self.extended_p2(true, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::Player2Up => {
-                    self.process_action_p2(time, false);
+                    self.process_action_p2(time, false, action.frame);
                     self.extended_p2(false, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::FpsChange(fps) => {
@@ -1433,7 +1496,7 @@ impl Macro {
             let time = data.frame as f32 / self.fps;
 
             if data.player2 {
-                self.process_action_p2(time, action.hold);
+                self.process_action_p2(time, action.hold, data.frame);
                 self.extended_p2(
                     action.hold,
                     data.frame,
@@ -1443,7 +1506,7 @@ impl Macro {
                     data.rot,
                 );
             } else {
-                self.process_action_p1(time, action.hold);
+                self.process_action_p1(time, action.hold, data.frame);
                 self.extended_p1(
                     action.hold,
                     data.frame,
@@ -1483,10 +1546,10 @@ impl Macro {
             let p2 = i - 14 >= num_p1 as usize * 5;
 
             if p2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -1533,14 +1596,43 @@ impl Macro {
             let time = frame as f32 / self.fps;
 
             if player2 {
-                self.process_action_p2(time, down);
+                self.process_action_p2(time, down, frame);
                 self.extended_p2(down, frame, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down);
+                self.process_action_p1(time, down, frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.);
             }
         }
 
         Ok(())
     }
+
+    /* gato
+    fn parse_gatobot(&mut self, data: &[u8]) -> Result<()> {
+        use base64::{engine::general_purpose, Engine as _};
+        use flate2::read::GzDecoder;
+
+        let text = String::from_utf8(data.to_vec())?;
+        if !text.starts_with("H4sIAAAAAAAA") {
+            anyhow::bail!("corrupted gatobot macro (must start with 'H4sIAAAAAAAA')");
+        }
+
+        let mut base64_decoded = general_purpose::URL_SAFE_NO_PAD.decode(text)?;
+
+        // data is xored with key 11
+        base64_decoded.iter_mut().for_each(|x| *x ^= 11);
+
+        let mut decoder = GzDecoder::new(base64_decoded.as_slice());
+        let mut decoded_str = String::new();
+        decoder.read_to_string(&mut decoded_str)?;
+
+        for action in decoded_str.split(';') {
+            let mut splitted = action.split('_');
+            let frame = splitted.next().context("no frame value")?;
+            let data = splitted.next().context("no saved data")?;
+            for (player, player_actions) in data.split('~').enumerate() {}
+        }
+        Ok(())
+    }
+    */
 }

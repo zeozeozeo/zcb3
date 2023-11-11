@@ -4,3 +4,5 @@ mod parser;
 pub use audio::*;
 pub use bot::*;
 pub use parser::*;
+
+pub use fasteval;
