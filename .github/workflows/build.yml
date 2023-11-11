@@ -12,8 +12,8 @@ jobs:
         include:
           - target: x86_64-pc-windows-gnu
             archive: zip
-          # - target: x86_64-unknown-linux-musl
-          #   archive: tar.gz tar.xz tar.zst
+          - target: x86_64-unknown-linux-musl
+            archive: tar.gz tar.xz tar.zst
           - target: x86_64-apple-darwin
             archive: zip
     steps:
@@ -26,3 +26,4 @@ jobs:
           TOOLCHAIN_VERSION: stable
           RUSTTARGET: ${{ matrix.target }}
           ARCHIVE_TYPES: ${{ matrix.archive }}
+          PRE_BUILD: "prebuild.sh"
