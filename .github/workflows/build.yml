@@ -70,7 +70,7 @@ jobs:
           asset_name: zcb3
           tag: ${{ github.ref }}
           overwrite: true
-        if: ${{ !contains(matrix.platform.name, 'windows') }}
+        if: ${{ !contains(matrix.platform.target, 'windows') }}
       - name: Upload binaries to release (Windows)
         uses: svenstaro/upload-release-action@v2
         with:
@@ -79,4 +79,4 @@ jobs:
           asset_name: zcb3
           tag: ${{ github.ref }}
           overwrite: true
-        if: contains(matrix.platform.name, 'windows')
+        if: contains(matrix.platform.target, 'windows')
