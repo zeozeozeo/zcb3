@@ -32,7 +32,7 @@ jobs:
           #   target: x86_64-unknown-linux-musl
           #   bin: zcb3
           #   name: zcb3-Linux-x86_64-musl.tar.gz
-           
+
           # - release_for: FreeBSD-x86_64
           #   os: ubuntu-20.04
           #   target: x86_64-unknown-freebsd
@@ -61,12 +61,12 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: zcb3-${{ matrix.platform.target }}
-          path: "target/${{ matrix.platform.target }}/zcb3*"
+          path: "target/${{ matrix.platform.target }}/release/zcb3*"
       - name: Upload binaries to release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/${{ matrix.platform.target }}/zcb3*
+          file: target/${{ matrix.platform.target }}/release/zcb3*
           asset_name: zcb3
           tag: ${{ github.ref }}
           overwrite: true
