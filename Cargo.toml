@@ -8,7 +8,6 @@ build = "build.rs"
 [profile.release]
 lto = true
 strip = true
-codegen-units = 1 # only use 1 codegen unit for the fastest possible executable
 
 # rubato is *super* slow in debug builds, so we always build it with O3
 [profile.dev.package.rubato]
