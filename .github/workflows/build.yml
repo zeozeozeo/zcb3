@@ -27,18 +27,18 @@ jobs:
             name: zcb3-Darwin-x86_64.tar.gz
             command: both
           
-          - release_for: Linux-x86_64
-            os: ubuntu-20.04
-            target: x86_64-unknown-linux-musl
-            bin: zcb3
-            name: zcb3-Linux-x86_64-musl.tar.gz
-
-          - release_for: FreeBSD-x86_64
-            os: ubuntu-20.04
-            target: x86_64-unknown-freebsd
-            bin: zcb3
-            name: zcb3-FreeBSD-x86_64.tar.gz
-            command: build
+          # - release_for: Linux-x86_64
+          #   os: ubuntu-20.04
+          #   target: x86_64-unknown-linux-musl
+          #   bin: zcb3
+          #   name: zcb3-Linux-x86_64-musl.tar.gz
+           
+          # - release_for: FreeBSD-x86_64
+          #   os: ubuntu-20.04
+          #   target: x86_64-unknown-freebsd
+          #   bin: zcb3
+          #   name: zcb3-FreeBSD-x86_64.tar.gz
+          #   command: build
 
     runs-on: ${{ matrix.platform.os }}
     steps:
