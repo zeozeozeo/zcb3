@@ -17,11 +17,6 @@ jobs:
           - target: x86_64-apple-darwin
             archive: zip
     steps:
-      - uses: actions/checkout@v2
-      - name: Change permissions for prebuild.sh
-        run: |
-          chmod +x ./prebuild.sh
-
       - uses: actions/checkout@master
       - name: Compile and release
         uses: rust-build/rust-build.action@v1.4.3
@@ -31,4 +26,4 @@ jobs:
           TOOLCHAIN_VERSION: stable
           RUSTTARGET: ${{ matrix.target }}
           ARCHIVE_TYPES: ${{ matrix.archive }}
-          PRE_BUILD: "prebuild.sh"
+          PRE_BUILD: ".github/workflows/prebuild.sh"
