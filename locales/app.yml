@@ -113,7 +113,7 @@ replay.file_format_5:
 replay.file_format_6:
     en: • Ybot Frame (no extension by default, rename to .ybf)
 replay.file_format_7:
-    en: • Echo (.echo, old and new formats)
+    en: • Echo (.echo, new binary format, new json format and old json format)
 replay.file_format_8:
     en: • Amethyst Replay (.thyst)
 replay.file_format_9:

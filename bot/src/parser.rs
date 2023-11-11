@@ -207,7 +207,7 @@ pub enum MacroType {
     Ybotf,
     /// .mhr files
     MhrBin,
-    /// .echo files (new and format)
+    /// .echo files (new binary format, new json format and old json format)
     Echo,
     /// .thyst files
     Amethyst,
@@ -968,34 +968,58 @@ impl Macro {
 
         let replay_type = cursor.read_u32::<BigEndian>()?;
         let action_size = if replay_type == 0x44424700 { 24 } else { 6 };
+        let dbg = action_size == 24;
         cursor.set_position(24);
         self.fps = cursor.read_f32::<LittleEndian>()?;
         cursor.set_position(48);
 
-        for _ in (48..data.len()).step_by(action_size).enumerate() {
+        for _ in (48..data.len()).step_by(action_size) {
             let frame = cursor.read_u32::<LittleEndian>()?;
             let down = cursor.read_u8()? == 1;
             let p1 = cursor.read_u8()? == 0;
             let time = frame as f32 / self.fps;
 
+            // read extra vars (only saved in debug mode)
+            let x = if dbg {
+                cursor.read_f32::<LittleEndian>()?
+            } else {
+                0.
+            };
+            let y_accel = if dbg {
+                cursor.read_f64::<LittleEndian>()?
+            } else {
+                0.
+            };
+            let _x_accel = if dbg {
+                cursor.read_f64::<LittleEndian>()?
+            } else {
+                0.
+            };
+            let y = if dbg {
+                cursor.read_f32::<LittleEndian>()?
+            } else {
+                0.
+            };
+            let rot = if dbg {
+                cursor.read_f32::<LittleEndian>()?
+            } else {
+                0.
+            };
+
             if p1 {
                 self.process_action_p1(time, down, frame);
-                self.extended_p1(down, frame, 0., 0., 0., 0.);
+                self.extended_p1(down, frame, x, y, y_accel as _, rot);
             } else {
                 self.process_action_p2(time, down, frame);
-                self.extended_p2(down, frame, 0., 0., 0., 0.);
+                self.extended_p2(down, frame, x, y, y_accel as _, rot);
             }
         }
 
         Ok(())
     }
 
-    /// Parses .echo files (both old json and new binary formats).
-    fn parse_echo(&mut self, data: &[u8]) -> Result<()> {
-        let Ok(v) = serde_json::from_slice::<Value>(data) else {
-            return self.parse_echobin(data);
-        };
-
+    /// Parses the old Echo json format.
+    fn parse_echo_old(&mut self, v: Value) -> Result<()> {
         self.fps = v["FPS"].as_f64().context("couldn't get 'FPS' field")? as f32;
         let starting_frame = v["Starting Frame"].as_u64().unwrap_or(0);
 
@@ -1028,6 +1052,47 @@ impl Macro {
                 self.extended_p1(down, frame as u32, x, y, y_accel, rot);
             }
         }
+        Ok(())
+    }
+
+    /// Parses .echo files (both old json and new binary formats).
+    fn parse_echo(&mut self, data: &[u8]) -> Result<()> {
+        let Ok(v) = serde_json::from_slice::<Value>(data) else {
+            return self.parse_echobin(data); // can't parse json, parse binary
+        };
+
+        // try parsing old json format
+        if self.parse_echo_old(v.clone()).is_ok() {
+            return Ok(());
+        } else {
+            self.actions.clear();
+            self.extended.clear();
+        }
+
+        self.fps = v["fps"].as_f64().context("no 'fps' field")? as f32;
+        for action in v["inputs"].as_array().context("no 'inputs' field")? {
+            let frame = action["frame"].as_u64().context("no 'frame' field")?;
+            let time = frame as f32 / self.fps;
+            let down = action["holding"].as_bool().context("no 'holding' field")?;
+            let p2 = if let Some(p2) = action["player_2"].as_bool() {
+                p2
+            } else {
+                false
+            };
+            let x = action["x_position"].as_f64().unwrap_or(0.);
+            let y_accel = action["y_vel"].as_f64().unwrap_or(0.);
+            // let _x_accel = action["x_vel"].as_f64().unwrap_or(0.);
+            let rot = action["rotation"].as_f64().unwrap_or(0.);
+
+            if p2 {
+                self.process_action_p2(time, down, frame as _);
+                self.extended_p2(down, frame as _, x as _, 0., y_accel as _, rot as _);
+            } else {
+                self.process_action_p1(time, down, frame as _);
+                self.extended_p1(down, frame as _, x as _, 0., y_accel as _, rot as _);
+            }
+        }
+
         Ok(())
     }
 
