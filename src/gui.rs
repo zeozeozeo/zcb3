@@ -856,7 +856,7 @@ impl App {
                     (t, self.bot.borrow_mut().eval_expr().unwrap_or(0.))
                 },
                 0.0..num_actions as f64,
-                num_actions,
+                num_actions.min(3000),
             ))
             .name(self.volume_variable.to_string());
 
