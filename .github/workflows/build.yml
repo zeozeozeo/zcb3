@@ -67,7 +67,7 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/${{ matrix.platform.target }}/release/zcb3
-          asset_name: zcb3
+          asset_name: zcb3-macos
           tag: ${{ github.ref }}
           overwrite: true
         if: ${{ !contains(matrix.platform.target, 'windows') }}
@@ -76,7 +76,7 @@ jobs:
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: target/${{ matrix.platform.target }}/release/zcb3.exe
-          asset_name: zcb3
+          asset_name: zcb3.exe
           tag: ${{ github.ref }}
           overwrite: true
         if: contains(matrix.platform.target, 'windows')
