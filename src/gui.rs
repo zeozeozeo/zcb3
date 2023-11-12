@@ -392,6 +392,19 @@ impl App {
                 );
             });
         });
+
+        #[cfg(windows)]
+        ui.horizontal(|ui| {
+            if ui
+                .button("Don't hide console on startup")
+                .on_hover_text("Run with 'set RUST_LOG=debug' to see debug logs")
+                .clicked()
+            {
+                // on Windows there's a check for this on startup
+                let _ = std::fs::File::create("zcb3.debug");
+            }
+            ui.label("(applied after restart)");
+        });
     }
 
     fn show_pwease_donate_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {

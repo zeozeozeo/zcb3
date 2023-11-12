@@ -111,10 +111,15 @@ struct Args {
     expr_change_volume: bool,
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(windows)]
 fn hide_console_window() {
     // note that this does not hide the console window when running from a batch file
-    unsafe { winapi::um::wincon::FreeConsole() };
+    let debug_exists = std::path::Path::new("zcb3.debug")
+        .try_exists()
+        .unwrap_or(false);
+    if !debug_exists {
+        unsafe { winapi::um::wincon::FreeConsole() };
+    }
 }
 
 fn main() {
@@ -129,7 +134,7 @@ fn main() {
         log::info!("no args, running gui. pass -h or --help to see help");
 
         // hide console window if running gui
-        #[cfg(target_os = "windows")]
+        #[cfg(windows)]
         {
             hide_console_window();
         }
