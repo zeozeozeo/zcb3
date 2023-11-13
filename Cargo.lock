@@ -5095,7 +5095,7 @@ dependencies = [
 
 [[package]]
 name = "zcb3"
-version = "3.1.9"
+version = "3.2.0"
 dependencies = [
  "anyhow",
  "bot",
