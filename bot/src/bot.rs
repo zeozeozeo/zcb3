@@ -1,4 +1,4 @@
-use crate::{AudioSegment, ClickType, ExtendedAction, Macro, Player};
+use crate::{AudioSegment, ClickType, ExtendedAction, Player, Replay};
 use anyhow::Result;
 use fasteval::Compiler;
 use rand::Rng;
@@ -44,11 +44,21 @@ impl PlayerClicks {
     }
 }
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Pitch {
     pub from: f32,
     pub to: f32,
     pub step: f32,
+}
+
+impl Default for Pitch {
+    fn default() -> Self {
+        Self {
+            from: 0.9,
+            to: 1.1,
+            step: 0.005,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -386,7 +396,7 @@ impl Bot {
     }
 
     /// Returns the minimum and maximum values for the volume expression.
-    pub fn expr_range(&mut self, replay: &Macro) -> (f64, f64) {
+    pub fn expr_range(&mut self, replay: &Replay) -> (f64, f64) {
         let mut min = f64::MAX;
         let mut max = f64::MIN;
         for action in &replay.extended {
@@ -398,9 +408,9 @@ impl Bot {
         (min, max)
     }
 
-    pub fn render_macro(
+    pub fn render_replay(
         &mut self,
-        replay: &Macro,
+        replay: &Replay,
         noise: bool,
         normalize: bool,
         use_expr: bool,

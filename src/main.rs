@@ -147,8 +147,8 @@ fn main() {
 fn run_cli(mut args: Args) {
     // read replay
     let mut f = std::fs::File::open(args.replay.clone()).expect("failed to open replay file");
-    let mut replay = Vec::new();
-    f.read_to_end(&mut replay)
+    let mut data = Vec::new();
+    f.read_to_end(&mut data)
         .expect("failed to read replay file");
 
     let replay_filename = Path::new(&args.replay)
@@ -188,15 +188,22 @@ fn run_cli(mut args: Args) {
         .expect("failed to create bot");
 
     // parse replay
-    let replay = Macro::parse(
-        MacroType::guess_format(replay_filename).unwrap(),
-        &replay,
-        timings,
-        vol_settings,
-        false,
-        args.sort_actions,
-    )
-    .unwrap();
+    // let replay = Macro::parse(
+    //     MacroType::guess_format(replay_filename).unwrap(),
+    //     &replay,
+    //     timings,
+    //     vol_settings,
+    //     false,
+    //     args.sort_actions,
+    // )
+    let format = ReplayType::guess_format(replay_filename).expect("failed to guess format");
+    let replay = Replay::build()
+        .with_timings(timings)
+        .with_vol_settings(vol_settings)
+        .with_extended(true)
+        .with_sort_actions(args.sort_actions)
+        .parse(format, &data)
+        .unwrap();
 
     // try to compile volume expression to check for errors
     if !args.volume_expr.is_empty() {
@@ -213,7 +220,7 @@ fn run_cli(mut args: Args) {
     }
 
     // render output file
-    let segment = bot.render_macro(
+    let segment = bot.render_replay(
         &replay,
         args.noise,
         args.normalize,

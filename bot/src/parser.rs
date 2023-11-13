@@ -3,7 +3,10 @@ use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use rand::Rng;
 use serde_json::Value;
-use std::io::{Cursor, Read, Write};
+use std::{
+    io::{Cursor, Read, Write},
+    ops::RangeInclusive,
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
@@ -122,7 +125,7 @@ impl ClickType {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Action {
-    /// Time since the macro was started (in seconds).
+    /// Time since the replay was started (in seconds).
     pub time: f32,
     /// What player this action is for.
     pub player: Player,
@@ -172,16 +175,16 @@ pub struct ExtendedAction {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct Macro {
-    /// Framerate of the macro.
+pub struct Replay {
+    /// Framerate of the replay.
     pub fps: f32,
-    /// Duration of the macro (in seconds).
+    /// Duration of the replay (in seconds).
     pub duration: f32,
     /// Actions used for generating clicks.
     pub actions: Vec<Action>,
     /// Whether to populate the `extended` vector.
     pub extended_data: bool,
-    /// Action data used for converting macros.
+    /// Action data used for converting replays.
     pub extended: Vec<ExtendedAction>,
 
     // used for determining the click type
@@ -191,10 +194,15 @@ pub struct Macro {
     // used for generating additional click info
     timings: Timings,
     vol_settings: VolumeSettings,
+
+    /// Frame offset (range, generated randomly).
+    frame_bias: Option<RangeInclusive<i64>>,
+    /// Whether to sort actions.
+    sort_actions: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
-pub enum MacroType {
+pub enum ReplayType {
     /// .mhr.json files
     Mhr,
     /// .json files
@@ -233,9 +241,9 @@ pub enum MacroType {
     // GatoBot,
 }
 
-impl MacroType {
+impl ReplayType {
     pub fn guess_format(filename: &str) -> Result<Self> {
-        use MacroType::*;
+        use ReplayType::*;
         let ext = filename
             .split('.')
             .last()
@@ -334,7 +342,7 @@ struct Obot3Replay {
     clicks: Vec<Obot3Click>,
 }
 
-impl Macro {
+impl Replay {
     pub const SUPPORTED_EXTENSIONS: &[&'static str] = &[
         "json",
         "mhr.json",
@@ -357,80 +365,107 @@ impl Macro {
         // "gatobot",
     ];
 
-    pub fn parse(
-        typ: MacroType,
-        data: &[u8],
-        timings: Timings,
-        vol_settings: VolumeSettings,
-        extended: bool,
-        sort_actions: bool,
-    ) -> Result<Self> {
-        log::info!("parsing replay, strlen {}, replay type {typ:?}", data.len());
+    pub fn build() -> Self {
+        Self::default()
+    }
 
-        let mut replay = Macro {
-            timings,
-            vol_settings,
-            extended_data: extended,
-            ..Default::default()
-        };
+    pub fn with_timings(mut self, timings: Timings) -> Self {
+        self.timings = timings;
+        self
+    }
+
+    pub fn with_vol_settings(mut self, vol_settings: VolumeSettings) -> Self {
+        self.vol_settings = vol_settings;
+        self
+    }
+
+    pub fn with_extended(mut self, extended: bool) -> Self {
+        self.extended_data = extended;
+        self
+    }
+
+    pub fn with_sort_actions(mut self, sort_actions: bool) -> Self {
+        self.sort_actions = sort_actions;
+        self
+    }
+
+    pub fn with_frame_bias(mut self, frame_bias: RangeInclusive<i64>) -> Self {
+        self.frame_bias = Some(frame_bias);
+        self
+    }
+
+    pub fn parse(mut self, typ: ReplayType, data: &[u8]) -> Result<Self> {
+        log::debug!("parsing replay, strlen {}, replay type {typ:?}", data.len());
 
         match typ {
-            MacroType::Mhr => replay.parse_mhr(data)?,
-            MacroType::TasBot => replay.parse_tasbot(data)?,
-            MacroType::Zbot => replay.parse_zbf(data)?,
-            MacroType::Obot => replay.parse_obot2(data)?, // will also handle obot3 replays
-            MacroType::Ybotf => replay.parse_ybotf(data)?,
-            MacroType::MhrBin => replay.parse_mhrbin(data)?,
-            MacroType::Echo => replay.parse_echo(data)?, // will handle all 3 replay versions
-            MacroType::Amethyst => replay.parse_amethyst(data)?,
-            MacroType::OsuReplay => replay.parse_osr(data)?,
-            MacroType::Gdmo => replay.parse_gdmo(data)?,
-            MacroType::ReplayBot => replay.parse_replaybot(data)?,
-            MacroType::Rush => replay.parse_rush(data)?,
-            MacroType::Kdbot => replay.parse_kdbot(data)?,
-            MacroType::Txt => replay.parse_txt(data)?,
-            MacroType::ReplayEngine => replay.parse_re(data)?,
-            MacroType::Ddhor => replay.parse_ddhor(data)?,
-            MacroType::Xbot => replay.parse_xbot(data)?,
-            // MacroType::GatoBot => replay.parse_gatobot(data)?,
+            ReplayType::Mhr => self.parse_mhr(data)?,
+            ReplayType::TasBot => self.parse_tasbot(data)?,
+            ReplayType::Zbot => self.parse_zbf(data)?,
+            ReplayType::Obot => self.parse_obot2(data)?, // will also handle obot3 replays
+            ReplayType::Ybotf => self.parse_ybotf(data)?,
+            ReplayType::MhrBin => self.parse_mhrbin(data)?,
+            ReplayType::Echo => self.parse_echo(data)?, // will handle all 3 replay versions
+            ReplayType::Amethyst => self.parse_amethyst(data)?,
+            ReplayType::OsuReplay => self.parse_osr(data)?,
+            ReplayType::Gdmo => self.parse_gdmo(data)?,
+            ReplayType::ReplayBot => self.parse_replaybot(data)?,
+            ReplayType::Rush => self.parse_rush(data)?,
+            ReplayType::Kdbot => self.parse_kdbot(data)?,
+            ReplayType::Txt => self.parse_txt(data)?,
+            ReplayType::ReplayEngine => self.parse_re(data)?,
+            ReplayType::Ddhor => self.parse_ddhor(data)?,
+            ReplayType::Xbot => self.parse_xbot(data)?,
+            // MacroType::GatoBot => self.parse_gatobot(data)?,
         }
 
         // sort actions by time / frame
-        if sort_actions {
-            replay.sort_actions();
+        if self.sort_actions {
+            self.sort_actions();
         }
 
-        if let Some(last) = replay.actions.last() {
-            replay.duration = last.time;
+        if let Some(last) = self.actions.last() {
+            self.duration = last.time;
         }
 
-        log::info!(
-            "macro fps: {}; macro duration: {:?}",
-            replay.fps,
-            replay.duration
+        log::debug!(
+            "replay fps: {}; replay duration: {:?}",
+            self.fps,
+            self.duration
         );
 
-        Ok(replay)
+        Ok(self)
     }
 
     /// Sorts actions by time / frame.
-    pub fn sort_actions(&mut self) {
+    pub fn sort_actions(&mut self) -> &mut Self {
         self.actions.sort_by(|a, b| a.time.total_cmp(&b.time));
         self.extended.sort_by(|a, b| a.frame.cmp(&b.frame));
+        self
     }
 
-    pub fn write<W: Write>(&self, typ: MacroType, writer: W) -> Result<()> {
+    pub fn write<W: Write>(&self, typ: ReplayType, writer: W) -> Result<&Self> {
         match typ {
-            MacroType::Mhr => self.write_mhr(writer)?,
-            MacroType::TasBot => self.write_tasbot(writer)?,
-            MacroType::Zbot => self.write_zbf(writer)?,
-            MacroType::Obot => self.write_obot2(writer)?,
-            MacroType::Ybotf => self.write_ybotf(writer)?,
-            MacroType::Echo => self.write_echo(writer)?,
-            MacroType::Amethyst => self.write_amethyst(writer)?,
+            ReplayType::Mhr => self.write_mhr(writer)?,
+            ReplayType::TasBot => self.write_tasbot(writer)?,
+            ReplayType::Zbot => self.write_zbf(writer)?,
+            ReplayType::Obot => self.write_obot2(writer)?,
+            ReplayType::Ybotf => self.write_ybotf(writer)?,
+            ReplayType::Echo => self.write_echo(writer)?,
+            ReplayType::Amethyst => self.write_amethyst(writer)?,
             _ => anyhow::bail!("unsupported format"),
         }
-        Ok(())
+        Ok(self)
+    }
+
+    #[inline(always)]
+    fn get_frame_with_frame_offset(&self, frame: u32) -> u32 {
+        let offset = if let Some(bias) = self.frame_bias.clone() {
+            rand::thread_rng().gen_range(bias) as i64
+        } else {
+            return frame;
+        };
+
+        (frame as i64 + offset).max(0) as u32
     }
 
     fn process_action_p1(&mut self, time: f32, down: bool, frame: u32) {
@@ -446,8 +481,13 @@ impl Macro {
 
         self.prev_time.0 = time;
         self.prev_action.0 = Some(typ);
-        self.actions
-            .push(Action::new(time, Player::One, typ, vol_offset, frame))
+        self.actions.push(Action::new(
+            time,
+            Player::One,
+            typ,
+            vol_offset,
+            self.get_frame_with_frame_offset(frame),
+        ))
     }
 
     // .0 is changed to .1 here, because it's the second player
@@ -463,8 +503,13 @@ impl Macro {
 
         self.prev_time.1 = time;
         self.prev_action.1 = Some(typ);
-        self.actions
-            .push(Action::new(time, Player::Two, typ, vol_offset, frame))
+        self.actions.push(Action::new(
+            time,
+            Player::Two,
+            typ,
+            vol_offset,
+            self.get_frame_with_frame_offset(frame),
+        ))
     }
 
     fn extended_p1(&mut self, down: bool, frame: u32, x: f32, y: f32, y_accel: f32, rot: f32) {
@@ -472,7 +517,7 @@ impl Macro {
             self.extended.push(ExtendedAction {
                 player2: false,
                 down,
-                frame,
+                frame: self.get_frame_with_frame_offset(frame),
                 x,
                 y,
                 y_accel,
@@ -499,7 +544,7 @@ impl Macro {
             self.extended.push(ExtendedAction {
                 player2: true,
                 down,
-                frame,
+                frame: self.get_frame_with_frame_offset(frame),
                 x,
                 y,
                 y_accel,
@@ -532,7 +577,7 @@ impl Macro {
             .for_each(func)
     }
 
-    /// Returns the last frame in the macro. If extended actions are disabled, this
+    /// Returns the last frame in the replay. If extended actions are disabled, this
     /// always returns 0.
     #[inline]
     pub fn last_frame(&self) -> u32 {
@@ -928,7 +973,7 @@ impl Macro {
     }
 
     fn parse_mhrbin(&mut self, data: &[u8]) -> Result<()> {
-        // if it's a json macro, load from json instead
+        // if it's a json replay, load from json instead
         if serde_json::from_slice::<Value>(data).is_ok() {
             return self.parse_mhr(data);
         }
@@ -971,7 +1016,7 @@ impl Macro {
         Ok(())
     }
 
-    /// Parses the new Echo macro format.
+    /// Parses the new Echo replay format.
     fn parse_echobin(&mut self, data: &[u8]) -> Result<()> {
         use byteorder::BigEndian;
         let mut cursor = Cursor::new(data);
@@ -1169,7 +1214,7 @@ impl Macro {
         Ok(())
     }
 
-    /// Amethyst stores macros like this:
+    /// Amethyst stores replays like this:
     ///
     /// ```no_run
     /// /* for player1 clicks */
@@ -1255,17 +1300,16 @@ impl Macro {
 
         cursor.set_position(cursor.position() + 19);
         let mods = cursor.read_i32::<LittleEndian>()?;
-        let speed;
-        if mods & (1 << 6) != 0 {
+        let speed = if mods & (1 << 6) != 0 {
             // dt
-            speed = 1.5;
+            1.5
         } else if mods & (1 << 8) != 0 {
             // ht
-            speed = 0.75;
+            0.75
         } else {
             // nm
-            speed = 1.0;
-        }
+            1.0
+        };
 
         let life_graph_exists = cursor.read_u8()? == 0x0b;
         if life_graph_exists {
@@ -1379,10 +1423,10 @@ impl Macro {
         let mut magic = [0u8; 4];
         cursor.read_exact(&mut magic)?;
 
-        // check if its a version 2 frame macro
+        // check if its a version 2 frame replay
         if magic != *REPLAYBOT_MAGIC {
             anyhow::bail!(
-                "old replaybot macro format is not supported, as it does not store frames"
+                "old replaybot replay format is not supported, as it does not store frames"
             )
         }
         let version = cursor.read_u8()?;
@@ -1650,7 +1694,7 @@ impl Macro {
             .parse::<u64>()? as f32;
 
         if lines.next().context("second line doesn't exist")?.trim() != "frames" {
-            anyhow::bail!("the xBot parser only supports xBot Frame macros");
+            anyhow::bail!("the xBot parser only supports xBot Frame replays");
         }
 
         for (i, line) in lines.enumerate() {
@@ -1696,7 +1740,7 @@ impl Macro {
 
         let text = String::from_utf8(data.to_vec())?;
         if !text.starts_with("H4sIAAAAAAAA") {
-            anyhow::bail!("corrupted gatobot macro (must start with 'H4sIAAAAAAAA')");
+            anyhow::bail!("corrupted gatobot replay (must start with 'H4sIAAAAAAAA')");
         }
 
         let mut base64_decoded = general_purpose::URL_SAFE_NO_PAD.decode(text)?;

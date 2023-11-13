@@ -1,6 +1,6 @@
 use crate::built_info;
 use anyhow::{Context, Result};
-use bot::{Bot, ExtendedAction, Macro, MacroType, Pitch, Timings, VolumeSettings};
+use bot::{Bot, ExtendedAction, Pitch, Replay, ReplayType, Timings, VolumeSettings};
 use eframe::{
     egui::{self, Key},
     epaint::Color32,
@@ -81,7 +81,7 @@ impl ToString for VolumeVariable {
 // #[derive(Debug)]
 struct App {
     stage: Stage,
-    replay: Macro,
+    replay: Replay,
     bot: Rc<RefCell<Bot>>,
     output: Option<PathBuf>,
     volume_var: f32,
@@ -101,29 +101,22 @@ struct App {
     volume_variable: VolumeVariable,
     sort_actions: bool,
     plot_data_aspect: f32,
+    frame_bias_range: (i64, i64),
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
             stage: Stage::default(),
-            replay: Macro::default(),
+            replay: Replay::default(),
             bot: Rc::new(RefCell::new(Bot::default())),
             output: None,
             volume_var: 0.20,
             noise: false,
             normalize: false,
             pitch_enabled: true,
-            pitch: Pitch {
-                from: 0.90,
-                to: 1.1,
-                step: 0.005,
-            },
-            timings: Timings {
-                hard: 2.0,
-                regular: 0.15,
-                soft: 0.025,
-            },
+            pitch: Pitch::default(),
+            timings: Timings::default(),
             vol_settings: VolumeSettings::default(),
             // autocutter: AutoCutter::default(),
             last_chars: [Key::A; 9],
@@ -135,13 +128,13 @@ impl Default for App {
             volume_variable: VolumeVariable::Variation,
             sort_actions: true,
             plot_data_aspect: 20.0,
+            frame_bias_range: (0, 0),
         }
     }
 }
 
-// terrible ux but who cares
 fn u32_edit_field(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
-    let mut tmp_value = format!("{}", value);
+    let mut tmp_value = format!("{value}");
     let res = ui.text_edit_singleline(&mut tmp_value);
     if let Ok(result) = tmp_value.parse::<u32>() {
         *value = result.max(1);
@@ -149,20 +142,27 @@ fn u32_edit_field(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
     res
 }
 
+fn i64_edit_field(ui: &mut egui::Ui, value: &mut i64) -> egui::Response {
+    let mut tmp_value = format!("{value}");
+    let res = ui.text_edit_singleline(&mut tmp_value);
+    if let Ok(result) = tmp_value.parse::<i64>() {
+        *value = result;
+    }
+    res
+}
+
+fn help_text<R>(ui: &mut egui::Ui, help: &str, add_contents: impl FnOnce(&mut egui::Ui) -> R) {
+    ui.horizontal(|ui| {
+        add_contents(ui);
+        ui.add_enabled_ui(false, |ui| ui.label("(?)").on_disabled_hover_text(help));
+    });
+}
+
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.input(|i| {
-            const BOYKISSER: [Key; 9] = [
-                Key::B,
-                Key::O,
-                Key::Y,
-                Key::K,
-                Key::I,
-                Key::S,
-                Key::S,
-                Key::E,
-                Key::R,
-            ];
+            use Key::*;
+            const BOYKISSER: [Key; 9] = [B, O, Y, K, I, S, S, E, R];
             for key in BOYKISSER {
                 if i.key_pressed(key) {
                     self.last_chars[self.char_idx as usize] = key;
@@ -217,7 +217,7 @@ impl eframe::App for App {
                     {
                         self.do_update_check(&dialog);
                     }
-                    ui.hyperlink_to("Join the discord server", "https://discord.gg/b4kBQyXYZT");
+                    ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
                 });
             });
 
@@ -449,46 +449,111 @@ impl App {
 
         let mut dialog = Modal::new(ctx, "replay_stage_dialog");
 
-        let t = &mut self.timings;
-        ui.add(egui::Slider::new(&mut t.hard, t.regular..=30.0).text(t!("replay.hard_timing")));
-        ui.add(
-            egui::Slider::new(&mut t.regular, t.soft..=t.hard).text(t!("replay.regular_timing")),
-        );
-        ui.add(egui::Slider::new(&mut t.soft, 0.0..=t.regular).text(t!("replay.soft_timing")));
-
-        ui.separator();
-
-        let vol = &mut self.vol_settings;
-        ui.add(
-            egui::Slider::new(&mut vol.volume_var, 0.0..=1.0).text(t!("replay.volume_variation")),
-        );
-        ui.add(
-            egui::Slider::new(&mut vol.global_volume, 0.0..=20.0).text(t!("replay.global_volume")),
-        );
-
-        ui.separator();
-
-        ui.checkbox(&mut vol.enabled, t!("replay.enable_spam_volume_changes"));
-
-        ui.add_enabled_ui(vol.enabled, |ui| {
-            ui.checkbox(
-                &mut vol.change_releases_volume,
-                t!("replay.change_releases_volume"),
-            );
-            ui.add(egui::Slider::new(&mut vol.spam_time, 0.0..=1.0).text(t!("replay.spam_time")));
-            ui.add(
-                egui::Slider::new(&mut vol.spam_vol_offset_factor, 0.0..=30.0)
-                    .text(t!("replay.spam_offset_factor")),
-            );
-            ui.add(
-                egui::Slider::new(&mut vol.max_spam_vol_offset, 0.0..=30.0)
-                    .text(t!("replay.max_spam_offset")),
-            );
+        ui.collapsing("Timings", |ui| {
+            ui.label("Click type timings. The number is the delay between actions (in seconds). \
+                    If the delay between the current and previous action is bigger than the specified \
+                    timing, the corresponding click type is used.");
+            let t = &mut self.timings;
+            help_text(ui, "Hardclick/hardrelease timing", |ui| {
+                ui.add(egui::Slider::new(&mut t.hard, t.regular..=30.0).text(t!("replay.hard_timing")));
+            });
+            help_text(ui, "Click/release timing", |ui| {
+                ui.add(
+                    egui::Slider::new(&mut t.regular, t.soft..=t.hard)
+                        .text(t!("replay.regular_timing")),
+                );
+            });
+            help_text(ui, "Softclick/softrelease timing", |ui| {
+                ui.add(egui::Slider::new(&mut t.soft, 0.0..=t.regular).text(t!("replay.soft_timing")));
+            });
+            ui.label(format!("Everything below {}s are microclicks/microreleases.", t.soft));
         });
 
-        ui.separator();
+        ui.collapsing("Volume settings", |ui| {
+            ui.label("General volume settings.");
 
-        ui.checkbox(&mut self.sort_actions, "Sort actions");
+            let vol = &mut self.vol_settings;
+            help_text(ui, "Maximum volume variation for each action (+/-)", |ui| {
+                ui.add(
+                    egui::Slider::new(&mut vol.volume_var, 0.0..=1.0)
+                        .text(t!("replay.volume_variation")),
+                );
+            });
+            help_text(ui, "Constant volume multiplier for all actions", |ui| {
+                ui.add(
+                    egui::Slider::new(&mut vol.global_volume, 0.0..=20.0)
+                        .text(t!("replay.global_volume")),
+                );
+            });
+        });
+
+        ui.collapsing("Spam volume changes", |ui| {
+            ui.label(
+                "This can be used to change the volume of the clicks in spams. \
+                    The spam time is the maximum time between actions when they can be \
+                    considered 'spam actions'. The spam volume offset factor depends on the delta. \
+                    The maximum spam offset factor is the maximum value this factor can be.",
+            );
+
+            let vol = &mut self.vol_settings;
+            ui.checkbox(&mut vol.enabled, t!("replay.enable_spam_volume_changes"));
+
+            ui.add_enabled_ui(vol.enabled, |ui| {
+                help_text(ui, "Apply spam volume changes to releases", |ui| {
+                    ui.checkbox(
+                        &mut vol.change_releases_volume,
+                        t!("replay.change_releases_volume"),
+                    );
+                });
+                help_text(
+                    ui,
+                    "Time between actions when they can be considered spam",
+                    |ui| {
+                        ui.add(
+                            egui::Slider::new(&mut vol.spam_time, 0.0..=1.0)
+                                .text(t!("replay.spam_time")),
+                        );
+                    },
+                );
+                help_text(ui, "Volume offset factor for spam actions", |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut vol.spam_vol_offset_factor, 0.0..=30.0)
+                            .text(t!("replay.spam_offset_factor")),
+                    );
+                });
+                help_text(ui, "Maximum value of the volume offset factor", |ui| {
+                    ui.add(
+                        egui::Slider::new(&mut vol.max_spam_vol_offset, 0.0..=30.0)
+                            .text(t!("replay.max_spam_offset")),
+                    );
+                });
+            });
+        });
+
+        ui.collapsing("Frame bias", |ui| {
+            ui.label(
+                "The frame bias is the minimum and maximum frame offset for each click (+/-). \
+                    This can be used to position actions inaccurately. The value of the \
+                    frame offset is generated randomly in this range.",
+            );
+            ui.horizontal(|ui| {
+                i64_edit_field(ui, &mut self.frame_bias_range.0);
+                help_text(ui, "Minimum frame offset", |ui| {
+                    ui.label("Min offset");
+                });
+            });
+            ui.horizontal(|ui| {
+                i64_edit_field(ui, &mut self.frame_bias_range.1);
+                help_text(ui, "Maximum frame offset", |ui| {
+                    ui.label("Max offset");
+                });
+            });
+        });
+
+        help_text(ui, "Sort actions by time", |ui| {
+            ui.checkbox(&mut self.sort_actions, "Sort actions");
+        });
+        ui.separator();
 
         ui.horizontal(|ui| {
             if ui.button(t!("replay.select_replay")).clicked() {
@@ -496,7 +561,7 @@ impl App {
                 if let Some(file) = FileDialog::new()
                     .add_filter(
                         t!("replay.replay_file_explorer"),
-                        Macro::SUPPORTED_EXTENSIONS,
+                        Replay::SUPPORTED_EXTENSIONS,
                     )
                     .pick_file()
                 {
@@ -509,17 +574,24 @@ impl App {
                     let mut data = Vec::new();
                     f.read_to_end(&mut data).unwrap();
 
-                    let replay_type = MacroType::guess_format(filename);
+                    let replay_type = ReplayType::guess_format(filename);
 
                     if let Ok(replay_type) = replay_type {
-                        let replay = Macro::parse(
-                            replay_type,
-                            &data,
-                            self.timings,
-                            self.vol_settings,
-                            true,
-                            self.sort_actions,
-                        );
+                        // parse replay
+                        let mut replay = Replay::build()
+                            .with_timings(self.timings)
+                            .with_vol_settings(self.vol_settings)
+                            .with_extended(true)
+                            .with_sort_actions(self.sort_actions);
+
+                        // set frame bias range if changed
+                        if self.frame_bias_range != (0, 0) {
+                            replay = replay
+                                .with_frame_bias(self.frame_bias_range.0..=self.frame_bias_range.1);
+                        }
+
+                        let replay = replay.parse(replay_type, &data);
+
                         if let Ok(replay) = replay {
                             self.replay = replay;
                             self.stage = Stage::SelectClickpack;
@@ -587,20 +659,45 @@ impl App {
         let mut dialog = Modal::new(ctx, "clickpack_stage_dialog");
 
         // pitch settings
-        ui.checkbox(&mut self.pitch_enabled, "Pitch variation");
-        ui.add_enabled_ui(self.pitch_enabled, |ui| {
-            let p = &mut self.pitch;
-            ui.add(egui::Slider::new(&mut p.from, 0.0..=p.to).text("Minimum pitch"));
-            ui.add(egui::Slider::new(&mut p.to, p.from..=50.0).text("Maxiumum pitch"));
-            ui.add(egui::Slider::new(&mut p.step, 0.0001..=1.0).text("Pitch step"));
+        ui.collapsing("Pitch variation", |ui| {
+            ui.label(
+                "Pitch variation can make clicks sound more realistic by \
+                    changing their pitch randomly.",
+            );
+            ui.checkbox(&mut self.pitch_enabled, "Enable pitch variation");
+            ui.add_enabled_ui(self.pitch_enabled, |ui| {
+                let p = &mut self.pitch;
+                help_text(ui, "Minimum pitch value. 1 = no change", |ui| {
+                    ui.add(egui::Slider::new(&mut p.from, 0.0..=p.to).text("Minimum pitch"));
+                });
+                help_text(ui, "Maximum pitch value. 1 = no change", |ui| {
+                    ui.add(egui::Slider::new(&mut p.to, p.from..=50.0).text("Maxiumum pitch"));
+                });
+                help_text(
+                    ui,
+                    "Step between pitch values. The more = the better & the slower",
+                    |ui| {
+                        ui.add(egui::Slider::new(&mut p.step, 0.0001..=1.0).text("Pitch step"));
+                    },
+                );
+            });
         });
-        ui.separator();
 
         // samplerate edit field
-        ui.horizontal(|ui| {
-            u32_edit_field(ui, &mut self.sample_rate);
-            ui.label("Sample rate");
+        ui.collapsing("Other", |ui| {
+            ui.horizontal(|ui| {
+                u32_edit_field(ui, &mut self.sample_rate);
+                help_text(
+                    ui,
+                    "Audio framerate.\nDon't touch this if you don't know what you're doing",
+                    |ui| {
+                        ui.label("Sample rate");
+                    },
+                );
+            });
         });
+
+        ui.separator();
 
         if ui.button("Select clickpack").clicked() {
             if let Some(dir) = FileDialog::new().pick_folder() {
@@ -651,7 +748,7 @@ impl App {
 
     fn render_replay(&mut self, dialog: &Modal) {
         let start = Instant::now();
-        let segment = self.bot.borrow_mut().render_macro(
+        let segment = self.bot.borrow_mut().render_replay(
             &self.replay,
             self.noise,
             self.normalize,
@@ -702,21 +799,27 @@ impl App {
         let mut dialog = Modal::new(ctx, "render_stage_dialog");
 
         ui.horizontal(|ui| {
-            if ui.button("Select output file").clicked() {
-                if let Some(path) = FileDialog::new()
-                    .add_filter("Supported audio files", &["wav"])
-                    .save_file()
-                {
-                    log::info!("selected output file: {path:?}");
-                    self.output = Some(path);
-                } else {
-                    dialog.open_dialog(
-                        Some("No output file was selected"),  // title
-                        Some("Please select an output file"), // body
-                        Some(Icon::Error),                    // icon
-                    );
-                }
-            }
+            help_text(
+                ui,
+                "Select the output .wav file.\nYou have to click 'Render' to render the output",
+                |ui| {
+                    if ui.button("Select output file").clicked() {
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("Supported audio files", &["wav"])
+                            .save_file()
+                        {
+                            log::info!("selected output file: {path:?}");
+                            self.output = Some(path);
+                        } else {
+                            dialog.open_dialog(
+                                Some("No output file was selected"),  // title
+                                Some("Please select an output file"), // body
+                                Some(Icon::Error),                    // icon
+                            );
+                        }
+                    }
+                },
+            );
             if let Some(output) = &self.output {
                 ui.label(format!(
                     "Selected output file: {}",
@@ -727,28 +830,25 @@ impl App {
 
         ui.separator();
 
-        // volume variation slider
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::Slider::new(&mut self.volume_var, -50.0..=50.0).text("Volume variation"),
-            );
-            ui.add_enabled_ui(false, |ui| {
-                ui.label("(?)").on_disabled_hover_text(
-                    "Maximum volume variation (+/-) of each click (generated randomly).\n0 = no volume variation.",
-                )
+        ui.collapsing("Audio settings", |ui| {
+            // volume variation slider
+            help_text(ui, "Maximum volume variation (+/-) of each click (generated randomly).\n0 = no volume variation.", |ui| {
+                ui.add(
+                    egui::Slider::new(&mut self.volume_var, -50.0..=50.0).text("Volume variation"),
+                );
             });
-        });
 
-        // overlay noise checkbox
-        ui.add_enabled_ui(self.bot.borrow().has_noise(), |ui| {
-            ui.checkbox(&mut self.noise, "Overlay noise")
-                .on_disabled_hover_text("Your clickpack doesn't have a noise file.")
-                .on_hover_text("Overlays the noise file that's in the clickpack directory.");
+            // overlay noise checkbox
+            ui.add_enabled_ui(self.bot.borrow().has_noise(), |ui| {
+                ui.checkbox(&mut self.noise, "Overlay noise")
+                    .on_disabled_hover_text("Your clickpack doesn't have a noise file.")
+                    .on_hover_text("Overlays the noise file that's in the clickpack directory.");
+            });
+            ui.checkbox(&mut self.normalize, "Normalize audio")
+                .on_hover_text(
+                    "Whether to normalize the output audio\n(make all samples to be in range of 0-1)",
+                );
         });
-        ui.checkbox(&mut self.normalize, "Normalize audio")
-            .on_hover_text(
-                "Whether to normalize the output audio\n(make all samples to be in range of 0-1)",
-            );
 
         ui.collapsing("Advanced", |ui| {
             ui.label(
@@ -759,10 +859,10 @@ impl App {
                 "Defined variables: frame, x (xpos), y (ypos), p (% in level, 0 to 1), \
                     player2 (1 if player 2, 0 if player 1), rot (player rotation), \
                     accel (player y acceleration), down (whether the mouse is down, 1 or 0), \
-                    fps (frames per second), time (in seconds), frames (total frames in macro), \
+                    fps (frames per second), time (in seconds), frames (total frames in replay), \
                     level_time (total time in level)",
             );
-            ui.label("Some variables may not be set due to different macro formats");
+            ui.label("Some variables may not be set due to different replay formats");
             ui.label("x = action index");
             ui.label("Example expression: sqrt(p) + sin(p) / 10");
             ui.separator();
