@@ -5021,6 +5021,7 @@ dependencies = [
  "rfd",
  "rust-i18n",
  "rustmatica",
+ "serde",
  "serde_json",
  "winapi",
  "winres",

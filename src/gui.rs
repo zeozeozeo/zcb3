@@ -11,6 +11,7 @@ use egui_plot::PlotPoint;
 use image::io::Reader as ImageReader;
 use rfd::FileDialog;
 use rust_i18n::t;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{cell::RefCell, io::Cursor, rc::Rc, time::Instant};
 use std::{io::Read, path::PathBuf};
@@ -66,56 +67,80 @@ impl Stage {
     }
 }
 
-// #[derive(Debug)]
-struct App {
-    stage: Stage,
-    replay: Replay,
-    bot: Rc<RefCell<Bot>>,
-    output: Option<PathBuf>,
-    volume_var: f32,
+#[derive(Serialize, Deserialize)]
+struct Config {
     noise: bool,
     normalize: bool,
     pitch_enabled: bool,
     pitch: Pitch,
     timings: Timings,
     vol_settings: VolumeSettings,
-    // autocutter: AutoCutter,
-    last_chars: [Key; 9],
-    char_idx: u8,
     litematic_export_releases: bool,
     sample_rate: u32,
     expr_text: String,
-    expr_error: String,
     expr_variable: ExprVariable,
     sort_actions: bool,
     plot_data_aspect: f32,
-    plot_points: Vec<PlotPoint>,
 }
 
-impl Default for App {
+impl Config {
+    fn save(&self, path: &PathBuf) -> Result<()> {
+        let json = serde_json::to_string_pretty(self)?;
+        std::fs::write(path, json)?;
+        Ok(())
+    }
+
+    fn load(&mut self, path: &PathBuf) -> Result<()> {
+        let f = std::fs::File::open(path)?;
+        *self = serde_json::from_reader(f)?;
+        Ok(())
+    }
+}
+
+impl Default for Config {
     fn default() -> Self {
         Self {
-            stage: Stage::default(),
-            replay: Replay::default(),
-            bot: Rc::new(RefCell::new(Bot::default())),
-            output: None,
-            volume_var: 0.20,
             noise: false,
             normalize: false,
             pitch_enabled: true,
             pitch: Pitch::default(),
             timings: Timings::default(),
             vol_settings: VolumeSettings::default(),
-            // autocutter: AutoCutter::default(),
-            last_chars: [Key::A; 9],
-            char_idx: 0,
             litematic_export_releases: false,
             sample_rate: 44100,
             expr_text: String::new(),
-            expr_error: String::new(),
             expr_variable: ExprVariable::Variation,
             sort_actions: true,
             plot_data_aspect: 20.0,
+        }
+    }
+}
+
+struct App {
+    conf: Config,
+    stage: Stage,
+    replay: Replay,
+    bot: Rc<RefCell<Bot>>,
+    output: Option<PathBuf>,
+    // autocutter: AutoCutter,
+    last_chars: [Key; 9],
+    char_idx: u8,
+    expr_error: String,
+    plot_points: Vec<PlotPoint>,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self {
+            conf: Config::default(),
+            stage: Stage::default(),
+            replay: Replay::default(),
+            bot: Rc::new(RefCell::new(Bot::default())),
+            output: None,
+            // autocutter: AutoCutter::default(),
+            last_chars: [Key::A; 9],
+            char_idx: 0,
+            expr_error: String::new(),
             plot_points: vec![],
         }
     }
@@ -188,7 +213,7 @@ impl eframe::App for App {
         });
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            let mut dialog = Modal::new(ctx, "update_dialog");
+            let mut dialog = Modal::new(ctx, "update_and_config_dialog");
 
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.add_space(2.0);
@@ -209,6 +234,23 @@ impl eframe::App for App {
                         self.do_update_check(&dialog);
                     }
                     ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
+
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .button("Load")
+                            .on_hover_text("Load a configuration file")
+                            .clicked()
+                        {
+                            self.load_config(&dialog);
+                        }
+                        if ui
+                            .button("Save")
+                            .on_hover_text("Save the current configuration")
+                            .clicked()
+                        {
+                            self.save_config(&dialog);
+                        }
+                    });
                 });
             });
 
@@ -302,12 +344,12 @@ impl App {
         // 1 repeater tick = 2 game ticks, or 0.1 seconds
         let mut prev_time = 0.;
         for action in &self.replay.actions {
-            if !self.litematic_export_releases && action.click.is_release() {
+            if !self.conf.litematic_export_releases && action.click.is_release() {
                 continue;
             }
 
             let mut delay = (action.time - prev_time) / 1.42; // 142% speed makes it align a bit better
-            if self.litematic_export_releases {
+            if self.conf.litematic_export_releases {
                 delay /= 1.42;
             }
             prev_time = action.time;
@@ -366,6 +408,40 @@ impl App {
         let _ = litematic.write_file("omagah.litematic");
     }
 
+    fn save_config(&self, dialog: &Modal) {
+        if let Some(file) = FileDialog::new()
+            .add_filter("Config file", &["json"])
+            .save_file()
+        {
+            if let Err(e) = self.conf.save(&file) {
+                dialog.open_dialog(Some("Failed to save config"), Some(e), Some(Icon::Error));
+            }
+        } else {
+            dialog.open_dialog(
+                Some("No file was selected"),
+                Some("Please select a file"),
+                Some(Icon::Error),
+            );
+        }
+    }
+
+    fn load_config(&mut self, dialog: &Modal) {
+        if let Some(file) = FileDialog::new()
+            .add_filter("Config file", &["json"])
+            .pick_file()
+        {
+            if let Err(e) = self.conf.load(&file) {
+                dialog.open_dialog(Some("Failed to load config"), Some(e), Some(Icon::Error));
+            }
+        } else {
+            dialog.open_dialog(
+                Some("No file was selected"),
+                Some("Please select a file"),
+                Some(Icon::Error),
+            );
+        }
+    }
+
     fn show_secret_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
         // this is so epic
         ui.add_enabled_ui(!self.replay.actions.is_empty(), |ui| {
@@ -378,7 +454,7 @@ impl App {
                     self.export_litematic();
                 }
                 ui.checkbox(
-                    &mut self.litematic_export_releases,
+                    &mut self.conf.litematic_export_releases,
                     t!("secret.export_releases"),
                 );
             });
@@ -444,7 +520,7 @@ impl App {
             ui.label("Click type timings. The number is the delay between actions (in seconds). \
                     If the delay between the current and previous action is bigger than the specified \
                     timing, the corresponding click type is used.");
-            let t = &mut self.timings;
+            let t = &mut self.conf.timings;
             help_text(ui, "Hardclick/hardrelease timing", |ui| {
                 ui.add(egui::Slider::new(&mut t.hard, t.regular..=30.0).text(t!("replay.hard_timing")));
             });
@@ -463,7 +539,7 @@ impl App {
         ui.collapsing("Volume settings", |ui| {
             ui.label("General volume settings.");
 
-            let vol = &mut self.vol_settings;
+            let vol = &mut self.conf.vol_settings;
             help_text(ui, "Maximum volume variation for each action (+/-)", |ui| {
                 ui.add(
                     egui::Slider::new(&mut vol.volume_var, 0.0..=1.0)
@@ -486,7 +562,7 @@ impl App {
                     The maximum spam offset factor is the maximum value this factor can be.",
             );
 
-            let vol = &mut self.vol_settings;
+            let vol = &mut self.conf.vol_settings;
             ui.checkbox(&mut vol.enabled, t!("replay.enable_spam_volume_changes"));
 
             ui.add_enabled_ui(vol.enabled, |ui| {
@@ -522,7 +598,7 @@ impl App {
         });
 
         help_text(ui, "Sort actions by time", |ui| {
-            ui.checkbox(&mut self.sort_actions, "Sort actions");
+            ui.checkbox(&mut self.conf.sort_actions, "Sort actions");
         });
         ui.separator();
 
@@ -550,10 +626,10 @@ impl App {
                     if let Ok(replay_type) = replay_type {
                         // parse replay
                         let replay = Replay::build()
-                            .with_timings(self.timings)
-                            .with_vol_settings(self.vol_settings)
+                            .with_timings(self.conf.timings)
+                            .with_vol_settings(self.conf.vol_settings)
                             .with_extended(true)
-                            .with_sort_actions(self.sort_actions)
+                            .with_sort_actions(self.conf.sort_actions)
                             .parse(replay_type, &data);
 
                         if let Ok(replay) = replay {
@@ -628,9 +704,9 @@ impl App {
                 "Pitch variation can make clicks sound more realistic by \
                     changing their pitch randomly.",
             );
-            ui.checkbox(&mut self.pitch_enabled, "Enable pitch variation");
-            ui.add_enabled_ui(self.pitch_enabled, |ui| {
-                let p = &mut self.pitch;
+            ui.checkbox(&mut self.conf.pitch_enabled, "Enable pitch variation");
+            ui.add_enabled_ui(self.conf.pitch_enabled, |ui| {
+                let p = &mut self.conf.pitch;
                 help_text(ui, "Minimum pitch value. 1 = no change", |ui| {
                     ui.add(egui::Slider::new(&mut p.from, 0.0..=p.to).text("Minimum pitch"));
                 });
@@ -650,7 +726,7 @@ impl App {
         // samplerate edit field
         ui.collapsing("Other", |ui| {
             ui.horizontal(|ui| {
-                u32_edit_field(ui, &mut self.sample_rate);
+                u32_edit_field(ui, &mut self.conf.sample_rate);
                 help_text(
                     ui,
                     "Audio framerate.\nDon't touch this if you don't know what you're doing",
@@ -667,10 +743,10 @@ impl App {
             if let Some(dir) = FileDialog::new().pick_folder() {
                 log::info!("selected clickpack folder: {dir:?}");
 
-                let bot = if self.pitch_enabled {
-                    Bot::new(dir, self.pitch, self.sample_rate)
+                let bot = if self.conf.pitch_enabled {
+                    Bot::new(dir, self.conf.pitch, self.conf.sample_rate)
                 } else {
-                    Bot::new(dir, Pitch::default(), self.sample_rate)
+                    Bot::new(dir, Pitch::default(), self.conf.sample_rate)
                 };
 
                 if let Ok(bot) = bot {
@@ -714,10 +790,10 @@ impl App {
         let start = Instant::now();
         let segment = self.bot.borrow_mut().render_replay(
             &self.replay,
-            self.noise,
-            self.normalize,
-            if !self.expr_text.is_empty() && self.expr_error.is_empty() {
-                self.expr_variable
+            self.conf.noise,
+            self.conf.normalize,
+            if !self.conf.expr_text.is_empty() && self.expr_error.is_empty() {
+                self.conf.expr_variable
             } else {
                 ExprVariable::None
             },
@@ -796,14 +872,14 @@ impl App {
             ui.label("y =");
 
             // save current expression if the new expression on this frame is invalid
-            let prev_expr = self.expr_text.clone();
+            let prev_expr = self.conf.expr_text.clone();
 
-            if ui.text_edit_singleline(&mut self.expr_text).changed() {
+            if ui.text_edit_singleline(&mut self.conf.expr_text).changed() {
                 expr_updated = true;
 
                 // recompile expression, check for compile errors
                 let mut bot = self.bot.borrow_mut();
-                if let Err(e) = bot.compile_expression(&self.expr_text) {
+                if let Err(e) = bot.compile_expression(&self.conf.expr_text) {
                     self.expr_error = e.to_string();
                 } else {
                     self.expr_error.clear(); // clear errors
@@ -855,19 +931,19 @@ impl App {
             ui.horizontal(|ui| {
                 ui.label("Change:");
                 ui.radio_value(
-                    &mut self.expr_variable,
+                    &mut self.conf.expr_variable,
                     ExprVariable::Variation,
                     ExprVariable::Variation.to_string(),
                 )
                 .on_hover_text("Changes the bounds of the random volume offset");
                 ui.radio_value(
-                    &mut self.expr_variable,
+                    &mut self.conf.expr_variable,
                     ExprVariable::Value,
                     ExprVariable::Value.to_string(),
                 )
                 .on_hover_text("Changes the volume value (addition)");
                 ui.radio_value(
-                    &mut self.expr_variable,
+                    &mut self.conf.expr_variable,
                     ExprVariable::TimeOffset,
                     ExprVariable::TimeOffset.to_string(),
                 )
@@ -877,9 +953,12 @@ impl App {
 
         // plot data aspect
         ui.horizontal(|ui| {
-            ui.add(egui::Slider::new(&mut self.plot_data_aspect, 0.001..=30.0).text("Data aspect"));
+            ui.add(
+                egui::Slider::new(&mut self.conf.plot_data_aspect, 0.001..=30.0)
+                    .text("Data aspect"),
+            );
             if ui.button("Reset").clicked() {
-                self.plot_data_aspect = 20.;
+                self.conf.plot_data_aspect = 20.;
             }
         });
 
@@ -917,13 +996,13 @@ impl App {
             PlotPoints::Owned(self.plot_points.clone())
         };
 
-        let line = Line::new(plot_points).name(self.expr_variable.to_string());
+        let line = Line::new(plot_points).name(self.conf.expr_variable.to_string());
         ui.add_space(4.);
 
         ui.add_enabled_ui(self.expr_error.is_empty() && num_actions > 0, |ui| {
             let plot = Plot::new("volume_multiplier_plot")
                 .legend(Legend::default())
-                .data_aspect(self.plot_data_aspect)
+                .data_aspect(self.conf.plot_data_aspect)
                 .y_axis_width(4);
             plot.show(ui, |plot_ui| {
                 plot_ui.line(line);
@@ -975,23 +1054,21 @@ impl App {
         ui.separator();
 
         ui.collapsing("Audio settings", |ui| {
-            // volume variation slider
-            help_text(ui, "Maximum volume variation (+/-) of each click (generated randomly).\n0 = no volume variation.", |ui| {
-                ui.add(
-                    egui::Slider::new(&mut self.volume_var, -50.0..=50.0).text("Volume variation"),
-                );
-            });
+            // make sure we disable noise if the clickpack doesn't have it
+            if self.conf.noise && !self.bot.borrow().has_noise() {
+                self.conf.noise = false;
+            }
 
             // overlay noise checkbox
             ui.add_enabled_ui(self.bot.borrow().has_noise(), |ui| {
-                ui.checkbox(&mut self.noise, "Overlay noise")
+                ui.checkbox(&mut self.conf.noise, "Overlay noise")
                     .on_disabled_hover_text("Your clickpack doesn't have a noise file.")
                     .on_hover_text("Overlays the noise file that's in the clickpack directory.");
             });
-            ui.checkbox(&mut self.normalize, "Normalize audio")
+            ui.checkbox(&mut self.conf.normalize, "Normalize audio")
                 .on_hover_text(
-                    "Whether to normalize the output audio\n(make all samples to be in range of 0-1)",
-                );
+                "Whether to normalize the output audio\n(make all samples to be in range of 0-1)",
+            );
         });
 
         ui.collapsing("Advanced", |ui| {

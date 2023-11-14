@@ -2,6 +2,7 @@ use crate::{AudioSegment, ClickType, ExtendedAction, Player, Replay};
 use anyhow::Result;
 use fasteval::Compiler;
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
     path::PathBuf,
@@ -44,7 +45,7 @@ impl PlayerClicks {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct Pitch {
     pub from: f32,
     pub to: f32,
@@ -61,7 +62,7 @@ impl Default for Pitch {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct Timings {
     pub hard: f32,
     pub regular: f32,
@@ -80,7 +81,7 @@ impl Default for Timings {
 }
 
 /// Defines the variable that the volume expression should affect.
-#[derive(Debug, Copy, Clone, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Default)]
 pub enum ExprVariable {
     #[default]
     None,
@@ -106,7 +107,7 @@ impl ExprVariable {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct VolumeSettings {
     pub enabled: bool,
     pub spam_time: f32,
@@ -502,7 +503,7 @@ impl Bot {
             );
         }
 
-        if noise && self.noise.is_some() {
+        if noise && self.has_noise() {
             let mut noise_duration = Duration::from_secs(0);
             let noise_segment = self.noise.as_ref().unwrap();
 

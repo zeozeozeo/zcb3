@@ -35,6 +35,7 @@ egui_extras = { version = "0.23.0", features = ["image"] }
 rustmatica = "0.1.1"
 rust-i18n = "2.2.1"
 egui_plot = "0.23.0"
+serde = "1.0.192"
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]
