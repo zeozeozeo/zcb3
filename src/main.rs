@@ -1,7 +1,7 @@
 mod gui;
 use bot::*;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use std::{
     io::Read,
     path::{Path, PathBuf},
@@ -14,6 +14,31 @@ i18n!("locales");
 pub mod built_info {
     // the file has been placed there by the build script.
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
+
+#[derive(ValueEnum, Debug, Clone)]
+enum ArgExprVariable {
+    None,
+    Variation,
+    Value,
+    TimeOffset,
+}
+
+impl Into<ExprVariable> for ArgExprVariable {
+    fn into(self) -> ExprVariable {
+        match self {
+            Self::None => ExprVariable::None,
+            Self::Variation => ExprVariable::Variation,
+            Self::Value => ExprVariable::Value,
+            Self::TimeOffset => ExprVariable::TimeOffset,
+        }
+    }
+}
+
+impl ToString for ArgExprVariable {
+    fn to_string(&self) -> String {
+        format!("{:?}", self)
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -101,14 +126,10 @@ struct Args {
     sample_rate: u32,
     #[arg(long, help = "Sort actions by time / frame", default_value_t = true)]
     sort_actions: bool,
-    #[arg(long, help = "Volume variation expression", default_value_t = String::new())]
+    #[arg(long, help = "Volume expression", default_value_t = String::new())]
     volume_expr: String,
-    #[arg(
-        long,
-        help = "Change volume value instead of variation",
-        default_value_t = false
-    )]
-    expr_change_volume: bool,
+    #[arg(long, help = "The variable that the expression should affect", default_value_t = ArgExprVariable::None)]
+    expr_variable: ArgExprVariable,
 }
 
 #[cfg(windows)]
@@ -224,8 +245,11 @@ fn run_cli(mut args: Args) {
         &replay,
         args.noise,
         args.normalize,
-        !args.volume_expr.is_empty(),
-        args.expr_change_volume,
+        if !args.volume_expr.is_empty() {
+            args.expr_variable.into()
+        } else {
+            ExprVariable::None
+        },
     );
 
     // save

@@ -1,18 +1,21 @@
 use crate::built_info;
 use anyhow::{Context, Result};
-use bot::{Bot, ExtendedAction, Pitch, Replay, ReplayType, Timings, VolumeSettings};
+use bot::{Bot, ExprVariable, ExtendedAction, Pitch, Replay, ReplayType, Timings, VolumeSettings};
 use eframe::{
-    egui::{self, Key},
+    egui::{self, Key, RichText},
     epaint::Color32,
     IconData,
 };
 use egui_modal::{Icon, Modal};
+use egui_plot::PlotPoint;
 use image::io::Reader as ImageReader;
 use rfd::FileDialog;
 use rust_i18n::t;
 use serde_json::Value;
 use std::{cell::RefCell, io::Cursor, rc::Rc, time::Instant};
 use std::{io::Read, path::PathBuf};
+
+const MAX_PLOT_POINTS: usize = 4096;
 
 pub fn run_gui() -> Result<(), eframe::Error> {
     rust_i18n::set_locale("en");
@@ -63,21 +66,6 @@ impl Stage {
     }
 }
 
-#[derive(PartialEq)]
-enum VolumeVariable {
-    Variation,
-    Value,
-}
-
-impl ToString for VolumeVariable {
-    fn to_string(&self) -> String {
-        match self {
-            Self::Variation => "Volume variation".to_string(),
-            Self::Value => "Volume value".to_string(),
-        }
-    }
-}
-
 // #[derive(Debug)]
 struct App {
     stage: Stage,
@@ -98,10 +86,10 @@ struct App {
     sample_rate: u32,
     expr_text: String,
     expr_error: String,
-    volume_variable: VolumeVariable,
+    expr_variable: ExprVariable,
     sort_actions: bool,
     plot_data_aspect: f32,
-    frame_bias_range: (i64, i64),
+    plot_points: Vec<PlotPoint>,
 }
 
 impl Default for App {
@@ -125,14 +113,15 @@ impl Default for App {
             sample_rate: 44100,
             expr_text: String::new(),
             expr_error: String::new(),
-            volume_variable: VolumeVariable::Variation,
+            expr_variable: ExprVariable::Variation,
             sort_actions: true,
             plot_data_aspect: 20.0,
-            frame_bias_range: (0, 0),
+            plot_points: vec![],
         }
     }
 }
 
+/// Value is always min clamped with 1.
 fn u32_edit_field(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
     let mut tmp_value = format!("{value}");
     let res = ui.text_edit_singleline(&mut tmp_value);
@@ -142,6 +131,7 @@ fn u32_edit_field(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
     res
 }
 
+/*
 fn i64_edit_field(ui: &mut egui::Ui, value: &mut i64) -> egui::Response {
     let mut tmp_value = format!("{value}");
     let res = ui.text_edit_singleline(&mut tmp_value);
@@ -150,6 +140,7 @@ fn i64_edit_field(ui: &mut egui::Ui, value: &mut i64) -> egui::Response {
     }
     res
 }
+*/
 
 fn help_text<R>(ui: &mut egui::Ui, help: &str, add_contents: impl FnOnce(&mut egui::Ui) -> R) {
     ui.horizontal(|ui| {
@@ -530,26 +521,6 @@ impl App {
             });
         });
 
-        ui.collapsing("Frame bias", |ui| {
-            ui.label(
-                "The frame bias is the minimum and maximum frame offset for each click (+/-). \
-                    This can be used to position actions inaccurately. The value of the \
-                    frame offset is generated randomly in this range.",
-            );
-            ui.horizontal(|ui| {
-                i64_edit_field(ui, &mut self.frame_bias_range.0);
-                help_text(ui, "Minimum frame offset", |ui| {
-                    ui.label("Min offset");
-                });
-            });
-            ui.horizontal(|ui| {
-                i64_edit_field(ui, &mut self.frame_bias_range.1);
-                help_text(ui, "Maximum frame offset", |ui| {
-                    ui.label("Max offset");
-                });
-            });
-        });
-
         help_text(ui, "Sort actions by time", |ui| {
             ui.checkbox(&mut self.sort_actions, "Sort actions");
         });
@@ -578,19 +549,12 @@ impl App {
 
                     if let Ok(replay_type) = replay_type {
                         // parse replay
-                        let mut replay = Replay::build()
+                        let replay = Replay::build()
                             .with_timings(self.timings)
                             .with_vol_settings(self.vol_settings)
                             .with_extended(true)
-                            .with_sort_actions(self.sort_actions);
-
-                        // set frame bias range if changed
-                        if self.frame_bias_range != (0, 0) {
-                            replay = replay
-                                .with_frame_bias(self.frame_bias_range.0..=self.frame_bias_range.1);
-                        }
-
-                        let replay = replay.parse(replay_type, &data);
+                            .with_sort_actions(self.sort_actions)
+                            .parse(replay_type, &data);
 
                         if let Ok(replay) = replay {
                             self.replay = replay;
@@ -752,8 +716,11 @@ impl App {
             &self.replay,
             self.noise,
             self.normalize,
-            !self.expr_text.is_empty() && self.expr_error.is_empty(),
-            self.volume_variable == VolumeVariable::Value,
+            if !self.expr_text.is_empty() && self.expr_error.is_empty() {
+                self.expr_variable
+            } else {
+                ExprVariable::None
+            },
         );
         let end = start.elapsed();
         log::info!("rendered in {end:?}");
@@ -791,6 +758,183 @@ impl App {
             )),
             Some(Icon::Success),
         );
+    }
+
+    fn show_plot(&mut self, ui: &mut egui::Ui) {
+        ui.label(
+            "Input a mathematical expression to change the volume multiplier \
+                depending on some variables.",
+        );
+        ui.collapsing("Defined variables", |ui| {
+            ui.label("• frame: Current frame");
+            ui.label("• x: Player X position");
+            ui.label("• y: Player Y position");
+            ui.label("• p: Percentage in level, 0-1");
+            ui.label("• player2: 1 if player 2, 0 if player 1");
+            ui.label("• rot: Player rotation");
+            ui.label("• accel: Player Y acceleration");
+            ui.label("• down: Whether the mouse is down, 1 or 0");
+            ui.label("• fps: The FPS of the replay");
+            ui.label("• time: Elapsed time in level, in seconds");
+            ui.label("• frames: Total amount of frames in replay");
+            ui.label("• level_time: Total time in level, in seconds");
+            ui.label("• rand: Random value in the range of 0 to 1");
+            ui.label(
+                RichText::new(
+                    "NOTE: Some variables may not be set due to different replay formats",
+                )
+                .color(Color32::YELLOW),
+            );
+        });
+        ui.label("x = action index");
+        ui.label("Example expression: sqrt(p) + sin(p) / 10");
+        ui.separator();
+
+        let mut expr_updated = false;
+
+        ui.horizontal(|ui| {
+            ui.label("y =");
+
+            // save current expression if the new expression on this frame is invalid
+            let prev_expr = self.expr_text.clone();
+
+            if ui.text_edit_singleline(&mut self.expr_text).changed() {
+                expr_updated = true;
+
+                // recompile expression, check for compile errors
+                let mut bot = self.bot.borrow_mut();
+                if let Err(e) = bot.compile_expression(&self.expr_text) {
+                    self.expr_error = e.to_string();
+                } else {
+                    self.expr_error.clear(); // clear errors
+
+                    // update namespace so we can check for undefined variables
+                    bot.update_namespace(
+                        &ExtendedAction::default(),
+                        self.replay.last_frame(),
+                        self.replay.fps as _,
+                    );
+
+                    if let Err(e) = bot.eval_expr() {
+                        self.expr_error = e.to_string();
+                    }
+                }
+
+                // if an error has occured, use the expression from the previous changed() event
+                // FIXME: this won't work if the previous event also had an invalid expression
+                if !self.expr_error.is_empty() {
+                    let _ = bot.compile_expression(&prev_expr);
+                }
+            }
+        });
+
+        // display error message if any
+        if !self.expr_error.is_empty() {
+            ui.add_space(4.);
+            ui.label(
+                egui::RichText::new(format!("ERROR: {}", self.expr_error))
+                    .strong()
+                    .color(Color32::LIGHT_RED),
+            );
+        }
+
+        // display plot
+        use egui_plot::{Legend, Line, Plot, PlotPoints};
+
+        let num_actions = self.replay.extended.len();
+        if num_actions == 0 {
+            ui.label(
+                egui::RichText::new("NOTE: You don't have a replay loaded")
+                    .strong()
+                    .color(Color32::YELLOW),
+            );
+        }
+
+        // what variable to change
+        help_text(ui, "The variable that the expression should affect", |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Change:");
+                ui.radio_value(
+                    &mut self.expr_variable,
+                    ExprVariable::Variation,
+                    ExprVariable::Variation.to_string(),
+                )
+                .on_hover_text("Changes the bounds of the random volume offset");
+                ui.radio_value(
+                    &mut self.expr_variable,
+                    ExprVariable::Value,
+                    ExprVariable::Value.to_string(),
+                )
+                .on_hover_text("Changes the volume value (addition)");
+                ui.radio_value(
+                    &mut self.expr_variable,
+                    ExprVariable::TimeOffset,
+                    ExprVariable::TimeOffset.to_string(),
+                )
+                .on_hover_text("Offsets the time of the action");
+            });
+        });
+
+        // plot data aspect
+        ui.horizontal(|ui| {
+            ui.add(egui::Slider::new(&mut self.plot_data_aspect, 0.001..=30.0).text("Data aspect"));
+            if ui.button("Reset").clicked() {
+                self.plot_data_aspect = 20.;
+            }
+        });
+
+        let plot_points = if expr_updated {
+            // compute a brand new set of points
+            let points = PlotPoints::from_parametric_callback(
+                |t| {
+                    if num_actions == 0 {
+                        return (0., 0.);
+                    }
+
+                    let idx = (t as usize).min(num_actions - 1);
+                    let action = self.replay.extended[idx];
+
+                    // update namespace
+                    // we can use `self.bot` here because it is an Rc<RefCell<>>
+                    self.bot.borrow_mut().update_namespace(
+                        &action,
+                        self.replay.last_frame(),
+                        self.replay.fps as _,
+                    );
+
+                    // compute the expression for this action
+                    let value = self.bot.borrow_mut().eval_expr().unwrap_or(0.);
+                    (t, value)
+                },
+                0.0..num_actions as f64,
+                num_actions.min(MAX_PLOT_POINTS),
+            );
+            self.plot_points = points.points().to_vec(); // save in cache
+            points
+        } else {
+            // this clone is really expensive, but it is faster than
+            // recomputing the entire set of points each frame
+            PlotPoints::Owned(self.plot_points.clone())
+        };
+
+        let line = Line::new(plot_points).name(self.expr_variable.to_string());
+        ui.add_space(4.);
+
+        ui.add_enabled_ui(self.expr_error.is_empty() && num_actions > 0, |ui| {
+            let plot = Plot::new("volume_multiplier_plot")
+                .legend(Legend::default())
+                .data_aspect(self.plot_data_aspect)
+                .y_axis_width(4);
+            plot.show(ui, |plot_ui| {
+                plot_ui.line(line);
+            })
+            .response
+            .on_disabled_hover_text(if num_actions == 0 {
+                "Please load a replay"
+            } else {
+                "The expression is invalid"
+            });
+        });
     }
 
     fn show_render_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -851,139 +995,7 @@ impl App {
         });
 
         ui.collapsing("Advanced", |ui| {
-            ui.label(
-                "Input a mathematical expression to change the volume multiplier \
-                    depending on some variables.",
-            );
-            ui.label(
-                "Defined variables: frame, x (xpos), y (ypos), p (% in level, 0 to 1), \
-                    player2 (1 if player 2, 0 if player 1), rot (player rotation), \
-                    accel (player y acceleration), down (whether the mouse is down, 1 or 0), \
-                    fps (frames per second), time (in seconds), frames (total frames in replay), \
-                    level_time (total time in level)",
-            );
-            ui.label("Some variables may not be set due to different replay formats");
-            ui.label("x = action index");
-            ui.label("Example expression: sqrt(p) + sin(p) / 10");
-            ui.separator();
-
-            ui.horizontal(|ui| {
-                ui.label("y =");
-
-                // save current expression if the new expression on this frame is invalid
-                let prev_expr = self.expr_text.clone();
-
-                if ui.text_edit_singleline(&mut self.expr_text).changed() {
-                    // recompile expression, check for compile errors
-                    let mut bot = self.bot.borrow_mut();
-                    if let Err(e) = bot.compile_expression(&self.expr_text) {
-                        self.expr_error = e.to_string();
-                    } else {
-                        self.expr_error.clear(); // clear errors
-
-                        // update namespace so we can check for undefined variables
-                        bot.update_namespace(
-                            &ExtendedAction::default(),
-                            self.replay.last_frame(),
-                            self.replay.fps as _,
-                        );
-
-                        if let Err(e) = bot.eval_expr() {
-                            self.expr_error = e.to_string();
-                        }
-                    }
-
-                    // if an error has occured, use the expression from the previous changed() event
-                    // FIXME: this won't work if the previous event also had an invalid expression
-                    if !self.expr_error.is_empty() {
-                        let _ = bot.compile_expression(&prev_expr);
-                    }
-                }
-            });
-
-            // display error message if any
-            if !self.expr_error.is_empty() {
-                ui.add_space(4.);
-                ui.label(
-                    egui::RichText::new(format!("ERROR: {}", self.expr_error))
-                        .strong()
-                        .color(Color32::LIGHT_RED),
-                );
-            }
-
-            // display plot
-            use egui_plot::{Legend, Line, Plot, PlotPoints};
-
-            let num_actions = self.replay.extended.len();
-            if num_actions == 0 {
-                ui.label(
-                    egui::RichText::new("NOTE: You don't have a replay loaded")
-                        .strong()
-                        .color(Color32::YELLOW),
-                );
-            }
-
-            // what variable to change
-            ui.horizontal(|ui| {
-                ui.label("Change:");
-                ui.radio_value(
-                    &mut self.volume_variable,
-                    VolumeVariable::Variation,
-                    VolumeVariable::Variation.to_string(),
-                );
-                ui.radio_value(
-                    &mut self.volume_variable,
-                    VolumeVariable::Value,
-                    VolumeVariable::Value.to_string(),
-                );
-            });
-
-            // plot data aspect
-            ui.horizontal(|ui| {
-                ui.add(
-                    egui::Slider::new(&mut self.plot_data_aspect, 0.001..=30.0).text("Data aspect"),
-                );
-                if ui.button("Reset").clicked() {
-                    self.plot_data_aspect = 20.;
-                }
-            });
-
-            let line = Line::new(PlotPoints::from_parametric_callback(
-                // we can use `self.bot` here because it is an Rc<RefCell<>>
-                |t| {
-                    if num_actions == 0 {
-                        return (0., 0.);
-                    }
-
-                    let idx = (t as usize).min(num_actions - 1);
-                    let action = self.replay.extended[idx];
-
-                    // update namespace
-                    self.bot.borrow_mut().update_namespace(
-                        &action,
-                        self.replay.last_frame(),
-                        self.replay.fps as _,
-                    );
-
-                    // compute the expression for this action
-                    (t, self.bot.borrow_mut().eval_expr().unwrap_or(0.))
-                },
-                0.0..num_actions as f64,
-                num_actions.min(3000),
-            ))
-            .name(self.volume_variable.to_string());
-
-            ui.add_space(4.);
-
-            ui.add_enabled_ui(self.expr_error.is_empty() && num_actions > 0, |ui| {
-                let plot = Plot::new("volume_multiplier_plot")
-                    .legend(Legend::default())
-                    .data_aspect(self.plot_data_aspect)
-                    .y_axis_width(4);
-                plot.show(ui, |plot_ui| {
-                    plot_ui.line(line);
-                });
-            });
+            self.show_plot(ui);
         });
 
         ui.separator();

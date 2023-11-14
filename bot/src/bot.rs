@@ -79,6 +79,33 @@ impl Default for Timings {
     }
 }
 
+/// Defines the variable that the volume expression should affect.
+#[derive(Debug, Copy, Clone, PartialEq, Default)]
+pub enum ExprVariable {
+    #[default]
+    None,
+    Variation,
+    Value,
+    TimeOffset,
+}
+
+impl ToString for ExprVariable {
+    fn to_string(&self) -> String {
+        match self {
+            Self::None => "None".to_string(),
+            Self::Variation => "Volume variation".to_string(),
+            Self::Value => "Volume value".to_string(),
+            Self::TimeOffset => "Time offset".to_string(),
+        }
+    }
+}
+
+impl ExprVariable {
+    pub const fn is_volume_change(self) -> bool {
+        matches!(self, Self::Variation | Self::Value)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VolumeSettings {
     pub enabled: bool,
@@ -387,6 +414,8 @@ impl Bot {
         self.ns.insert("frames".to_string(), total_frames as _);
         self.ns
             .insert("level_time".to_string(), total_frames as f64 / fps);
+        self.ns
+            .insert("rand".to_string(), rand::thread_rng().gen_range(0.0..=1.0));
     }
 
     pub fn eval_expr(&mut self) -> Result<f64> {
@@ -413,22 +442,31 @@ impl Bot {
         replay: &Replay,
         noise: bool,
         normalize: bool,
-        use_expr: bool,
-        expr_change_volume_value: bool,
+        expr_var: ExprVariable,
     ) -> AudioSegment {
         log::info!(
             "starting render, {} actions, noise: {noise}",
             replay.actions.len()
         );
 
-        let mut segment =
-            AudioSegment::silent(self.sample_rate, replay.duration + self.longest_click);
+        let longest_time_offset = if expr_var == ExprVariable::TimeOffset {
+            self.expr_range(&replay).1 as f32
+        } else {
+            0.
+        };
+
+        let mut segment = AudioSegment::silent(
+            self.sample_rate,
+            replay.duration + self.longest_click + longest_time_offset,
+        );
         let start = Instant::now();
 
         for action in &replay.actions {
             // calculate the volume from the expression if needed
-            let expr_vol = if use_expr {
+            let (expr_vol, time_offset) = if expr_var != ExprVariable::None {
                 // get extended action
+                // FIXME: this is very wasteful, currently we binary search the entire
+                //        actions array each time
                 let extended = replay
                     .extended
                     .binary_search_by(|a| a.frame.cmp(&action.frame))
@@ -439,23 +477,29 @@ impl Bot {
                     .copied()
                     .unwrap_or(ExtendedAction::default());
 
+                // compute expression
                 self.update_namespace(&extended, replay.last_frame(), replay.fps.into());
-                let vol = self.eval_expr().unwrap_or(0.) as f32;
-                if expr_change_volume_value {
-                    vol
-                } else {
-                    rand::thread_rng().gen_range(0.0..=vol)
+                let value = self.eval_expr().unwrap_or(0.) as f32;
+
+                match expr_var {
+                    ExprVariable::Value => (value, 0.),
+                    ExprVariable::Variation => (rand::thread_rng().gen_range(0.0..=value), 0.),
+                    ExprVariable::TimeOffset => (0., value),
+                    _ => unreachable!(),
                 }
             } else {
-                0.
+                (0., 0.)
             };
-
             let click = self
                 .get_random_click(action.player, action.click)
                 .random_pitch(); // if no pitch table is generated, returns self
 
             // overlay
-            segment.overlay_at_vol(action.time, click, 1.0 + action.vol_offset + expr_vol);
+            segment.overlay_at_vol(
+                action.time + time_offset,
+                click,
+                1.0 + action.vol_offset + expr_vol,
+            );
         }
 
         if noise && self.noise.is_some() {

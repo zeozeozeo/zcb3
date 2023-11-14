@@ -3,10 +3,7 @@ use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use rand::Rng;
 use serde_json::Value;
-use std::{
-    io::{Cursor, Read, Write},
-    ops::RangeInclusive,
-};
+use std::io::{Cursor, Read, Write};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
@@ -195,8 +192,6 @@ pub struct Replay {
     timings: Timings,
     vol_settings: VolumeSettings,
 
-    /// Frame offset (range, generated randomly).
-    frame_bias: Option<RangeInclusive<i64>>,
     /// Whether to sort actions.
     sort_actions: bool,
 }
@@ -389,11 +384,6 @@ impl Replay {
         self
     }
 
-    pub fn with_frame_bias(mut self, frame_bias: RangeInclusive<i64>) -> Self {
-        self.frame_bias = Some(frame_bias);
-        self
-    }
-
     pub fn parse(mut self, typ: ReplayType, data: &[u8]) -> Result<Self> {
         log::debug!("parsing replay, strlen {}, replay type {typ:?}", data.len());
 
@@ -457,17 +447,6 @@ impl Replay {
         Ok(self)
     }
 
-    #[inline(always)]
-    fn get_frame_with_frame_offset(&self, frame: u32) -> u32 {
-        let offset = if let Some(bias) = self.frame_bias.clone() {
-            rand::thread_rng().gen_range(bias) as i64
-        } else {
-            return frame;
-        };
-
-        (frame as i64 + offset).max(0) as u32
-    }
-
     fn process_action_p1(&mut self, time: f32, down: bool, frame: u32) {
         // if action is the same, skip it
         if let Some(typ) = self.prev_action.0 {
@@ -481,13 +460,8 @@ impl Replay {
 
         self.prev_time.0 = time;
         self.prev_action.0 = Some(typ);
-        self.actions.push(Action::new(
-            time,
-            Player::One,
-            typ,
-            vol_offset,
-            self.get_frame_with_frame_offset(frame),
-        ))
+        self.actions
+            .push(Action::new(time, Player::One, typ, vol_offset, frame))
     }
 
     // .0 is changed to .1 here, because it's the second player
@@ -503,13 +477,8 @@ impl Replay {
 
         self.prev_time.1 = time;
         self.prev_action.1 = Some(typ);
-        self.actions.push(Action::new(
-            time,
-            Player::Two,
-            typ,
-            vol_offset,
-            self.get_frame_with_frame_offset(frame),
-        ))
+        self.actions
+            .push(Action::new(time, Player::Two, typ, vol_offset, frame))
     }
 
     fn extended_p1(&mut self, down: bool, frame: u32, x: f32, y: f32, y_accel: f32, rot: f32) {
@@ -517,7 +486,7 @@ impl Replay {
             self.extended.push(ExtendedAction {
                 player2: false,
                 down,
-                frame: self.get_frame_with_frame_offset(frame),
+                frame,
                 x,
                 y,
                 y_accel,
@@ -544,7 +513,7 @@ impl Replay {
             self.extended.push(ExtendedAction {
                 player2: true,
                 down,
-                frame: self.get_frame_with_frame_offset(frame),
+                frame,
                 x,
                 y,
                 y_accel,
