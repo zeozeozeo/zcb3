@@ -134,6 +134,7 @@ struct App {
     char_idx: u8,
     expr_error: String,
     plot_points: Vec<PlotPoint>,
+    update_tags: Option<(usize, usize, String)>,
 }
 
 impl Default for App {
@@ -149,6 +150,7 @@ impl Default for App {
             char_idx: 0,
             expr_error: String::new(),
             plot_points: vec![],
+            update_tags: None,
         }
     }
 }
@@ -182,7 +184,7 @@ fn help_text<R>(ui: &mut egui::Ui, help: &str, add_contents: impl FnOnce(&mut eg
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         ctx.input(|i| {
             use Key::*;
             const BOYKISSER: [Key; 9] = [B, O, Y, K, I, S, S, E, R];
@@ -220,7 +222,8 @@ impl eframe::App for App {
         });
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            let mut dialog = Modal::new(ctx, "update_and_config_dialog");
+            let mut dialog = Modal::new(ctx, "config_dialog");
+            let mut modal = Modal::new(ctx, "update_modal");
 
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.add_space(2.0);
@@ -238,7 +241,7 @@ impl eframe::App for App {
                         .on_hover_text(t!("bottombar.check_for_updates"))
                         .clicked()
                     {
-                        self.do_update_check(&dialog);
+                        self.do_update_check(&modal);
                     }
                     ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
 
@@ -262,6 +265,9 @@ impl eframe::App for App {
             });
 
             dialog.show_dialog();
+            modal.show_dialog();
+
+            self.show_update_check_modal(&modal, frame);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -279,9 +285,11 @@ impl eframe::App for App {
     }
 }
 
-fn get_latest_tag() -> Result<usize> {
+const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/37.0.2062.94 Chrome/37.0.2062.94 Safari/537.36";
+
+fn get_latest_tag() -> Result<(usize, String)> {
     let client = reqwest::blocking::Client::builder()
-        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/37.0.2062.94 Chrome/37.0.2062.94 Safari/537.36")
+        .user_agent(USER_AGENT)
         .build()?;
     let resp = client
         .get("https://api.github.com/repos/zeozeozeo/zcb3/tags")
@@ -293,12 +301,65 @@ fn get_latest_tag() -> Result<usize> {
     let tags = v.as_array().context("not an array")?;
     let latest_tag = tags.get(0).context("couldn't latest tags")?;
     let name = latest_tag.get("name").context("couldn't get tag name")?;
+    let tagname = name.as_str().context("tag name is not a string")?;
 
-    Ok(name
-        .as_str()
-        .context("tag name is not a string")?
-        .replace('.', "")
-        .parse()?)
+    Ok((tagname.replace('.', "").parse()?, tagname.to_string()))
+}
+
+fn update_to_tag(tag: &str) -> Result<()> {
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(USER_AGENT)
+        .build()?;
+    let resp = client
+        .get("https://api.github.com/repos/zeozeozeo/zcb3/releases/tags/3.2.0")
+        .send()?
+        .text()?;
+    let v: Value = serde_json::from_str(&resp)?;
+
+    let filename = if cfg!(windows) {
+        "zcb3.exe"
+    } else if cfg!(macos) {
+        "zcb3_macos"
+    } else {
+        anyhow::bail!("unsupported on this platform");
+    };
+
+    // search for the required asset
+    let asset_url: Option<&str> = v["assets"]
+        .as_array()
+        .context("failed to get 'assets' array")?
+        .iter()
+        .map(|v| v["browser_download_url"].as_str().unwrap_or(""))
+        .find(|url| url.contains(filename));
+
+    if let Some(url) = asset_url {
+        let resp = client.get(url).send()?.bytes()?;
+
+        // generate random string
+        use rand::Rng;
+        let random_str: String = rand::thread_rng()
+            .sample_iter(&rand::distributions::Alphanumeric)
+            .take(7)
+            .map(char::from)
+            .collect();
+
+        let new_binary = format!(
+            "zcb3_update_{tag}_{random_str}{}",
+            if cfg!(windows) { ".exe" } else { "" }
+        );
+        std::fs::write(&new_binary, resp)?;
+
+        // replace executable
+        self_replace::self_replace(&new_binary)?;
+
+        if std::path::Path::new(&new_binary).try_exists()? {
+            std::fs::remove_file(new_binary)?;
+        }
+    } else {
+        anyhow::bail!("failed to find required asset for tag {tag} (filename: {filename})")
+    }
+
+    Ok(())
 }
 
 fn get_current_tag() -> usize {
@@ -306,24 +367,61 @@ fn get_current_tag() -> usize {
 }
 
 impl App {
-    fn do_update_check(&mut self, dialog: &Modal) {
+    fn show_update_check_modal(&mut self, modal: &Modal, frame: &mut eframe::Frame) {
+        let Some((tag, current_tag, tag_string)) = self.update_tags.clone() else {
+            return;
+        };
+        modal.show(|ui| {
+            modal.title(ui, "New version available");
+            modal.frame(ui, |ui| {
+                modal.body_and_icon(ui, format!("A new version of ZCB is available (latest: {tag}, this: {current_tag}).\n\
+                                    Download the new version on the GitHub page, Discord server or use the auto-updater."),
+                                    Icon::Info);
+            });
+            modal.buttons(ui, |ui| {
+                if modal.button(ui, "auto-update")
+                    .on_hover_text("Automatically update to the newest version.\n\
+                                    This might take some time!\n\
+                                    You might have to restart ZCB.")
+                    .clicked()
+                {
+                    if let Err(e) = update_to_tag(&tag_string) {
+                        modal.open_dialog(
+                            Some("Failed to perform auto-update"),
+                            Some(format!("{e}. Try updating manually.")),
+                            Some(Icon::Error),
+                        );
+                    }
+                    self.update_tags = None;
+                    frame.close();
+                }
+                if modal.button(ui, "close").clicked() {
+                    self.update_tags = None;
+                }
+            });
+        });
+    }
+
+    fn do_update_check(&mut self, modal: &Modal) {
         let latest_tag = get_latest_tag();
         let current_tag = get_current_tag();
 
-        if let Ok(tag) = latest_tag {
+        if let Ok((tag, tag_str)) = latest_tag {
             log::info!("latest tag: {tag}, current tag {current_tag}");
             if tag > current_tag {
-                dialog.open_dialog(
-                    Some(t!("update.new_version_title")),
-                    Some(t!(
-                        "update.new_version_body",
-                        tag = tag,
-                        current_tag = current_tag,
-                    )),
-                    Some(Icon::Info),
-                );
+                // dialog.open_dialog(
+                //     Some(t!("update.new_version_title")),
+                //     Some(t!(
+                //         "update.new_version_body",
+                //         tag = tag,
+                //         current_tag = current_tag,
+                //     )),
+                //     Some(Icon::Info),
+                // );
+                self.update_tags = Some((tag, current_tag, tag_str));
+                modal.open();
             } else {
-                dialog.open_dialog(
+                modal.open_dialog(
                     Some(t!("update.up_to_date_title")),
                     Some(t!("update.up_to_date_body")),
                     Some(Icon::Success),
@@ -331,7 +429,7 @@ impl App {
             }
         } else if let Err(e) = latest_tag {
             log::error!("failed to check for updates: {e}");
-            dialog.open_dialog(
+            modal.open_dialog(
                 Some(t!("update.failed_to_check")),
                 Some(e),
                 Some(Icon::Error),
