@@ -313,7 +313,10 @@ fn update_to_tag(tag: &str) -> Result<()> {
         .user_agent(USER_AGENT)
         .build()?;
     let resp = client
-        .get("https://api.github.com/repos/zeozeozeo/zcb3/releases/tags/3.2.0")
+        .get(format!(
+            "https://api.github.com/repos/zeozeozeo/zcb3/releases/tags/{})",
+            tag.trim()
+        ))
         .send()?
         .text()?;
     let v: Value = serde_json::from_str(&resp)?;
