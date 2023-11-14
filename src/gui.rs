@@ -135,6 +135,7 @@ struct App {
     expr_error: String,
     plot_points: Vec<PlotPoint>,
     update_tags: Option<(usize, usize, String)>,
+    update_expr: bool,
 }
 
 impl Default for App {
@@ -151,6 +152,7 @@ impl Default for App {
             expr_error: String::new(),
             plot_points: vec![],
             update_tags: None,
+            update_expr: false,
         }
     }
 }
@@ -537,6 +539,8 @@ impl App {
         {
             if let Err(e) = self.conf.load(&file) {
                 dialog.open_dialog(Some("Failed to load config"), Some(e), Some(Icon::Error));
+            } else {
+                self.update_expr = true;
             }
         } else {
             dialog.open_dialog(
@@ -971,7 +975,7 @@ impl App {
         ui.label("Example expression: sqrt(p) + sin(p) / 10");
         ui.separator();
 
-        let mut expr_updated = false;
+        let mut expr_changed = false;
 
         ui.horizontal(|ui| {
             ui.label("y =");
@@ -979,8 +983,9 @@ impl App {
             // save current expression if the new expression on this frame is invalid
             let prev_expr = self.conf.expr_text.clone();
 
-            if ui.text_edit_singleline(&mut self.conf.expr_text).changed() {
-                expr_updated = true;
+            if ui.text_edit_singleline(&mut self.conf.expr_text).changed() || self.update_expr {
+                expr_changed = true;
+                self.update_expr = false;
 
                 // recompile expression, check for compile errors
                 let mut bot = self.bot.borrow_mut();
@@ -1067,7 +1072,7 @@ impl App {
             }
         });
 
-        let plot_points = if expr_updated {
+        let plot_points = if expr_changed {
             // compute a brand new set of points
             let points = PlotPoints::from_parametric_callback(
                 |t| {
