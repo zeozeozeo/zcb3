@@ -747,6 +747,7 @@ impl App {
                         if let Ok(replay) = replay {
                             self.replay = replay;
                             self.stage = Stage::SelectClickpack;
+                            self.update_expr = true;
                         } else if let Err(e) = replay {
                             dialog.open_dialog(
                                 Some(t!("replay.failed_to_parse_title")),
