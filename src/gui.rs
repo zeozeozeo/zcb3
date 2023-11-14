@@ -13,7 +13,7 @@ use rfd::FileDialog;
 use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{cell::RefCell, io::Cursor, rc::Rc, time::Instant};
+use std::{cell::RefCell, io::Cursor, time::Instant};
 use std::{io::Read, path::PathBuf};
 
 const MAX_PLOT_POINTS: usize = 4096;
@@ -127,7 +127,7 @@ struct App {
     conf: Config,
     stage: Stage,
     replay: Replay,
-    bot: Rc<RefCell<Bot>>,
+    bot: RefCell<Bot>,
     output: Option<PathBuf>,
     // autocutter: AutoCutter,
     last_chars: [Key; 9],
@@ -144,7 +144,7 @@ impl Default for App {
             conf: Config::default(),
             stage: Stage::default(),
             replay: Replay::default(),
-            bot: Rc::new(RefCell::new(Bot::default())),
+            bot: RefCell::new(Bot::default()),
             output: None,
             // autocutter: AutoCutter::default(),
             last_chars: [Key::A; 9],
@@ -863,7 +863,7 @@ impl App {
                 };
 
                 if let Ok(bot) = bot {
-                    self.bot = Rc::new(RefCell::new(bot));
+                    self.bot = RefCell::new(bot);
                     self.stage = Stage::Render;
                 } else if let Err(e) = bot {
                     dialog.open_dialog(

@@ -332,14 +332,18 @@ impl AudioSegment {
         self.data.len() - idx
     }
 
-    pub fn get_preview_data(&self, displayed_samples: usize, time: Duration) -> Vec<f32> {
-        let start = self.get_sample_index_which_was_a_duration_ago(time);
-        let samples_after = self.samples_after_index(start);
-        let mut step = samples_after / displayed_samples;
-        // make sure step is aligned to NUM_CHANNELS
-        step -= step % Self::NUM_CHANNELS;
+    pub fn remove_silence_before(&mut self, threshold: f32) {
+        let mut idx = 0;
+        for (i, v) in self.data.chunks(2).enumerate() {
+            let avg = (v[0] + v[1]) / 2.; // avg of l and r channels
+            if avg.abs() > threshold {
+                idx = i * 2;
+                break;
+            }
+        }
 
-        self.data[start..].iter().step_by(step).copied().collect()
+        // remove all values upto index
+        self.data.drain(..idx);
     }
 
     /*

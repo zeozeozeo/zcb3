@@ -155,7 +155,9 @@ fn read_clicks_in_directory(dir: PathBuf, pitch: Pitch, sample_rate: u32) -> Vec
                 log::error!("failed to decode file '{path:?}'");
                 continue;
             };
+            log::info!("segment b4: {}", segment.sample_rate);
             segment.resample(sample_rate);
+            log::info!("segment sample rate: {}", segment.sample_rate);
             segment.make_pitch_table(pitch.from, pitch.to, pitch.step);
             segments.push(segment);
         }
@@ -186,7 +188,7 @@ impl PlayerClicks {
     }
 
     /// Choose a random click based on a click type.
-    pub fn random_click(&mut self, click_type: ClickType) -> &AudioSegment {
+    pub fn random_click(&mut self, click_type: ClickType, sample_rate: u32) -> &AudioSegment {
         // :sob:
         macro_rules! get_click {
             ($clicks:expr, $typ:expr) => {{
@@ -220,15 +222,15 @@ impl PlayerClicks {
             use ClickType::*;
 
             // this looks unnecessary, but the borrow checker doesn't think the same
-            let has_clicks = match typ {
-                HardClick => !self.hardclicks.is_empty(),
-                HardRelease => !self.hardreleases.is_empty(),
-                Click => !self.clicks.is_empty(),
-                Release => !self.releases.is_empty(),
-                SoftClick => !self.softclicks.is_empty(),
-                SoftRelease => !self.softreleases.is_empty(),
-                MicroClick => !self.microclicks.is_empty(),
-                MicroRelease => !self.microreleases.is_empty(),
+            let has_clicks = !match typ {
+                HardClick => self.hardclicks.is_empty(),
+                HardRelease => self.hardreleases.is_empty(),
+                Click => self.clicks.is_empty(),
+                Release => self.releases.is_empty(),
+                SoftClick => self.softclicks.is_empty(),
+                SoftRelease => self.softreleases.is_empty(),
+                MicroClick => self.microclicks.is_empty(),
+                MicroRelease => self.microreleases.is_empty(),
                 _ => continue,
             };
             if has_clicks {
@@ -245,6 +247,7 @@ impl PlayerClicks {
                 };
             }
         }
+        self.silent_segment.sample_rate = sample_rate;
         &mut self.silent_segment
     }
 
@@ -363,23 +366,28 @@ impl Bot {
         }
     }
 
-    fn get_random_click(&mut self, player: Player, click: ClickType) -> &AudioSegment {
+    fn get_random_click(
+        &mut self,
+        player: Player,
+        click: ClickType,
+        sample_rate: u32,
+    ) -> &AudioSegment {
         // try to get a random click from the player clicks
         // if it doesn't exist for the wanted player, use the other one (guaranteed to have atleast
         // one click)
         match player {
             Player::One => {
                 if self.player.0.clicks.is_empty() {
-                    self.player.1.random_click(click)
+                    self.player.1.random_click(click, sample_rate)
                 } else {
-                    self.player.0.random_click(click)
+                    self.player.0.random_click(click, sample_rate)
                 }
             }
             Player::Two => {
                 if self.player.1.clicks.is_empty() {
-                    self.player.0.random_click(click)
+                    self.player.0.random_click(click, sample_rate)
                 } else {
-                    self.player.1.random_click(click)
+                    self.player.1.random_click(click, sample_rate)
                 }
             }
         }
@@ -491,8 +499,9 @@ impl Bot {
             } else {
                 (0., 0.)
             };
+
             let click = self
-                .get_random_click(action.player, action.click)
+                .get_random_click(action.player, action.click, self.sample_rate)
                 .random_pitch(); // if no pitch table is generated, returns self
 
             // overlay
