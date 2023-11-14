@@ -53,7 +53,7 @@ enum Stage {
     SelectClickpack,
     Render,
     // AutoCutter,
-    PweaseDonate,
+    Donate,
     Secret,
 }
 
@@ -67,8 +67,14 @@ impl Stage {
     }
 }
 
+fn get_version() -> String {
+    built_info::PKG_VERSION.to_string()
+}
+
 #[derive(Serialize, Deserialize)]
 struct Config {
+    #[serde(default = "get_version")]
+    version: String,
     noise: bool,
     normalize: bool,
     pitch_enabled: bool,
@@ -100,6 +106,7 @@ impl Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
+            version: get_version(),
             noise: false,
             normalize: false,
             pitch_enabled: true,
@@ -204,7 +211,7 @@ impl eframe::App for App {
                 );
                 ui.selectable_value(&mut self.stage, Stage::Render, t!("topbar.render"));
                 // ui.selectable_value(&mut self.stage, Stage::AutoCutter, t!("topbar.autocutter"));
-                ui.selectable_value(&mut self.stage, Stage::PweaseDonate, t!("topbar.donate"));
+                ui.selectable_value(&mut self.stage, Stage::Donate, t!("topbar.donate"));
                 if self.stage == Stage::Secret {
                     ui.selectable_value(&mut self.stage, Stage::Secret, t!("topbar.secret"));
                 }
@@ -264,7 +271,7 @@ impl eframe::App for App {
                     Stage::SelectClickpack => self.show_select_clickpack_stage(ctx, ui),
                     Stage::Render => self.show_render_stage(ctx, ui),
                     // Stage::AutoCutter => self.autocutter.show_ui(ctx, ui),
-                    Stage::PweaseDonate => self.show_pwease_donate_stage(ctx, ui),
+                    Stage::Donate => self.show_pwease_donate_stage(ctx, ui),
                     Stage::Secret => self.show_secret_stage(ctx, ui),
                 };
             });
