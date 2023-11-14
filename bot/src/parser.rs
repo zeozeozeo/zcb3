@@ -218,7 +218,7 @@ pub enum ReplayType {
     OsuReplay,
     /// GDMegaOverlay .macro files
     Gdmo,
-    /// ReplayBot .replay files (rename to .replaybot)
+    /// ReplayBot .replay files
     ReplayBot,
     /// Rush .rsh files
     Rush,
@@ -391,7 +391,7 @@ impl Replay {
             ReplayType::Mhr => self.parse_mhr(data)?,
             ReplayType::TasBot => self.parse_tasbot(data)?,
             ReplayType::Zbot => self.parse_zbf(data)?,
-            ReplayType::Obot => self.parse_obot2(data)?, // will also handle obot3 replays
+            ReplayType::Obot => self.parse_obot2(data)?, // will also handle obot3 and replaybot replays
             ReplayType::Ybotf => self.parse_ybotf(data)?,
             ReplayType::MhrBin => self.parse_mhrbin(data)?,
             ReplayType::Echo => self.parse_echo(data)?, // will handle all 3 replay versions
@@ -603,8 +603,11 @@ impl Replay {
         Ok(())
     }
 
-    /// Will also handle obot3 replays.
+    /// Will also handle obot3 and replaybot replays.
     fn parse_obot2(&mut self, data: &[u8]) -> Result<()> {
+        if data.len() >= 4 && &data[..4] == b"RPLY" {
+            return self.parse_replaybot(data);
+        }
         let Ok(decoded) = bincode::deserialize::<Obot2Replay>(data) else {
             return self.parse_obot3(data);
         };
@@ -1389,15 +1392,16 @@ impl Replay {
         const REPLAYBOT_MAGIC: &[u8; 4] = b"RPLY";
 
         let mut cursor = Cursor::new(data);
-        let mut magic = [0u8; 4];
-        cursor.read_exact(&mut magic)?;
 
         // check if its a version 2 frame replay
-        if magic != *REPLAYBOT_MAGIC {
+        if data.len() < 4 || &data[..4] != REPLAYBOT_MAGIC {
             anyhow::bail!(
                 "old replaybot replay format is not supported, as it does not store frames"
             )
         }
+
+        cursor.set_position(4); // skip magic
+
         let version = cursor.read_u8()?;
         if version != 2 {
             anyhow::bail!("unsupported replaybot version {version} (only v2 is supported, because v1 doesn't store frames)")
@@ -1407,7 +1411,6 @@ impl Replay {
         }
 
         self.fps = cursor.read_f32::<LittleEndian>()?;
-        cursor.set_position(cursor.position() + 4); // skip 4 bytes
         for _ in (10..data.len()).step_by(5) {
             let frame = cursor.read_u32::<LittleEndian>()?;
             let time = frame as f32 / self.fps;
@@ -1499,7 +1502,6 @@ impl Replay {
         Ok(())
     }
 
-    /// Will also handle obot2 replays.
     fn parse_obot3(&mut self, mut data: &[u8]) -> Result<()> {
         let mut deserializer = dlhn::Deserializer::new(&mut data);
         let Ok(replay) = Obot3Replay::deserialize(&mut deserializer) else {

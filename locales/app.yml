@@ -121,7 +121,7 @@ replay.file_format_9:
 replay.file_format_10:
     en: • GDMO Replay (.macro)
 replay.file_format_11:
-    en: • ReplayBot Replay (.replay, rename to .replaybot)
+    en: • ReplayBot Replay (.replay)
 replay.file_format_12:
     en: • KD-BOT Replay (.kd)
 replay.file_format_13:
