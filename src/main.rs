@@ -66,7 +66,7 @@ struct Args {
     #[arg(
         long,
         help = "Whether pitch variation is enabled",
-        default_value_t = false
+        default_value_t = true
     )]
     pitch_enabled: bool,
     #[arg(long, help = "Minimum pitch value", default_value_t = 0.9)]
