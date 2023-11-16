@@ -452,6 +452,7 @@ impl Bot {
         noise: bool,
         normalize: bool,
         expr_var: ExprVariable,
+        enable_pitch: bool,
     ) -> AudioSegment {
         log::info!(
             "starting render, {} actions, noise: {noise}",
@@ -500,9 +501,10 @@ impl Bot {
                 (0., 0.)
             };
 
-            let click = self
-                .get_random_click(action.player, action.click, self.sample_rate)
-                .random_pitch(); // if no pitch table is generated, returns self
+            let mut click = self.get_random_click(action.player, action.click, self.sample_rate);
+            if enable_pitch {
+                click = click.random_pitch(); // if no pitch table is generated, returns self
+            }
 
             // overlay
             segment.overlay_at_vol(

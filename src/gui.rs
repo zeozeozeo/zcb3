@@ -910,6 +910,7 @@ impl App {
             } else {
                 ExprVariable::None
             },
+            self.conf.pitch_enabled,
         );
         let end = start.elapsed();
         log::info!("rendered in {end:?}");

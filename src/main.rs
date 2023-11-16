@@ -250,6 +250,7 @@ fn run_cli(mut args: Args) {
         } else {
             ExprVariable::None
         },
+        args.pitch_enabled,
     );
 
     // save
