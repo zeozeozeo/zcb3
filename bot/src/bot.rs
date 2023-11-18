@@ -55,9 +55,9 @@ pub struct Pitch {
 impl Default for Pitch {
     fn default() -> Self {
         Self {
-            from: 0.9,
-            to: 1.1,
-            step: 0.005,
+            from: 0.95,
+            to: 1.05,
+            step: 0.001,
         }
     }
 }
