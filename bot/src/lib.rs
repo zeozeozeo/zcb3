@@ -5,4 +5,4 @@ pub use audio::*;
 pub use bot::*;
 pub use parser::*;
 
-pub use fasteval;
+pub use fasteval2;

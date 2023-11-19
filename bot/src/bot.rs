@@ -1,6 +1,6 @@
 use crate::{AudioSegment, ClickType, ExtendedAction, Player, Replay};
 use anyhow::Result;
-use fasteval::Compiler;
+use fasteval2::Compiler;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -284,8 +284,8 @@ pub struct Bot {
     pub sample_rate: u32,
     /// Expression evaluator namespace. Updated with default variables every action.
     pub ns: BTreeMap<String, f64>,
-    slab: fasteval::Slab,
-    pub compiled_expr: fasteval::Instruction,
+    slab: fasteval2::Slab,
+    pub compiled_expr: fasteval2::Instruction,
 }
 
 impl Bot {
@@ -394,16 +394,16 @@ impl Bot {
     }
 
     pub fn compile_expression(&mut self, expr: &str) -> Result<()> {
-        let parser = fasteval::Parser::new();
-        // a [`fasteval::Slab`] can't be cloned, so we wrap it in a refcell
-        self.slab = fasteval::Slab::new();
+        let parser = fasteval2::Parser::new();
+        // a [`fasteval2::Slab`] can't be cloned, so we wrap it in a refcell
+        self.slab = fasteval2::Slab::new();
         self.ns = BTreeMap::new();
 
         // try to compile expr
         self.compiled_expr = parser
             .parse(expr, &mut self.slab.ps)?
             .from(&self.slab.ps)
-            .compile(&self.slab.ps, &mut self.slab.cs);
+            .compile(&self.slab.ps, &mut self.slab.cs, &mut self.ns);
         Ok(())
     }
 
@@ -428,7 +428,7 @@ impl Bot {
     }
 
     pub fn eval_expr(&mut self) -> Result<f64> {
-        use fasteval::Evaler;
+        use fasteval2::Evaler;
         let val = self.compiled_expr.eval(&self.slab, &mut self.ns)?;
         Ok(val)
     }

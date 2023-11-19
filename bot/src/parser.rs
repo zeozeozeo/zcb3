@@ -206,7 +206,7 @@ pub enum ReplayType {
     Zbot,
     /// OmegaBot 3 and OmegaBot 2 .replay files
     Obot,
-    /// Ybot frame files (no extension)
+    /// yBot frame files (no extension)
     Ybotf,
     /// .mhr files
     MhrBin,
@@ -450,7 +450,10 @@ impl Replay {
     fn process_action_p1(&mut self, time: f32, down: bool, frame: u32) {
         // if action is the same, skip it
         if let Some(typ) = self.prev_action.0 {
-            if down == typ.is_click() {
+            if down == typ.is_click()
+                && self.actions.last().unwrap().frame != frame.saturating_sub(1)
+            // FIXME FIXME REMOVE THIS
+            {
                 return;
             }
         }
@@ -467,7 +470,10 @@ impl Replay {
     // .0 is changed to .1 here, because it's the second player
     fn process_action_p2(&mut self, time: f32, down: bool, frame: u32) {
         if let Some(typ) = self.prev_action.1 {
-            if down == typ.is_click() {
+            if down == typ.is_click()
+                && self.actions.last().unwrap().frame != frame.saturating_sub(1)
+            // FIXME FIXME REMOVE THIS
+            {
                 return;
             }
         }
