@@ -338,7 +338,7 @@ struct Obot3Replay {
 }
 
 impl Replay {
-    pub const SUPPORTED_EXTENSIONS: &[&'static str] = &[
+    pub const SUPPORTED_EXTENSIONS: &'static [&'static str] = &[
         "json",
         "mhr.json",
         "mhr",
