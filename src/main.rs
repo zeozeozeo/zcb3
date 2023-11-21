@@ -24,13 +24,13 @@ enum ArgExprVariable {
     TimeOffset,
 }
 
-impl Into<ExprVariable> for ArgExprVariable {
-    fn into(self) -> ExprVariable {
-        match self {
-            Self::None => ExprVariable::None,
-            Self::Variation => ExprVariable::Variation,
-            Self::Value => ExprVariable::Value,
-            Self::TimeOffset => ExprVariable::TimeOffset,
+impl From<ArgExprVariable> for ExprVariable {
+    fn from(val: ArgExprVariable) -> Self {
+        match val {
+            ArgExprVariable::None => ExprVariable::None,
+            ArgExprVariable::Variation => ExprVariable::Variation,
+            ArgExprVariable::Value => ExprVariable::Value,
+            ArgExprVariable::TimeOffset => ExprVariable::TimeOffset,
         }
     }
 }

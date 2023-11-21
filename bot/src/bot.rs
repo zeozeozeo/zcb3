@@ -460,7 +460,7 @@ impl Bot {
         );
 
         let longest_time_offset = if expr_var == ExprVariable::TimeOffset {
-            self.expr_range(&replay).1 as f32
+            self.expr_range(replay).1 as f32
         } else {
             0.
         };
