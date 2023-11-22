@@ -10,7 +10,6 @@ use egui_modal::{Icon, Modal};
 use egui_plot::PlotPoint;
 use image::io::Reader as ImageReader;
 use rfd::FileDialog;
-use rust_i18n::t;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{cell::RefCell, io::Cursor, time::Instant};
@@ -19,8 +18,6 @@ use std::{io::Read, path::PathBuf};
 const MAX_PLOT_POINTS: usize = 4096;
 
 pub fn run_gui() -> Result<(), eframe::Error> {
-    rust_i18n::set_locale("en");
-
     let img = ImageReader::new(Cursor::new(include_bytes!("assets/icon.ico")))
         .with_guessed_format()
         .unwrap()
@@ -207,17 +204,13 @@ impl eframe::App for App {
         egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.stage, Stage::SelectReplay, t!("topbar.replay"));
-                ui.selectable_value(
-                    &mut self.stage,
-                    Stage::SelectClickpack,
-                    t!("topbar.clickpack"),
-                );
-                ui.selectable_value(&mut self.stage, Stage::Render, t!("topbar.render"));
-                // ui.selectable_value(&mut self.stage, Stage::AutoCutter, t!("topbar.autocutter"));
-                ui.selectable_value(&mut self.stage, Stage::Donate, t!("topbar.donate"));
+                ui.selectable_value(&mut self.stage, Stage::SelectReplay, "Replay");
+                ui.selectable_value(&mut self.stage, Stage::SelectClickpack, "Clickpack");
+                ui.selectable_value(&mut self.stage, Stage::Render, "Render");
+                // ui.selectable_value(&mut self.stage, Stage::AutoCutter, "AutoCutter");
+                ui.selectable_value(&mut self.stage, Stage::Donate, "Donate");
                 if self.stage == Stage::Secret {
-                    ui.selectable_value(&mut self.stage, Stage::Secret, t!("topbar.secret"));
+                    ui.selectable_value(&mut self.stage, Stage::Secret, "Secret");
                 }
             });
             ui.add_space(2.0);
@@ -232,15 +225,15 @@ impl eframe::App for App {
                 ui.horizontal(|ui| {
                     if self.stage != self.stage.previous()
                         && ui
-                            .button(t!("bottombar.back"))
-                            .on_hover_text(t!("bottombar.back_hover"))
+                            .button("Back")
+                            .on_hover_text("Go back to the previous stage")
                             .clicked()
                     {
                         self.stage = self.stage.previous();
                     }
                     if ui
-                        .button(t!("bottombar.check_for_updates"))
-                        .on_hover_text(t!("bottombar.check_for_updates"))
+                        .button("Check for updates")
+                        .on_hover_text("Check if your ZCB version is up-to-date")
                         .clicked()
                     {
                         self.do_update_check(&modal);
@@ -427,15 +420,18 @@ impl App {
                 modal.open();
             } else {
                 modal.open_dialog(
-                    Some(t!("update.up_to_date_title")),
-                    Some(t!("update.up_to_date_body")),
+                    Some("You are up-to-date!"),
+                    Some(
+                        "You are running the latest version of ZCB.\n\
+                        You can always download new versions on GitHub or on the Discord server.",
+                    ),
                     Some(Icon::Success),
                 );
             }
         } else if let Err(e) = latest_tag {
             log::error!("failed to check for updates: {e}");
             modal.open_dialog(
-                Some(t!("update.failed_to_check")),
+                Some("Failed to check for updates"),
                 Some(e),
                 Some(Icon::Error),
             );
@@ -559,16 +555,13 @@ impl App {
         ui.add_enabled_ui(!self.replay.actions.is_empty(), |ui| {
             ui.horizontal(|ui| {
                 if ui
-                    .button(t!("secret.export_to_litematic"))
-                    .on_disabled_hover_text(t!("secret.export_to_litematic_disabled_hover"))
+                    .button("Export replay to .litematic")
+                    .on_disabled_hover_text("You have to load a replay first")
                     .clicked()
                 {
                     self.export_litematic();
                 }
-                ui.checkbox(
-                    &mut self.conf.litematic_export_releases,
-                    t!("secret.export_releases"),
-                );
+                ui.checkbox(&mut self.conf.litematic_export_releases, "Export releases");
             });
         });
 
@@ -587,21 +580,21 @@ impl App {
     }
 
     fn show_pwease_donate_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
-        ui.heading(t!("donations.heading"));
-        ui.label(t!("donations.consider_supporting"));
+        ui.heading("Donations");
+        ui.label("ZCB is completely free software, donations are appreciated :3");
 
         ui.add_space(8.0);
 
         ui.horizontal(|ui| {
             ui.add(egui::Image::new(egui::include_image!("assets/kofi_logo.png")).max_width(32.0));
-            ui.hyperlink_to(t!("donations.kofi"), "https://ko-fi.com/zeozeozeo");
+            ui.hyperlink_to("Donate to me on Ko-fi", "https://ko-fi.com/zeozeozeo");
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add(
                 egui::Image::new(egui::include_image!("assets/liberapay_logo.png")).max_width(32.0),
             );
-            ui.hyperlink_to(t!("donations.liberapay"), "https://liberapay.com/zeo");
+            ui.hyperlink_to("Donate to me on Liberapay", "https://liberapay.com/zeo");
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -610,7 +603,7 @@ impl App {
                     .max_width(32.0),
             );
             ui.hyperlink_to(
-                t!("donations.donationalerts"),
+                "Donate to me on DonationAlerts",
                 "https://donationalerts.com/r/zeozeozeo",
             );
         });
@@ -619,12 +612,15 @@ impl App {
             ui.add(
                 egui::Image::new(egui::include_image!("assets/boosty_logo.png")).max_width(32.0),
             );
-            ui.hyperlink_to(t!("donations.boosty"), "https://boosty.to/zeozeozeo/donate");
+            ui.hyperlink_to(
+                "Donate to me on Boosty",
+                "https://boosty.to/zeozeozeo/donate",
+            );
         });
     }
 
     fn show_replay_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
-        ui.heading(t!("replay.heading"));
+        ui.heading("Select replay file");
 
         let mut dialog = Modal::new(ctx, "replay_stage_dialog");
 
@@ -634,16 +630,16 @@ impl App {
                     timing, the corresponding click type is used.");
             let t = &mut self.conf.timings;
             help_text(ui, "Hardclick/hardrelease timing", |ui| {
-                ui.add(egui::Slider::new(&mut t.hard, t.regular..=30.0).text(t!("replay.hard_timing")));
+                ui.add(egui::Slider::new(&mut t.hard, t.regular..=30.0).text("Hard timing"));
             });
             help_text(ui, "Click/release timing", |ui| {
                 ui.add(
                     egui::Slider::new(&mut t.regular, t.soft..=t.hard)
-                        .text(t!("replay.regular_timing")),
+                        .text("Regular timing"),
                 );
             });
             help_text(ui, "Softclick/softrelease timing", |ui| {
-                ui.add(egui::Slider::new(&mut t.soft, 0.0..=t.regular).text(t!("replay.soft_timing")));
+                ui.add(egui::Slider::new(&mut t.soft, 0.0..=t.regular).text("Soft timing"));
             });
             ui.label(format!("Everything below {}s are microclicks/microreleases.", t.soft));
         });
@@ -653,16 +649,10 @@ impl App {
 
             let vol = &mut self.conf.vol_settings;
             help_text(ui, "Maximum volume variation for each action (+/-)", |ui| {
-                ui.add(
-                    egui::Slider::new(&mut vol.volume_var, 0.0..=1.0)
-                        .text(t!("replay.volume_variation")),
-                );
+                ui.add(egui::Slider::new(&mut vol.volume_var, 0.0..=1.0).text("Volume variation"));
             });
             help_text(ui, "Constant volume multiplier for all actions", |ui| {
-                ui.add(
-                    egui::Slider::new(&mut vol.global_volume, 0.0..=20.0)
-                        .text(t!("replay.global_volume")),
-                );
+                ui.add(egui::Slider::new(&mut vol.global_volume, 0.0..=20.0).text("Global volume"));
             });
         });
 
@@ -675,14 +665,11 @@ impl App {
             );
 
             let vol = &mut self.conf.vol_settings;
-            ui.checkbox(&mut vol.enabled, t!("replay.enable_spam_volume_changes"));
+            ui.checkbox(&mut vol.enabled, "Enable spam volume changes");
 
             ui.add_enabled_ui(vol.enabled, |ui| {
                 help_text(ui, "Apply spam volume changes to releases", |ui| {
-                    ui.checkbox(
-                        &mut vol.change_releases_volume,
-                        t!("replay.change_releases_volume"),
-                    );
+                    ui.checkbox(&mut vol.change_releases_volume, "Change releases volume");
                 });
                 help_text(
                     ui,
@@ -690,20 +677,20 @@ impl App {
                     |ui| {
                         ui.add(
                             egui::Slider::new(&mut vol.spam_time, 0.0..=1.0)
-                                .text(t!("replay.spam_time")),
+                                .text("Spam time (between actions)"),
                         );
                     },
                 );
                 help_text(ui, "Volume offset factor for spam actions", |ui| {
                     ui.add(
                         egui::Slider::new(&mut vol.spam_vol_offset_factor, 0.0..=30.0)
-                            .text(t!("replay.spam_offset_factor")),
+                            .text("Spam volume offset factor"),
                     );
                 });
                 help_text(ui, "Maximum value of the volume offset factor", |ui| {
                     ui.add(
                         egui::Slider::new(&mut vol.max_spam_vol_offset, 0.0..=30.0)
-                            .text(t!("replay.max_spam_offset")),
+                            .text("Maximum spam volume offset"),
                     );
                 });
             });
@@ -715,13 +702,10 @@ impl App {
         ui.separator();
 
         ui.horizontal(|ui| {
-            if ui.button(t!("replay.select_replay")).clicked() {
+            if ui.button("Select replay").clicked() {
                 // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
                 if let Some(file) = FileDialog::new()
-                    .add_filter(
-                        t!("replay.replay_file_explorer"),
-                        Replay::SUPPORTED_EXTENSIONS,
-                    )
+                    .add_filter("Replay file", Replay::SUPPORTED_EXTENSIONS)
                     .pick_file()
                 {
                     log::info!("selected replay file: {file:?}");
@@ -750,22 +734,22 @@ impl App {
                             self.update_expr = true;
                         } else if let Err(e) = replay {
                             dialog.open_dialog(
-                                Some(t!("replay.failed_to_parse_title")),
-                                Some(t!("replay.failed_to_parse_body", e = e)),
+                                Some("Failed to parse replay file"),
+                                Some(format!("{e}. Is the format supported?")),
                                 Some(Icon::Error),
                             );
                         }
                     } else if let Err(e) = replay_type {
                         dialog.open_dialog(
-                            Some(t!("replay.failed_to_guess_title")),
-                            Some(t!("replay.failed_to_parse_body", e = e)),
+                            Some("Failed to guess replay format"),
+                            Some(format!("Failed to guess replay format: {e}")),
                             Some(Icon::Error),
                         );
                     }
                 } else {
                     dialog.open_dialog(
-                        Some(t!("replay.no_file_title")),
-                        Some(t!("replay.no_file_body")),
+                        Some("No file was selected"),
+                        Some("Please select a file"),
                         Some(Icon::Error),
                     )
                 }
@@ -774,32 +758,30 @@ impl App {
             let num_actions = self.replay.actions.len();
             let num_extended = self.replay.extended.len();
             if num_actions > 0 {
-                ui.label(t!(
-                    "replay.num_actions",
-                    num_actions = num_actions,
-                    num_extended_actions = num_extended
+                ui.label(format!(
+                    "Number of actions in replay: {num_actions} / {num_extended}"
                 ));
             }
         });
 
-        ui.collapsing(t!("replay.supported_file_formats_collapsing"), |ui| {
-            ui.label(t!("replay.file_format_1"));
-            ui.label(t!("replay.file_format_2"));
-            ui.label(t!("replay.file_format_3"));
-            ui.label(t!("replay.file_format_4"));
-            ui.label(t!("replay.file_format_5"));
-            ui.label(t!("replay.file_format_6"));
-            ui.label(t!("replay.file_format_7"));
-            ui.label(t!("replay.file_format_8"));
-            ui.label(t!("replay.file_format_9"));
-            ui.label(t!("replay.file_format_10"));
-            ui.label(t!("replay.file_format_11"));
-            ui.label(t!("replay.file_format_12"));
-            ui.label(t!("replay.file_format_13"));
-            ui.label(t!("replay.file_format_14"));
-            ui.label(t!("replay.file_format_15"));
-            ui.label(t!("replay.file_format_16"));
-            ui.label(t!("replay.file_format_17"));
+        ui.collapsing("Supported file formats", |ui| {
+            ui.label("• Mega Hack Replay JSON (.mhr.json)");
+            ui.label("• Mega Hack Replay Binary (.mhr)");
+            ui.label("• TASbot Replay (.json)");
+            ui.label("• zBot Frame (.zbf)");
+            ui.label("• OmegaBot 2 & 3 Replay (.replay)");
+            ui.label("• yBot Frame (no extension by default, rename to .ybf)");
+            ui.label("• Echo (.echo, new binary format, new json format and old json format)");
+            ui.label("• Amethyst Replay (.thyst)");
+            ui.label("• osu! replay (.osr)");
+            ui.label("• GDMO Replay (.macro)");
+            ui.label("• ReplayBot Replay (.replay)");
+            ui.label("• KD-BOT Replay (.kd)");
+            ui.label("• Rush Replay (.rsh)");
+            ui.label("• Plaintext Replay (.txt, generated from mat's macro converter)");
+            ui.label("• ReplayEngine Replay (.re)");
+            ui.label("• DDHOR Replay (.ddhor, old frame format)");
+            ui.label("• xBot Frame (.xbot)");
         });
 
         // show dialog if there is one
