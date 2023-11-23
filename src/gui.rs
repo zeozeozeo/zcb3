@@ -153,6 +153,7 @@ struct App {
     conf_after_replay_selected: Option<Config>,
     replay_path: Option<PathBuf>,
     clickpack_num_sounds: Option<usize>,
+    clickpack_has_noise: bool,
 }
 
 impl Default for App {
@@ -174,6 +175,7 @@ impl Default for App {
             conf_after_replay_selected: None,
             replay_path: None,
             clickpack_num_sounds: None,
+            clickpack_has_noise: false,
         }
     }
 }
@@ -932,6 +934,7 @@ impl App {
             if ui.button("Select clickpack").clicked() {
                 if let Some(dir) = FileDialog::new().pick_folder() {
                     log::info!("selected clickpack folder: {dir:?}");
+                    self.clickpack_has_noise = bot::dir_has_noise(&dir);
                     self.clickpack_path = Some(dir);
                     self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
                     self.stage = Stage::Render;
@@ -1264,7 +1267,7 @@ impl App {
             }
 
             // overlay noise checkbox
-            ui.add_enabled_ui(self.bot.borrow().has_noise(), |ui| {
+            ui.add_enabled_ui(self.clickpack_has_noise, |ui| {
                 ui.checkbox(&mut self.conf.noise, "Overlay noise")
                     .on_disabled_hover_text("Your clickpack doesn't have a noise file")
                     .on_hover_text("Overlays the noise file that's in the clickpack directory");

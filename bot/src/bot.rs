@@ -271,6 +271,32 @@ pub struct Bot {
     pub compiled_expr: fasteval2::Instruction,
 }
 
+pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
+    let Ok(dir) = dir.read_dir() else {
+        return None;
+    };
+    for entry in dir {
+        let path = entry.unwrap().path();
+        let filename = path.file_name().unwrap().to_str().unwrap();
+        // if it's a noise* or whitenoise* file we should try to load it
+        if path.is_file() && (filename.starts_with("noise") || filename.starts_with("whitenoise")) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+pub fn dir_has_noise(dir: &Path) -> bool {
+    let mut player1_path = dir.to_path_buf();
+    player1_path.push("player1");
+    let mut player2_path = dir.to_path_buf();
+    player2_path.push("player2");
+
+    find_noise_file(&player1_path).is_some()
+        || find_noise_file(&player2_path).is_some()
+        || find_noise_file(dir).is_some()
+}
+
 impl Bot {
     #[inline]
     pub fn new(sample_rate: u32) -> Self {
@@ -332,26 +358,18 @@ impl Bot {
     }
 
     fn load_noise(&mut self, dir: &Path, params: &InterpolationParams) {
-        let Ok(dir) = dir.read_dir() else {
+        let Some(path) = find_noise_file(dir) else {
             return;
         };
-        for entry in dir {
-            let path = entry.unwrap().path();
-            let filename = path.file_name().unwrap().to_str().unwrap();
-            // if it's a noise* or whitenoise* file we should try to load it
-            if path.is_file()
-                && (filename.starts_with("noise") || filename.starts_with("whitenoise"))
-            {
-                log::info!("found noise file {path:?}");
-                let f = std::fs::File::open(path.clone()).unwrap();
-                self.noise = if let Ok(mut noise) = AudioSegment::from_media_source(Box::new(f)) {
-                    noise.resample(self.sample_rate, params);
-                    Some(noise)
-                } else {
-                    None
-                };
-            }
-        }
+        let Ok(f) = std::fs::File::open(path) else {
+            return;
+        };
+        self.noise = if let Ok(mut noise) = AudioSegment::from_media_source(Box::new(f)) {
+            noise.resample(self.sample_rate, params);
+            Some(noise)
+        } else {
+            None
+        };
     }
 
     fn get_random_click(&mut self, player: Player, click: ClickType) -> &AudioSegment {
