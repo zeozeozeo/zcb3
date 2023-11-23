@@ -5,7 +5,7 @@ use rand::{seq::SliceRandom, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -270,21 +270,25 @@ impl Bot {
 
     pub fn load_clickpack(
         &mut self,
-        clickpack_dir: &PathBuf,
+        clickpack_dir: &Path,
         pitch: Pitch,
         params: &InterpolationParams,
     ) {
         assert!(self.sample_rate > 0);
-        let mut player1_path = clickpack_dir.clone();
+        let mut player1_path = clickpack_dir.to_path_buf();
         player1_path.push("player1");
-        let mut player2_path = clickpack_dir.clone();
+        let mut player2_path = clickpack_dir.to_path_buf();
         player2_path.push("player2");
 
         // check if the clickpack has player1/player2 folders
         if !player1_path.exists() && !player2_path.exists() {
             log::warn!("clickpack directory doesn't have player1/player2 folders");
-            let clicks =
-                PlayerClicks::from_path(clickpack_dir.clone(), pitch, self.sample_rate, params);
+            let clicks = PlayerClicks::from_path(
+                clickpack_dir.to_path_buf(),
+                pitch,
+                self.sample_rate,
+                params,
+            );
             self.player = (clicks.clone(), clicks);
             self.load_noise(clickpack_dir, params); // try to load noise
             return;
@@ -310,7 +314,7 @@ impl Bot {
         self.load_noise(clickpack_dir, params);
     }
 
-    fn load_noise(&mut self, dir: &PathBuf, params: &InterpolationParams) {
+    fn load_noise(&mut self, dir: &Path, params: &InterpolationParams) {
         let Ok(dir) = dir.read_dir() else {
             return;
         };
@@ -342,14 +346,14 @@ impl Bot {
         match player {
             Player::One => {
                 if let Some(click) = p1.random_click(click) {
-                    return click;
+                    click
                 } else {
                     return p2.random_click(click).unwrap(); // use p2 clicks
                 }
             }
             Player::Two => {
                 if let Some(click) = p2.random_click(click) {
-                    return click;
+                    click
                 } else {
                     return p1.random_click(click).unwrap(); // use p1 clicks
                 }

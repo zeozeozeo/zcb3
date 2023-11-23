@@ -58,9 +58,9 @@ impl ToString for InterpolationType {
     }
 }
 
-impl Into<rubato::SincInterpolationType> for InterpolationType {
-    fn into(self) -> rubato::SincInterpolationType {
-        match self {
+impl From<InterpolationType> for rubato::SincInterpolationType {
+    fn from(val: InterpolationType) -> Self {
+        match val {
             InterpolationType::Cubic => rubato::SincInterpolationType::Cubic,
             InterpolationType::Quadratic => rubato::SincInterpolationType::Quadratic,
             InterpolationType::Linear => rubato::SincInterpolationType::Linear,
@@ -93,9 +93,9 @@ impl ToString for WindowFunction {
     }
 }
 
-impl Into<rubato::WindowFunction> for WindowFunction {
-    fn into(self) -> rubato::WindowFunction {
-        match self {
+impl From<WindowFunction> for rubato::WindowFunction {
+    fn from(val: WindowFunction) -> Self {
+        match val {
             WindowFunction::Blackman => rubato::WindowFunction::Blackman,
             WindowFunction::Blackman2 => rubato::WindowFunction::Blackman2,
             WindowFunction::BlackmanHarris => rubato::WindowFunction::BlackmanHarris,
@@ -141,14 +141,14 @@ impl Default for InterpolationParams {
     }
 }
 
-impl Into<rubato::SincInterpolationParameters> for InterpolationParams {
-    fn into(self) -> rubato::SincInterpolationParameters {
+impl From<InterpolationParams> for rubato::SincInterpolationParameters {
+    fn from(val: InterpolationParams) -> Self {
         rubato::SincInterpolationParameters {
-            sinc_len: self.sinc_len,
-            f_cutoff: self.f_cutoff,
-            oversampling_factor: self.oversampling_factor,
-            interpolation: self.interpolation.into(),
-            window: self.window.into(),
+            sinc_len: val.sinc_len,
+            f_cutoff: val.f_cutoff,
+            oversampling_factor: val.oversampling_factor,
+            interpolation: val.interpolation.into(),
+            window: val.window.into(),
         }
     }
 }
@@ -511,6 +511,7 @@ mod tests {
         assert!(segment.data.get(sample).is_some());
         let sample = segment.time_to_sample(0.0);
         assert!(segment.data.get(sample).is_some());
+        #[allow(clippy::approx_constant)]
         let sample = segment.time_to_sample(3.14);
         assert!(segment.data.get(sample).is_some());
     }

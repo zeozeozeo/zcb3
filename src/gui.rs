@@ -15,7 +15,7 @@ use image::io::Reader as ImageReader;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{cell::RefCell, io::Cursor, time::Instant};
+use std::{cell::RefCell, io::Cursor, path::Path, time::Instant};
 use std::{io::Read, path::PathBuf};
 
 const MAX_PLOT_POINTS: usize = 4096;
@@ -414,7 +414,7 @@ impl App {
                 if modal.button(ui, "auto-update")
                     .on_hover_text("Automatically update to the newest version.\n\
                                     This might take some time!\n\
-                                    You might have to restart ZCB.")
+                                    You might have to restart ZCB")
                     .clicked()
                 {
                     if let Err(e) = update_to_tag(&tag_string) {
@@ -653,11 +653,11 @@ impl App {
         });
     }
 
-    fn load_replay(&mut self, dialog: &Modal, file: &PathBuf) {
+    fn load_replay(&mut self, dialog: &Modal, file: &Path) {
         let filename = file.file_name().unwrap().to_str().unwrap();
 
         // read replay file
-        let mut f = std::fs::File::open(file.clone()).unwrap();
+        let mut f = std::fs::File::open(file).unwrap();
         let mut data = Vec::new();
         f.read_to_end(&mut data).unwrap();
 
@@ -1253,8 +1253,8 @@ impl App {
             // overlay noise checkbox
             ui.add_enabled_ui(self.bot.borrow().has_noise(), |ui| {
                 ui.checkbox(&mut self.conf.noise, "Overlay noise")
-                    .on_disabled_hover_text("Your clickpack doesn't have a noise file.")
-                    .on_hover_text("Overlays the noise file that's in the clickpack directory.");
+                    .on_disabled_hover_text("Your clickpack doesn't have a noise file")
+                    .on_hover_text("Overlays the noise file that's in the clickpack directory");
             });
 
             // normalize audio checkbox
