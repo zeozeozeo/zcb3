@@ -1,7 +1,7 @@
 use crate::{AudioSegment, ClickType, ExtendedAction, Player, Replay};
 use anyhow::Result;
 use fasteval2::Compiler;
-use rand::Rng;
+use rand::{seq::SliceRandom, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -19,30 +19,6 @@ pub struct PlayerClicks {
     pub softreleases: Vec<AudioSegment>,
     pub microclicks: Vec<AudioSegment>,
     pub microreleases: Vec<AudioSegment>,
-    silent_segment: AudioSegment,
-    prev_idx: Option<usize>,
-    prev_click_typ: Option<ClickType>,
-}
-
-impl PlayerClicks {
-    #[inline]
-    pub fn has_clicks(&self) -> bool {
-        for clicks in [
-            &self.hardclicks,
-            &self.hardreleases,
-            &self.clicks,
-            &self.releases,
-            &self.softclicks,
-            &self.softreleases,
-            &self.microclicks,
-            &self.microreleases,
-        ] {
-            if !clicks.is_empty() {
-                return true;
-            }
-        }
-        false
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -184,71 +160,52 @@ impl PlayerClicks {
             path.pop();
         }
 
+        if !player.has_clicks() {
+            log::warn!("no clicks found, assuming there's no subdirectories");
+            player.clicks = read_clicks_in_directory(path.clone(), pitch, sample_rate);
+        }
+
         player
     }
 
-    /// Choose a random click based on a click type.
-    pub fn random_click(&mut self, click_type: ClickType, sample_rate: u32) -> &AudioSegment {
-        // :sob:
-        macro_rules! get_click {
-            ($clicks:expr, $typ:expr) => {{
-                // get click index
-                let idx = if $clicks.len() == 1
-                    || $typ.is_release()
-                    || self.prev_idx.is_none()
-                    || self.prev_click_typ != Some($typ)
-                {
-                    rand::thread_rng().gen_range(0..$clicks.len())
-                } else {
-                    // previous was a click
-                    // generate a random index thats not `prev_idx`
-                    let prev_idx = self.prev_idx.unwrap();
-                    let mut idx = prev_idx;
-                    while idx == prev_idx {
-                        idx = rand::thread_rng().gen_range(0..$clicks.len());
-                    }
-                    idx
-                };
-                if !$typ.is_release() {
-                    self.prev_click_typ = Some($typ);
-                }
-                self.prev_idx = Some(idx);
-                &mut $clicks[idx]
-            }};
-        }
+    #[inline]
+    pub fn has_clicks(&self) -> bool {
+        [
+            &self.hardclicks,
+            &self.hardreleases,
+            &self.clicks,
+            &self.releases,
+            &self.softclicks,
+            &self.softreleases,
+            &self.microclicks,
+            &self.microreleases,
+        ]
+        .iter()
+        .any(|c| !c.is_empty())
+    }
 
+    /// Choose a random click based on a click type.
+    pub fn random_click(&self, click_type: ClickType) -> Option<&AudioSegment> {
         let preferred = click_type.preferred();
         for typ in preferred {
             use ClickType::*;
 
-            // this looks unnecessary, but the borrow checker doesn't think the same
-            let has_clicks = !match typ {
-                HardClick => self.hardclicks.is_empty(),
-                HardRelease => self.hardreleases.is_empty(),
-                Click => self.clicks.is_empty(),
-                Release => self.releases.is_empty(),
-                SoftClick => self.softclicks.is_empty(),
-                SoftRelease => self.softreleases.is_empty(),
-                MicroClick => self.microclicks.is_empty(),
-                MicroRelease => self.microreleases.is_empty(),
+            let click = match typ {
+                HardClick => self.hardclicks.choose(&mut rand::thread_rng()),
+                HardRelease => self.hardreleases.choose(&mut rand::thread_rng()),
+                Click => self.clicks.choose(&mut rand::thread_rng()),
+                Release => self.releases.choose(&mut rand::thread_rng()),
+                SoftClick => self.softclicks.choose(&mut rand::thread_rng()),
+                SoftRelease => self.softreleases.choose(&mut rand::thread_rng()),
+                MicroClick => self.microclicks.choose(&mut rand::thread_rng()),
+                MicroRelease => self.microreleases.choose(&mut rand::thread_rng()),
                 _ => continue,
             };
-            if has_clicks {
-                return match typ {
-                    HardClick => get_click!(self.hardclicks, typ),
-                    HardRelease => get_click!(self.hardreleases, typ),
-                    Click => get_click!(self.clicks, typ),
-                    Release => get_click!(self.releases, typ),
-                    SoftClick => get_click!(self.softclicks, typ),
-                    SoftRelease => get_click!(self.softreleases, typ),
-                    MicroClick => get_click!(self.microclicks, typ),
-                    MicroRelease => get_click!(self.microreleases, typ),
-                    _ => continue,
-                };
+            if let Some(click) = click {
+                return Some(click);
             }
         }
-        self.silent_segment.sample_rate = sample_rate;
-        &mut self.silent_segment
+        None
     }
 
     /// Finds the longest click amongst all clicks.
@@ -366,28 +323,25 @@ impl Bot {
         }
     }
 
-    fn get_random_click(
-        &mut self,
-        player: Player,
-        click: ClickType,
-        sample_rate: u32,
-    ) -> &AudioSegment {
-        // try to get a random click from the player clicks
+    fn get_random_click(&mut self, player: Player, click: ClickType) -> &AudioSegment {
+        // try to get a random click/release from the player clicks
         // if it doesn't exist for the wanted player, use the other one (guaranteed to have atleast
         // one click)
+        let p1 = &self.player.0;
+        let p2 = &self.player.1;
         match player {
             Player::One => {
-                if self.player.0.clicks.is_empty() {
-                    self.player.1.random_click(click, sample_rate)
+                if let Some(click) = p1.random_click(click) {
+                    return click;
                 } else {
-                    self.player.0.random_click(click, sample_rate)
+                    return p2.random_click(click).unwrap(); // use p2 clicks
                 }
             }
             Player::Two => {
-                if self.player.1.clicks.is_empty() {
-                    self.player.0.random_click(click, sample_rate)
+                if let Some(click) = p2.random_click(click) {
+                    return click;
                 } else {
-                    self.player.1.random_click(click, sample_rate)
+                    return p1.random_click(click).unwrap(); // use p1 clicks
                 }
             }
         }
@@ -501,7 +455,7 @@ impl Bot {
                 (0., 0.)
             };
 
-            let mut click = self.get_random_click(action.player, action.click, self.sample_rate);
+            let mut click = self.get_random_click(action.player, action.click);
             if enable_pitch {
                 click = click.random_pitch(); // if no pitch table is generated, returns self
             }
