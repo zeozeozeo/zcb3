@@ -236,6 +236,23 @@ impl PlayerClicks {
         }
         max
     }
+
+    #[inline]
+    pub fn num_sounds(&self) -> usize {
+        [
+            &self.hardclicks,
+            &self.hardreleases,
+            &self.clicks,
+            &self.releases,
+            &self.softclicks,
+            &self.softreleases,
+            &self.microclicks,
+            &self.microreleases,
+        ]
+        .iter()
+        .map(|c| c.len())
+        .sum()
+    }
 }
 
 #[derive(Debug, Default)]

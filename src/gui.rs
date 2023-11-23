@@ -152,6 +152,7 @@ struct App {
     clickpack_path: Option<PathBuf>,
     conf_after_replay_selected: Option<Config>,
     replay_path: Option<PathBuf>,
+    clickpack_num_sounds: Option<usize>,
 }
 
 impl Default for App {
@@ -172,6 +173,7 @@ impl Default for App {
             clickpack_path: None,
             conf_after_replay_selected: None,
             replay_path: None,
+            clickpack_num_sounds: None,
         }
     }
 }
@@ -943,7 +945,16 @@ impl App {
             }
             if let Some(selected_clickpack_path) = &self.clickpack_path {
                 let filename = selected_clickpack_path.file_name().unwrap();
-                ui.label(format!("Selected clickpack: {filename:?}"));
+
+                // clickpack_num_sounds only gets set after rendering where the
+                // clickpack gets loaded
+                if let Some(num_sounds) = self.clickpack_num_sounds {
+                    ui.label(format!(
+                        "Selected clickpack: {filename:?}, {num_sounds} sounds"
+                    ));
+                } else {
+                    ui.label(format!("Selected clickpack: {filename:?}"));
+                }
             }
         });
 
@@ -975,6 +986,8 @@ impl App {
             self.conf.pitch,
             &self.conf.interpolation_params,
         );
+        self.clickpack_num_sounds =
+            Some(self.bot.borrow().player.0.num_sounds() + self.bot.borrow().player.1.num_sounds());
 
         let start = Instant::now();
         let segment = self.bot.borrow_mut().render_replay(
