@@ -1283,7 +1283,7 @@ impl App {
         ui.separator();
 
         let has_output = self.output.is_some();
-        let has_clicks = self.bot.borrow().has_clicks();
+        let has_clicks = self.clickpack_path.is_some();
         ui.add_enabled_ui(
             has_output && has_clicks && !self.replay.actions.is_empty(),
             |ui| {
