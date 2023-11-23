@@ -954,7 +954,6 @@ impl App {
             ui.label("Optionally you can put a noise.* or whitenoise.* file inside the clickpack \
                     folder to have an option to overlay background noise.");
             ui.label("All audio files will be resampled to the selected sample rate.");
-            ui.label("Loading the clickpack may take a while, please be patient.");
             ui.label("Pitch step is the step between pitch changes in the pitch table. The lower it is, \
                     the more random the pitch is. Pitch 1.0 = no pitch.");
         });
