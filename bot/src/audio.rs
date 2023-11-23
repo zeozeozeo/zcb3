@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::io::{BufWriter, Cursor};
 use std::time::{Duration, Instant};
@@ -11,6 +12,146 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
+
+/// Interpolation methods that can be selected. For asynchronous interpolation where the
+/// ratio between input and output sample rates can be any number, it's not possible to
+/// pre-calculate all the needed interpolation filters.
+/// Instead they have to be computed as needed, which becomes impractical since the
+/// sincs are very expensive to generate in terms of cpu time.
+/// It's more efficient to combine the sinc filters with some other interpolation technique.
+/// Then, sinc filters are used to provide a fixed number of interpolated points between input samples,
+/// and then, the new value is calculated by interpolation between those points.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, Copy)]
+pub enum InterpolationType {
+    /// For cubic interpolation, the four nearest intermediate points are calculated
+    /// using sinc interpolation.
+    /// Then, a cubic polynomial is fitted to these points, and is used to calculate the new sample value.
+    /// The computation time is approximately twice as long as that of linear interpolation,
+    /// but it requires much fewer intermediate points for a good result.
+    Cubic,
+    /// For quadratic interpolation, the three nearest intermediate points are calculated
+    /// using sinc interpolation.
+    /// Then, a quadratic polynomial is fitted to these points, and is used to calculate the new sample value.
+    /// The computation time lies approximately halfway between that of linear and quadratic interpolation.
+    Quadratic,
+    /// For linear interpolation, the new sample value is calculated by linear interpolation
+    /// between the two nearest points.
+    /// This requires two intermediate points to be calculated using sinc interpolation,
+    /// and the output is obtained by taking a weighted average of these two points.
+    /// This is relatively fast, but needs a large number of intermediate points to
+    /// push the resampling artefacts below the noise floor.
+    #[default]
+    Linear,
+    /// The Nearest mode doesn't do any interpolation, but simply picks the nearest intermediate point.
+    /// This is useful when the nearest point is actually the correct one, for example when upsampling by a factor 2,
+    /// like 48kHz->96kHz.
+    /// Then, when setting the oversampling_factor to 2 and using Nearest mode,
+    /// no unnecessary computations are performed and the result is equivalent to that of synchronous resampling.
+    /// This also works for other ratios that can be expressed by a fraction. For 44.1kHz -> 48 kHz,
+    /// setting oversampling_factor to 160 gives the desired result (since 48kHz = 160/147 * 44.1kHz).
+    Nearest,
+}
+
+impl ToString for InterpolationType {
+    fn to_string(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+impl Into<rubato::SincInterpolationType> for InterpolationType {
+    fn into(self) -> rubato::SincInterpolationType {
+        match self {
+            InterpolationType::Cubic => rubato::SincInterpolationType::Cubic,
+            InterpolationType::Quadratic => rubato::SincInterpolationType::Quadratic,
+            InterpolationType::Linear => rubato::SincInterpolationType::Linear,
+            InterpolationType::Nearest => rubato::SincInterpolationType::Nearest,
+        }
+    }
+}
+
+/// Different window functions that can be used to window the sinc function.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default, Copy)]
+pub enum WindowFunction {
+    /// Blackman. Intermediate rolloff and intermediate attenuation.
+    Blackman,
+    /// Squared Blackman. Slower rolloff but better attenuation than Blackman.
+    Blackman2,
+    /// Blackman-Harris. Slow rolloff but good attenuation.
+    BlackmanHarris,
+    /// Squared Blackman-Harris. Slower rolloff but better attenuation than Blackman-Harris.
+    #[default]
+    BlackmanHarris2,
+    /// Hann. Fast rolloff but not very high attenuation.
+    Hann,
+    /// Squared Hann. Slower rolloff and higher attenuation than simple Hann.
+    Hann2,
+}
+
+impl ToString for WindowFunction {
+    fn to_string(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+impl Into<rubato::WindowFunction> for WindowFunction {
+    fn into(self) -> rubato::WindowFunction {
+        match self {
+            WindowFunction::Blackman => rubato::WindowFunction::Blackman,
+            WindowFunction::Blackman2 => rubato::WindowFunction::Blackman2,
+            WindowFunction::BlackmanHarris => rubato::WindowFunction::BlackmanHarris,
+            WindowFunction::BlackmanHarris2 => rubato::WindowFunction::BlackmanHarris2,
+            WindowFunction::Hann => rubato::WindowFunction::Hann,
+            WindowFunction::Hann2 => rubato::WindowFunction::Hann2,
+        }
+    }
+}
+
+/// A struct holding the parameters for sinc interpolation.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct InterpolationParams {
+    /// Length of the windowed sinc interpolation filter.
+    /// Higher values can allow a higher cut-off frequency leading to less high frequency roll-off
+    /// at the expense of higher cpu usage. 256 is a good starting point.
+    /// The value will be rounded up to the nearest multiple of 8.
+    pub sinc_len: usize,
+    /// Relative cutoff frequency of the sinc interpolation filter
+    /// (relative to the lowest one of fs_in/2 or fs_out/2). Start at 0.95, and increase if needed.
+    pub f_cutoff: f32,
+    /// The number of intermediate points to use for interpolation.
+    /// Higher values use more memory for storing the sinc filters.
+    /// Only the points actually needed are calculated during processing
+    /// so a larger number does not directly lead to higher cpu usage.
+    /// A lower value helps in keeping the sincs in the cpu cache. Start at 128.
+    pub oversampling_factor: usize,
+    /// Interpolation type, see `SincInterpolationType`
+    pub interpolation: InterpolationType,
+    /// Window function to use.
+    pub window: WindowFunction,
+}
+
+impl Default for InterpolationParams {
+    fn default() -> Self {
+        InterpolationParams {
+            sinc_len: 256,
+            f_cutoff: 0.95,
+            interpolation: InterpolationType::Linear,
+            oversampling_factor: 256,
+            window: WindowFunction::BlackmanHarris2,
+        }
+    }
+}
+
+impl Into<rubato::SincInterpolationParameters> for InterpolationParams {
+    fn into(self) -> rubato::SincInterpolationParameters {
+        rubato::SincInterpolationParameters {
+            sinc_len: self.sinc_len,
+            f_cutoff: self.f_cutoff,
+            oversampling_factor: self.oversampling_factor,
+            interpolation: self.interpolation.into(),
+            window: self.window.into(),
+        }
+    }
+}
 
 #[inline(always)]
 fn time_to_sample(sample_rate: u32, channels: usize, time: f32) -> usize {
@@ -214,7 +355,7 @@ impl AudioSegment {
     /// Uses sinc interpolation to resample the audio to the given rate (squared blackman-harris).
     ///
     /// Does not do anything if sample rate is the same.
-    pub fn resample(&mut self, rate: u32) -> &mut Self {
+    pub fn resample(&mut self, rate: u32, params: &InterpolationParams) -> &mut Self {
         if self.sample_rate == rate {
             return self;
         }
@@ -223,18 +364,7 @@ impl AudioSegment {
             self.sample_rate
         );
         let start = Instant::now();
-        use rubato::{
-            Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType,
-            WindowFunction,
-        };
-        let params = SincInterpolationParameters {
-            sinc_len: 256,
-            f_cutoff: 0.95,
-            interpolation: SincInterpolationType::Linear,
-            oversampling_factor: 256,
-            window: WindowFunction::BlackmanHarris2,
-        };
-
+        use rubato::{Resampler, SincFixedIn};
         let resampled = {
             // deinterleave audio & convert to f64
             let mut deinterleaved: Vec<Vec<f64>> = vec![
@@ -248,7 +378,7 @@ impl AudioSegment {
             let mut resampler = SincFixedIn::<f64>::new(
                 rate as f64 / self.sample_rate as f64,
                 2.0,
-                params,
+                params.clone().into(),
                 deinterleaved[0].len(),
                 2,
             )
@@ -284,7 +414,13 @@ impl AudioSegment {
     }
 
     /// Generates a pitch table for an audiosegment (pitch ranges from `from` to `to` with step `step`).
-    pub fn make_pitch_table(&mut self, from: f32, to: f32, step: f32) {
+    pub fn make_pitch_table(
+        &mut self,
+        from: f32,
+        to: f32,
+        step: f32,
+        params: &InterpolationParams,
+    ) {
         let old_seg = self.clone();
         log::info!(
             "generating pitch table; {from} => {to} (+= {step}, {} computations)",
@@ -298,7 +434,7 @@ impl AudioSegment {
             .for_each(|(i, seg)| {
                 let cur = from + (i as f32 * step);
                 log::debug!("resampling step: {cur}");
-                seg.resample((self.sample_rate as f32 * cur) as u32);
+                seg.resample((self.sample_rate as f32 * cur) as u32, params);
                 seg.sample_rate = self.sample_rate; // keep same sample rate
             });
     }

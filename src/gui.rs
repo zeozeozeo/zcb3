@@ -1,6 +1,9 @@
 use crate::built_info;
 use anyhow::{Context, Result};
-use bot::{Bot, ExprVariable, ExtendedAction, Pitch, Replay, ReplayType, Timings, VolumeSettings};
+use bot::{
+    Bot, ExprVariable, ExtendedAction, InterpolationParams, InterpolationType, Pitch, Replay,
+    ReplayType, Timings, VolumeSettings, WindowFunction,
+};
 use eframe::{
     egui::{self, Key, RichText},
     epaint::Color32,
@@ -68,7 +71,11 @@ fn get_version() -> String {
     built_info::PKG_VERSION.to_string()
 }
 
-#[derive(Serialize, Deserialize)]
+fn default_interpolation_params() -> InterpolationParams {
+    InterpolationParams::default()
+}
+
+#[derive(Serialize, Deserialize, Clone)]
 struct Config {
     #[serde(default = "get_version")]
     version: String,
@@ -84,6 +91,8 @@ struct Config {
     expr_variable: ExprVariable,
     sort_actions: bool,
     plot_data_aspect: f32,
+    #[serde(default = "default_interpolation_params")]
+    interpolation_params: InterpolationParams,
 }
 
 impl Config {
@@ -97,6 +106,12 @@ impl Config {
         let f = std::fs::File::open(path)?;
         *self = serde_json::from_reader(f)?;
         Ok(())
+    }
+
+    fn replay_changed(&self, other: &Self) -> bool {
+        self.timings != other.timings
+            || self.vol_settings != other.vol_settings
+            || self.sort_actions != other.sort_actions
     }
 }
 
@@ -116,6 +131,7 @@ impl Default for Config {
             expr_variable: ExprVariable::Variation,
             sort_actions: true,
             plot_data_aspect: 20.0,
+            interpolation_params: default_interpolation_params(),
         }
     }
 }
@@ -133,6 +149,9 @@ struct App {
     plot_points: Vec<PlotPoint>,
     update_tags: Option<(usize, usize, String)>,
     update_expr: bool,
+    clickpack_path: Option<PathBuf>,
+    conf_after_replay_selected: Option<Config>,
+    replay_path: Option<PathBuf>,
 }
 
 impl Default for App {
@@ -150,12 +169,15 @@ impl Default for App {
             plot_points: vec![],
             update_tags: None,
             update_expr: false,
+            clickpack_path: None,
+            conf_after_replay_selected: None,
+            replay_path: None,
         }
     }
 }
 
 /// Value is always min clamped with 1.
-fn u32_edit_field(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
+fn u32_edit_field_min1(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
     let mut tmp_value = format!("{value}");
     let res = ui.text_edit_singleline(&mut tmp_value);
     if let Ok(result) = tmp_value.parse::<u32>() {
@@ -164,16 +186,23 @@ fn u32_edit_field(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
     res
 }
 
-/*
-fn i64_edit_field(ui: &mut egui::Ui, value: &mut i64) -> egui::Response {
+fn usize_edit_field(ui: &mut egui::Ui, value: &mut usize) -> egui::Response {
     let mut tmp_value = format!("{value}");
     let res = ui.text_edit_singleline(&mut tmp_value);
-    if let Ok(result) = tmp_value.parse::<i64>() {
+    if let Ok(result) = tmp_value.parse::<usize>() {
         *value = result;
     }
     res
 }
-*/
+
+fn f32_edit_field(ui: &mut egui::Ui, value: &mut f32) -> egui::Response {
+    let mut tmp_value = format!("{value}");
+    let res = ui.text_edit_singleline(&mut tmp_value);
+    if let Ok(result) = tmp_value.parse::<f32>() {
+        *value = result;
+    }
+    res
+}
 
 fn help_text<R>(ui: &mut egui::Ui, help: &str, add_contents: impl FnOnce(&mut egui::Ui) -> R) {
     ui.horizontal(|ui| {
@@ -619,6 +648,45 @@ impl App {
         });
     }
 
+    fn load_replay(&mut self, dialog: &Modal, file: &PathBuf) {
+        let filename = file.file_name().unwrap().to_str().unwrap();
+
+        // read replay file
+        let mut f = std::fs::File::open(file.clone()).unwrap();
+        let mut data = Vec::new();
+        f.read_to_end(&mut data).unwrap();
+
+        let replay_type = ReplayType::guess_format(filename);
+
+        if let Ok(replay_type) = replay_type {
+            // parse replay
+            let replay = Replay::build()
+                .with_timings(self.conf.timings)
+                .with_vol_settings(self.conf.vol_settings)
+                .with_extended(true)
+                .with_sort_actions(self.conf.sort_actions)
+                .parse(replay_type, &data);
+
+            if let Ok(replay) = replay {
+                self.replay = replay;
+                self.update_expr = true;
+                self.conf_after_replay_selected = Some(self.conf.clone());
+            } else if let Err(e) = replay {
+                dialog.open_dialog(
+                    Some("Failed to parse replay file"),
+                    Some(format!("{e}. Is the format supported?")),
+                    Some(Icon::Error),
+                );
+            }
+        } else if let Err(e) = replay_type {
+            dialog.open_dialog(
+                Some("Failed to guess replay format"),
+                Some(format!("Failed to guess replay format: {e}")),
+                Some(Icon::Error),
+            );
+        }
+    }
+
     fn show_replay_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.heading("Select replay file");
 
@@ -701,6 +769,21 @@ impl App {
         });
         ui.separator();
 
+        if let Some(conf_after_replay_selected) = &self.conf_after_replay_selected {
+            if conf_after_replay_selected.replay_changed(&self.conf) {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Reload replay to apply settings").color(Color32::LIGHT_RED),
+                    );
+                    if let Some(replay_path) = &self.replay_path.clone() {
+                        if ui.button("Reload").on_hover_text("Reload replay").clicked() {
+                            self.load_replay(&dialog, replay_path);
+                        }
+                    }
+                });
+            }
+        }
+
         ui.horizontal(|ui| {
             if ui.button("Select replay").clicked() {
                 // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
@@ -708,44 +791,9 @@ impl App {
                     .add_filter("Replay file", Replay::SUPPORTED_EXTENSIONS)
                     .pick_file()
                 {
-                    log::info!("selected replay file: {file:?}");
-
-                    let filename = file.file_name().unwrap().to_str().unwrap();
-
-                    // read replay file
-                    let mut f = std::fs::File::open(file.clone()).unwrap();
-                    let mut data = Vec::new();
-                    f.read_to_end(&mut data).unwrap();
-
-                    let replay_type = ReplayType::guess_format(filename);
-
-                    if let Ok(replay_type) = replay_type {
-                        // parse replay
-                        let replay = Replay::build()
-                            .with_timings(self.conf.timings)
-                            .with_vol_settings(self.conf.vol_settings)
-                            .with_extended(true)
-                            .with_sort_actions(self.conf.sort_actions)
-                            .parse(replay_type, &data);
-
-                        if let Ok(replay) = replay {
-                            self.replay = replay;
-                            self.stage = Stage::SelectClickpack;
-                            self.update_expr = true;
-                        } else if let Err(e) = replay {
-                            dialog.open_dialog(
-                                Some("Failed to parse replay file"),
-                                Some(format!("{e}. Is the format supported?")),
-                                Some(Icon::Error),
-                            );
-                        }
-                    } else if let Err(e) = replay_type {
-                        dialog.open_dialog(
-                            Some("Failed to guess replay format"),
-                            Some(format!("Failed to guess replay format: {e}")),
-                            Some(Icon::Error),
-                        );
-                    }
+                    self.replay_path = Some(file.clone());
+                    self.load_replay(&dialog, &file);
+                    self.stage = Stage::SelectClickpack;
                 } else {
                     dialog.open_dialog(
                         Some("No file was selected"),
@@ -818,50 +866,81 @@ impl App {
             });
         });
 
-        // samplerate edit field
-        ui.collapsing("Other", |ui| {
+        // advanced
+        ui.collapsing("Advanced", |ui| {
+            let ip = &mut self.conf.interpolation_params;
+            ui.label("Sinc interpolation parameters. If you don't know what this is, probably don't touch it.");
             ui.horizontal(|ui| {
-                u32_edit_field(ui, &mut self.conf.sample_rate);
+                usize_edit_field(ui, &mut ip.sinc_len);
                 help_text(
                     ui,
-                    "Audio framerate.\nDon't touch this if you don't know what you're doing",
-                    |ui| {
-                        ui.label("Sample rate");
-                    },
+                    "Length of the windowed sinc interpolation filter.",
+                    |ui| ui.label("Sinc length"),
                 );
             });
+            ui.horizontal(|ui| {
+                f32_edit_field(ui, &mut ip.f_cutoff);
+                help_text(
+                    ui,
+                    "Relative cutoff frequency of the sinc interpolation filter.",
+                    |ui| ui.label("Frequency cutoff"),
+                );
+            });
+            ui.horizontal(|ui| {
+                usize_edit_field(ui, &mut ip.oversampling_factor);
+                help_text(
+                    ui,
+                    "The number of intermediate points to use for interpolation.",
+                    |ui| ui.label("Oversampling factor"),
+                );
+            });
+            egui::ComboBox::from_label("Interpolation type")
+                .selected_text(ip.interpolation.to_string())
+                .show_ui(ui, |ui| {
+                    use InterpolationType::*;
+                    for typ in [Cubic, Quadratic, Linear, Nearest] {
+                        ui.selectable_value(&mut ip.interpolation, typ, typ.to_string());
+                    }
+                });
+            egui::ComboBox::from_label("Window function")
+                .selected_text(ip.window.to_string())
+                .show_ui(ui, |ui| {
+                    use WindowFunction::*;
+                    for window in [
+                        Blackman,
+                        Blackman2,
+                        BlackmanHarris,
+                        BlackmanHarris2,
+                        Hann,
+                        Hann2,
+                    ] {
+                        ui.selectable_value(&mut ip.window, window, window.to_string());
+                    }
+                });
         });
 
         ui.separator();
 
-        if ui.button("Select clickpack").clicked() {
-            if let Some(dir) = FileDialog::new().pick_folder() {
-                log::info!("selected clickpack folder: {dir:?}");
-
-                let bot = if self.conf.pitch_enabled {
-                    Bot::new(dir, self.conf.pitch, self.conf.sample_rate)
-                } else {
-                    Bot::new(dir, Pitch::default(), self.conf.sample_rate)
-                };
-
-                if let Ok(bot) = bot {
-                    self.bot = RefCell::new(bot);
+        ui.horizontal(|ui| {
+            if ui.button("Select clickpack").clicked() {
+                if let Some(dir) = FileDialog::new().pick_folder() {
+                    log::info!("selected clickpack folder: {dir:?}");
+                    self.clickpack_path = Some(dir);
+                    self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
                     self.stage = Stage::Render;
-                } else if let Err(e) = bot {
+                } else {
                     dialog.open_dialog(
-                        Some("Failed to load clickpack"), // title
-                        Some(e),                          // body
-                        Some(Icon::Error),                // icon
+                        Some("No directory was selected"), // title
+                        Some("Please select a directory"), // body
+                        Some(Icon::Error),                 // icon
                     )
                 }
-            } else {
-                dialog.open_dialog(
-                    Some("No directory was selected"), // title
-                    Some("Please select a directory"), // body
-                    Some(Icon::Error),                 // icon
-                )
             }
-        }
+            if let Some(selected_clickpack_path) = &self.clickpack_path {
+                let filename = selected_clickpack_path.file_name().unwrap();
+                ui.label(format!("Selected clickpack: {filename:?}"));
+            }
+        });
 
         ui.collapsing("Info", |ui| {
             ui.label("The clickpack should either have player1 and/or player2 folders inside it, \
@@ -882,6 +961,17 @@ impl App {
     }
 
     fn render_replay(&mut self, dialog: &Modal) {
+        let Some(clickpack_path) = &self.clickpack_path else {
+            return;
+        };
+
+        // load clickpack
+        self.bot.borrow_mut().load_clickpack(
+            clickpack_path,
+            self.conf.pitch,
+            &self.conf.interpolation_params,
+        );
+
         let start = Instant::now();
         let segment = self.bot.borrow_mut().render_replay(
             &self.replay,
@@ -1162,10 +1252,24 @@ impl App {
                     .on_disabled_hover_text("Your clickpack doesn't have a noise file.")
                     .on_hover_text("Overlays the noise file that's in the clickpack directory.");
             });
+
+            // normalize audio checkbox
             ui.checkbox(&mut self.conf.normalize, "Normalize audio")
                 .on_hover_text(
                 "Whether to normalize the output audio\n(make all samples to be in range of 0-1)",
             );
+
+            // audio framerate inputfield
+            ui.horizontal(|ui| {
+                u32_edit_field_min1(ui, &mut self.conf.sample_rate);
+                help_text(
+                    ui,
+                    "Audio framerate.\nDon't touch this if you don't know what you're doing",
+                    |ui| {
+                        ui.label("Sample rate");
+                    },
+                );
+            });
         });
 
         ui.collapsing("Advanced", |ui| {

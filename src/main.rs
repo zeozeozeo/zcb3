@@ -200,19 +200,15 @@ fn run_cli(mut args: Args) {
         volume_var: args.volume_var,
     };
 
-    // create bot (loads clickpack)
-    let mut bot = Bot::new(PathBuf::from(args.clicks), pitch, args.sample_rate)
-        .expect("failed to create bot");
+    // create bot and load clickpack
+    let mut bot = Bot::new(args.sample_rate);
+    bot.load_clickpack(
+        &PathBuf::from(args.clicks),
+        pitch,
+        &InterpolationParams::default(),
+    );
 
     // parse replay
-    // let replay = Macro::parse(
-    //     MacroType::guess_format(replay_filename).unwrap(),
-    //     &replay,
-    //     timings,
-    //     vol_settings,
-    //     false,
-    //     args.sort_actions,
-    // )
     let format = ReplayType::guess_format(replay_filename).expect("failed to guess format");
     let replay = Replay::build()
         .with_timings(timings)

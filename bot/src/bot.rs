@@ -1,4 +1,4 @@
-use crate::{AudioSegment, ClickType, ExtendedAction, Player, Replay};
+use crate::{AudioSegment, ClickType, ExtendedAction, InterpolationParams, Player, Replay};
 use anyhow::Result;
 use fasteval2::Compiler;
 use rand::{seq::SliceRandom, Rng};
@@ -108,7 +108,12 @@ impl Default for VolumeSettings {
     }
 }
 
-fn read_clicks_in_directory(dir: PathBuf, pitch: Pitch, sample_rate: u32) -> Vec<AudioSegment> {
+fn read_clicks_in_directory(
+    dir: PathBuf,
+    pitch: Pitch,
+    sample_rate: u32,
+    params: &InterpolationParams,
+) -> Vec<AudioSegment> {
     log::debug!(
         "loading clicks from directory {}",
         dir.to_str().unwrap_or("")
@@ -131,10 +136,9 @@ fn read_clicks_in_directory(dir: PathBuf, pitch: Pitch, sample_rate: u32) -> Vec
                 log::error!("failed to decode file '{path:?}'");
                 continue;
             };
-            log::info!("segment b4: {}", segment.sample_rate);
-            segment.resample(sample_rate);
-            log::info!("segment sample rate: {}", segment.sample_rate);
-            segment.make_pitch_table(pitch.from, pitch.to, pitch.step);
+
+            segment.resample(sample_rate, params);
+            segment.make_pitch_table(pitch.from, pitch.to, pitch.step, params);
             segments.push(segment);
         }
     }
@@ -142,7 +146,12 @@ fn read_clicks_in_directory(dir: PathBuf, pitch: Pitch, sample_rate: u32) -> Vec
 }
 
 impl PlayerClicks {
-    pub fn from_path(mut path: PathBuf, pitch: Pitch, sample_rate: u32) -> Self {
+    pub fn from_path(
+        mut path: PathBuf,
+        pitch: Pitch,
+        sample_rate: u32,
+        params: &InterpolationParams,
+    ) -> Self {
         let mut player = PlayerClicks::default();
 
         for (dir, clicks) in [
@@ -156,13 +165,13 @@ impl PlayerClicks {
             ("microreleases", &mut player.microreleases),
         ] {
             path.push(dir);
-            *clicks = read_clicks_in_directory(path.clone(), pitch, sample_rate);
+            *clicks = read_clicks_in_directory(path.clone(), pitch, sample_rate, params);
             path.pop();
         }
 
         if !player.has_clicks() {
             log::warn!("no clicks found, assuming there's no subdirectories");
-            player.clicks = read_clicks_in_directory(path.clone(), pitch, sample_rate);
+            player.clicks = read_clicks_in_directory(path.clone(), pitch, sample_rate, params);
         }
 
         player
@@ -246,25 +255,25 @@ pub struct Bot {
 }
 
 impl Bot {
-    pub fn new(clickpack_dir: PathBuf, pitch: Pitch, sample_rate: u32) -> Result<Self> {
-        let mut bot = Bot {
+    #[inline]
+    pub fn new(sample_rate: u32) -> Self {
+        Self {
             sample_rate,
             ..Default::default()
-        };
-        bot.load_clickpack(clickpack_dir, pitch);
-        if !bot.player.0.has_clicks() && !bot.player.1.has_clicks() {
-            return Err(anyhow::anyhow!(
-                "couldn't find any sounds, did you choose the right folder?"
-            ));
         }
-        Ok(bot)
     }
 
+    #[inline]
     pub const fn has_noise(&self) -> bool {
         self.noise.is_some()
     }
 
-    fn load_clickpack(&mut self, clickpack_dir: PathBuf, pitch: Pitch) {
+    pub fn load_clickpack(
+        &mut self,
+        clickpack_dir: &PathBuf,
+        pitch: Pitch,
+        params: &InterpolationParams,
+    ) {
         assert!(self.sample_rate > 0);
         let mut player1_path = clickpack_dir.clone();
         player1_path.push("player1");
@@ -274,16 +283,17 @@ impl Bot {
         // check if the clickpack has player1/player2 folders
         if !player1_path.exists() && !player2_path.exists() {
             log::warn!("clickpack directory doesn't have player1/player2 folders");
-            let clicks = PlayerClicks::from_path(clickpack_dir.clone(), pitch, self.sample_rate);
+            let clicks =
+                PlayerClicks::from_path(clickpack_dir.clone(), pitch, self.sample_rate, params);
             self.player = (clicks.clone(), clicks);
-            self.load_noise(clickpack_dir); // try to load noise
+            self.load_noise(clickpack_dir, params); // try to load noise
             return;
         }
 
         // load clicks from player1 and player2 folders
         self.player = (
-            PlayerClicks::from_path(player1_path.clone(), pitch, self.sample_rate),
-            PlayerClicks::from_path(player2_path.clone(), pitch, self.sample_rate),
+            PlayerClicks::from_path(player1_path.clone(), pitch, self.sample_rate, params),
+            PlayerClicks::from_path(player2_path.clone(), pitch, self.sample_rate, params),
         );
 
         // find longest click (will be used to ensure that the end doesn't get cut off)
@@ -295,12 +305,12 @@ impl Bot {
         log::debug!("longest click: {:?}", self.longest_click);
 
         // search for noise file, prefer root clickpack dir
-        self.load_noise(player1_path);
-        self.load_noise(player2_path);
-        self.load_noise(clickpack_dir);
+        self.load_noise(&player1_path, params);
+        self.load_noise(&player2_path, params);
+        self.load_noise(clickpack_dir, params);
     }
 
-    fn load_noise(&mut self, dir: PathBuf) {
+    fn load_noise(&mut self, dir: &PathBuf, params: &InterpolationParams) {
         let Ok(dir) = dir.read_dir() else {
             return;
         };
@@ -314,7 +324,7 @@ impl Bot {
                 log::info!("found noise file {path:?}");
                 let f = std::fs::File::open(path.clone()).unwrap();
                 self.noise = if let Ok(mut noise) = AudioSegment::from_media_source(Box::new(f)) {
-                    noise.resample(self.sample_rate);
+                    noise.resample(self.sample_rate, params);
                     Some(noise)
                 } else {
                     None
