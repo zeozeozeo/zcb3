@@ -459,10 +459,11 @@ impl App {
             } else {
                 modal.open_dialog(
                     Some("You are up-to-date!"),
-                    Some(
-                        "You are running the latest version of ZCB.\n\
+                    Some(format!(
+                        "You are running the latest version of ZCB ({}).\n\
                         You can always download new versions on GitHub or on the Discord server.",
-                    ),
+                        get_version(),
+                    )),
                     Some(Icon::Success),
                 );
             }
@@ -1262,7 +1263,7 @@ impl App {
 
         ui.collapsing("Audio settings", |ui| {
             // make sure we disable noise if the clickpack doesn't have it
-            if self.conf.noise && !self.bot.borrow().has_noise() {
+            if !self.clickpack_has_noise {
                 self.conf.noise = false;
             }
 
