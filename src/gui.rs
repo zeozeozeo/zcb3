@@ -251,6 +251,7 @@ impl eframe::App for App {
 
         egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
             let mut dialog = Modal::new(ctx, "config_dialog");
+            let mut update_dialog = Modal::new(ctx, "update_dialog");
             let mut modal = Modal::new(ctx, "update_modal");
 
             egui::ScrollArea::horizontal().show(ui, |ui| {
@@ -269,7 +270,7 @@ impl eframe::App for App {
                         .on_hover_text("Check if your ZCB version is up-to-date")
                         .clicked()
                     {
-                        self.do_update_check(&modal);
+                        self.do_update_check(&modal, &update_dialog);
                     }
                     ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
 
@@ -298,9 +299,10 @@ impl eframe::App for App {
             });
 
             dialog.show_dialog();
+            update_dialog.show_dialog();
             modal.show_dialog();
 
-            self.show_update_check_modal(&modal, frame);
+            self.show_update_check_modal(&modal, &update_dialog, frame);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -339,17 +341,15 @@ fn get_latest_tag() -> Result<(usize, String)> {
     Ok((tagname.replace('.', "").parse()?, tagname.to_string()))
 }
 
-fn update_to_tag(tag: &str) -> Result<()> {
+fn update_to_latest(tag: &str) -> Result<()> {
     let client = reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
         .build()?;
     let resp = client
-        .get(format!(
-            "https://api.github.com/repos/zeozeozeo/zcb3/releases/tags/{})",
-            tag.trim()
-        ))
+        .get("https://api.github.com/repos/zeozeozeo/zcb3/releases/latest")
         .send()?
         .text()?;
+    log::debug!("releases response text: '{resp}'");
     let v: Value = serde_json::from_str(&resp)?;
 
     let filename = if cfg!(windows) {
@@ -370,6 +370,7 @@ fn update_to_tag(tag: &str) -> Result<()> {
 
     if let Some(url) = asset_url {
         let resp = client.get(url).send()?.bytes()?;
+        log::info!("response data length: {}", resp.len());
 
         // generate random string
         use rand::Rng;
@@ -403,7 +404,12 @@ fn get_current_tag() -> usize {
 }
 
 impl App {
-    fn show_update_check_modal(&mut self, modal: &Modal, frame: &mut eframe::Frame) {
+    fn show_update_check_modal(
+        &mut self,
+        modal: &Modal,
+        dialog: &Modal,
+        frame: &mut eframe::Frame,
+    ) {
         let Some((tag, current_tag, tag_string)) = self.update_tags.clone() else {
             return;
         };
@@ -421,15 +427,16 @@ impl App {
                                     You might have to restart ZCB")
                     .clicked()
                 {
-                    if let Err(e) = update_to_tag(&tag_string) {
-                        modal.open_dialog(
+                    if let Err(e) = update_to_latest(&tag_string) {
+                        dialog.open_dialog(
                             Some("Failed to perform auto-update"),
                             Some(format!("{e}. Try updating manually.")),
                             Some(Icon::Error),
                         );
+                    } else {
+                        frame.close();
                     }
                     self.update_tags = None;
-                    frame.close();
                 }
                 if modal.button(ui, "close").clicked() {
                     self.update_tags = None;
@@ -438,7 +445,7 @@ impl App {
         });
     }
 
-    fn do_update_check(&mut self, modal: &Modal) {
+    fn do_update_check(&mut self, modal: &Modal, dialog: &Modal) {
         let latest_tag = get_latest_tag();
         let current_tag = get_current_tag();
 
@@ -457,7 +464,7 @@ impl App {
                 self.update_tags = Some((tag, current_tag, tag_str));
                 modal.open();
             } else {
-                modal.open_dialog(
+                dialog.open_dialog(
                     Some("You are up-to-date!"),
                     Some(format!(
                         "You are running the latest version of ZCB ({}).\n\
@@ -469,7 +476,7 @@ impl App {
             }
         } else if let Err(e) = latest_tag {
             log::error!("failed to check for updates: {e}");
-            modal.open_dialog(
+            dialog.open_dialog(
                 Some("Failed to check for updates"),
                 Some(e),
                 Some(Icon::Error),
