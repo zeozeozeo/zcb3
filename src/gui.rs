@@ -276,6 +276,11 @@ impl eframe::App for App {
                             .clicked()
                         {
                             self.load_config(&dialog);
+
+                            // reload replay if it was loaded
+                            if let Some(replay_path) = &self.replay_path.clone() {
+                                self.load_replay(&dialog, replay_path);
+                            }
                         }
                         if ui
                             .button("Save")
