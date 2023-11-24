@@ -6,9 +6,8 @@ use bot::{
     WindowFunction,
 };
 use eframe::{
-    egui::{self, Key, RichText},
+    egui::{self, IconData, Key, RichText},
     epaint::Color32,
-    IconData,
 };
 use egui_modal::{Icon, Modal};
 use egui_plot::PlotPoint;
@@ -29,12 +28,13 @@ pub fn run_gui() -> Result<(), eframe::Error> {
         .unwrap();
 
     let options = eframe::NativeOptions {
-        initial_window_size: Some(egui::vec2(420.0, 390.0)),
-        icon_data: Some(IconData {
-            rgba: img.to_rgba8().to_vec(),
-            width: img.width(),
-            height: img.height(),
-        }),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([420.0, 390.0])
+            .with_icon(IconData {
+                rgba: img.to_rgba8().to_vec(),
+                width: img.width(),
+                height: img.height(),
+            }),
         ..Default::default()
     };
     eframe::run_native(
@@ -216,7 +216,7 @@ fn help_text<R>(ui: &mut egui::Ui, help: &str, add_contents: impl FnOnce(&mut eg
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         ctx.input(|i| {
             use Key::*;
             const BOYKISSER: [Key; 9] = [B, O, Y, K, I, S, S, E, R];
@@ -302,7 +302,7 @@ impl eframe::App for App {
             update_dialog.show_dialog();
             modal.show_dialog();
 
-            self.show_update_check_modal(&modal, &update_dialog, frame);
+            self.show_update_check_modal(&modal, &update_dialog, ctx);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -404,12 +404,7 @@ fn get_current_tag() -> usize {
 }
 
 impl App {
-    fn show_update_check_modal(
-        &mut self,
-        modal: &Modal,
-        dialog: &Modal,
-        frame: &mut eframe::Frame,
-    ) {
+    fn show_update_check_modal(&mut self, modal: &Modal, dialog: &Modal, ctx: &egui::Context) {
         let Some((tag, current_tag, tag_string)) = self.update_tags.clone() else {
             return;
         };
@@ -434,7 +429,7 @@ impl App {
                             Some(Icon::Error),
                         );
                     } else {
-                        frame.close();
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
                     self.update_tags = None;
                 }
@@ -452,15 +447,6 @@ impl App {
         if let Ok((tag, tag_str)) = latest_tag {
             log::info!("latest tag: {tag}, current tag {current_tag}");
             if tag > current_tag {
-                // dialog.open_dialog(
-                //     Some(t!("update.new_version_title")),
-                //     Some(t!(
-                //         "update.new_version_body",
-                //         tag = tag,
-                //         current_tag = current_tag,
-                //     )),
-                //     Some(Icon::Info),
-                // );
                 self.update_tags = Some((tag, current_tag, tag_str));
                 modal.open();
             } else {
