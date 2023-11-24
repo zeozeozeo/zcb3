@@ -573,7 +573,10 @@ impl Bot {
 
                 match expr_var {
                     ExprVariable::Value => (value, 0.),
-                    ExprVariable::Variation => (rand::thread_rng().gen_range(0.0..=value), 0.),
+                    ExprVariable::Variation => (
+                        rand::thread_rng().gen_range(value.min(0.0)..=value.max(0.0)),
+                        0.,
+                    ),
                     ExprVariable::TimeOffset => (0., value),
                     _ => unreachable!(),
                 }
