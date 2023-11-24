@@ -275,6 +275,15 @@ impl eframe::App for App {
                     ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.style_mut().spacing.item_spacing.x = 4.;
+                        if ui
+                            .button("Reset")
+                            .on_hover_text("Reset the current configuration to defaults")
+                            .clicked()
+                        {
+                            self.conf = Config::default();
+                        }
+                        ui.style_mut().spacing.item_spacing.x = 4.;
                         if ui
                             .button("Load")
                             .on_hover_text("Load a configuration file")
@@ -287,6 +296,7 @@ impl eframe::App for App {
                                 self.load_replay(&dialog, replay_path);
                             }
                         }
+                        ui.style_mut().spacing.item_spacing.x = 4.;
                         if ui
                             .button("Save")
                             .on_hover_text("Save the current configuration")
