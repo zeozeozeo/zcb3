@@ -29,7 +29,7 @@ pub fn run_gui() -> Result<(), eframe::Error> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([420.0, 390.0])
+            .with_inner_size([460.0, 440.0])
             .with_icon(IconData {
                 rgba: img.to_rgba8().to_vec(),
                 width: img.width(),
