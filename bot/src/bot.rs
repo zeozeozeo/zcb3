@@ -5,20 +5,47 @@ use rand::{seq::SliceRandom, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
+    ops::{Deref, DerefMut},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
 #[derive(Debug, Clone, Default)]
+pub struct AudioFile {
+    pub segment: AudioSegment,
+    pub filename: String,
+}
+
+impl AudioFile {
+    pub const fn new(segment: AudioSegment, filename: String) -> Self {
+        Self { segment, filename }
+    }
+}
+
+impl Deref for AudioFile {
+    type Target = AudioSegment;
+
+    fn deref(&self) -> &Self::Target {
+        &self.segment
+    }
+}
+
+impl DerefMut for AudioFile {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.segment
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct PlayerClicks {
-    pub hardclicks: Vec<AudioSegment>,
-    pub hardreleases: Vec<AudioSegment>,
-    pub clicks: Vec<AudioSegment>,
-    pub releases: Vec<AudioSegment>,
-    pub softclicks: Vec<AudioSegment>,
-    pub softreleases: Vec<AudioSegment>,
-    pub microclicks: Vec<AudioSegment>,
-    pub microreleases: Vec<AudioSegment>,
+    pub hardclicks: Vec<AudioFile>,
+    pub hardreleases: Vec<AudioFile>,
+    pub clicks: Vec<AudioFile>,
+    pub releases: Vec<AudioFile>,
+    pub softclicks: Vec<AudioFile>,
+    pub softreleases: Vec<AudioFile>,
+    pub microclicks: Vec<AudioFile>,
+    pub microreleases: Vec<AudioFile>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -26,6 +53,14 @@ pub struct Pitch {
     pub from: f32,
     pub to: f32,
     pub step: f32,
+}
+
+impl Pitch {
+    pub const NO_PITCH: Pitch = Pitch {
+        from: 1.,
+        to: 1.,
+        step: 0.,
+    };
 }
 
 impl Default for Pitch {
@@ -105,6 +140,8 @@ pub struct ClickpackConversionSettings {
     pub silence_threshold: f32,
     pub player1_dirname: String,
     pub player2_dirname: String,
+    #[serde(default = "bool::default")]
+    pub rename_files: bool,
 }
 
 impl Default for ClickpackConversionSettings {
@@ -116,6 +153,7 @@ impl Default for ClickpackConversionSettings {
             silence_threshold: 0.05,
             player1_dirname: "player1".to_string(),
             player2_dirname: "player2".to_string(),
+            rename_files: false,
         }
     }
 }
@@ -150,7 +188,7 @@ fn read_clicks_in_directory(
     pitch: Pitch,
     sample_rate: u32,
     params: &InterpolationParams,
-) -> Vec<AudioSegment> {
+) -> Vec<AudioFile> {
     log::debug!(
         "loading clicks from directory {}",
         dir.to_str().unwrap_or("")
@@ -174,9 +212,11 @@ fn read_clicks_in_directory(
                 continue;
             };
 
+            let filename = path.file_name().unwrap().to_str().unwrap().to_string();
+
             segment.resample(sample_rate, params);
             segment.make_pitch_table(pitch.from, pitch.to, pitch.step, params);
-            segments.push(segment);
+            segments.push(AudioFile::new(segment, filename));
         }
     }
     segments
@@ -634,7 +674,14 @@ impl Bot {
                     }
 
                     // create click file
-                    player_path.push(format!("{}.wav", i + 1));
+                    if settings.rename_files {
+                        player_path.push(format!("{}.wav", i + 1));
+                    } else {
+                        player_path.push(format!(
+                            "{}.wav",
+                            click.filename.split('.').next().unwrap_or(&click.filename)
+                        ));
+                    }
                     log::debug!("creating file {player_path:?}");
                     let f = std::fs::File::create(&player_path)?;
 

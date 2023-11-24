@@ -258,7 +258,7 @@ fn run_cli(mut args: Args) {
             step: args.pitch_step,
         }
     } else {
-        Pitch::default()
+        Pitch::NO_PITCH
     };
 
     let timings = Timings {

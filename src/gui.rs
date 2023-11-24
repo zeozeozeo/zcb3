@@ -905,6 +905,10 @@ impl App {
                     ui.checkbox(&mut conv_settings.reverse, "Reverse audio")
                 });
 
+                help_text(ui, "Rename all audio files to 1.wav, 2.wav, etc.", |ui| {
+                    ui.checkbox(&mut conv_settings.rename_files, "Rename files")
+                });
+
                 help_text(
                     ui,
                     "Remove silence from beginning or end of all audio files",
@@ -977,6 +981,7 @@ impl App {
                         if ui
                             .button("Convert")
                             .on_disabled_hover_text(err.unwrap_or(""))
+                            .on_hover_text("Convert the clickpack.\nNote that all files will be converted to .wav")
                             .clicked()
                         {
                             if let Some(dir) = FileDialog::new().pick_folder() {
@@ -986,7 +991,7 @@ impl App {
                                 if !self.bot.borrow().has_clicks() {
                                     self.bot.borrow_mut().load_clickpack(
                                         &self.clickpack_path.clone().unwrap(),
-                                        self.conf.pitch,
+                                        Pitch::NO_PITCH, // don't generate pitch table
                                         &self.conf.interpolation_params,
                                     )
                                 }
@@ -1010,6 +1015,9 @@ impl App {
                                         Some(Icon::Success),
                                     )
                                 }
+
+                                // finished, unload clickpack
+                                *self.bot.borrow_mut() = Bot::new(self.conf.sample_rate);
                             } else {
                                 dialog.open_dialog(
                                     Some("No directory was selected"),
@@ -1139,7 +1147,11 @@ impl App {
         // load clickpack
         self.bot.borrow_mut().load_clickpack(
             clickpack_path,
-            self.conf.pitch,
+            if self.conf.pitch_enabled {
+                self.conf.pitch
+            } else {
+                Pitch::NO_PITCH
+            },
             &self.conf.interpolation_params,
         );
         self.clickpack_num_sounds =
