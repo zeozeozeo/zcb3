@@ -972,6 +972,7 @@ impl App {
                                 }
 
                                 // convert
+                                let start = Instant::now();
                                 if let Err(e) =
                                     self.bot.borrow().convert_clickpack(&dir, conv_settings)
                                 {
@@ -979,6 +980,15 @@ impl App {
                                         Some("Failed to convert clickpack"),
                                         Some(e),
                                         Some(Icon::Error),
+                                    )
+                                } else {
+                                    dialog.open_dialog(
+                                        Some("Success!"),
+                                        Some(format!(
+                                            "Successfully converted clickpack in {:?}.",
+                                            start.elapsed()
+                                        )),
+                                        Some(Icon::Success),
                                     )
                                 }
                             } else {
