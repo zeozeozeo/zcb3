@@ -257,6 +257,7 @@ impl eframe::App for App {
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
+                    ui.style_mut().spacing.item_spacing.x = 5.;
                     if self.stage != self.stage.previous()
                         && ui
                             .button("Back")
@@ -275,7 +276,7 @@ impl eframe::App for App {
                     ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.style_mut().spacing.item_spacing.x = 4.;
+                        ui.style_mut().spacing.item_spacing.x = 5.;
                         if ui
                             .button("Reset")
                             .on_hover_text("Reset the current configuration to defaults")
@@ -283,7 +284,7 @@ impl eframe::App for App {
                         {
                             self.conf = Config::default();
                         }
-                        ui.style_mut().spacing.item_spacing.x = 4.;
+                        ui.style_mut().spacing.item_spacing.x = 5.;
                         if ui
                             .button("Load")
                             .on_hover_text("Load a configuration file")
@@ -296,7 +297,7 @@ impl eframe::App for App {
                                 self.load_replay(&dialog, replay_path);
                             }
                         }
-                        ui.style_mut().spacing.item_spacing.x = 4.;
+                        ui.style_mut().spacing.item_spacing.x = 5.;
                         if ui
                             .button("Save")
                             .on_hover_text("Save the current configuration")
@@ -658,6 +659,13 @@ impl App {
                 "Donate to me on Boosty",
                 "https://boosty.to/zeozeozeo/donate",
             );
+        });
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::Image::new(egui::include_image!("assets/discord_logo.png")).max_width(32.0),
+            );
+            ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
         });
     }
 
