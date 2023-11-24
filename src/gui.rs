@@ -980,6 +980,8 @@ impl App {
                             .clicked()
                         {
                             if let Some(dir) = FileDialog::new().pick_folder() {
+                                let start = Instant::now();
+
                                 // check if the clickpack is loaded, load it if not
                                 if !self.bot.borrow().has_clicks() {
                                     self.bot.borrow_mut().load_clickpack(
@@ -990,7 +992,6 @@ impl App {
                                 }
 
                                 // convert
-                                let start = Instant::now();
                                 if let Err(e) =
                                     self.bot.borrow().convert_clickpack(&dir, conv_settings)
                                 {
