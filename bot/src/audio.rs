@@ -301,9 +301,9 @@ impl AudioSegment {
         log::info!("writing wav file");
         let start = Instant::now();
 
-        // create buffered writer with 64mb buffer size
+        // create buffered writer with 16mb buffer size
         let mut wav =
-            hound::WavWriter::new(BufWriter::with_capacity(64 * 1024 * 1024, writer), spec)?;
+            hound::WavWriter::new(BufWriter::with_capacity(16 * 1024 * 1024, writer), spec)?;
         for sample in &self.data {
             wav.write_sample(*sample)?;
         }
@@ -468,7 +468,7 @@ impl AudioSegment {
         self.data.len() - idx
     }
 
-    pub fn remove_silence_before(&mut self, threshold: f32) {
+    pub fn remove_silence_from_start(&mut self, threshold: f32) {
         let mut idx = 0;
         for (i, v) in self.data.chunks(2).enumerate() {
             let avg = (v[0] + v[1]) / 2.; // avg of l and r channels
@@ -480,6 +480,38 @@ impl AudioSegment {
 
         // remove all values upto index
         self.data.drain(..idx);
+    }
+
+    pub fn remove_silence_from_end(&mut self, threshold: f32) {
+        let mut idx = 0;
+        for (i, v) in self.data.chunks(2).rev().enumerate() {
+            let avg = (v[0] + v[1]) / 2.; // avg of l and r channels
+            if avg.abs() > threshold {
+                idx = i * 2;
+                break;
+            }
+        }
+
+        // remove all values from index
+        self.data.drain((self.data.len() - idx)..);
+    }
+
+    pub fn set_volume(&mut self, volume: f32) -> &mut Self {
+        for sample in &mut self.data {
+            *sample *= volume;
+        }
+        self
+    }
+
+    pub fn reverse(&mut self) -> &mut Self {
+        self.data = self
+            .data
+            .chunks_exact(Self::NUM_CHANNELS)
+            .rev()
+            .flatten()
+            .copied()
+            .collect();
+        self
     }
 
     /*

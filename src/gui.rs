@@ -1,8 +1,9 @@
 use crate::built_info;
 use anyhow::{Context, Result};
 use bot::{
-    Bot, ExprVariable, ExtendedAction, InterpolationParams, InterpolationType, Pitch, Replay,
-    ReplayType, Timings, VolumeSettings, WindowFunction,
+    Bot, ClickpackConversionSettings, ExprVariable, ExtendedAction, InterpolationParams,
+    InterpolationType, Pitch, RemoveSilenceFrom, Replay, ReplayType, Timings, VolumeSettings,
+    WindowFunction,
 };
 use eframe::{
     egui::{self, Key, RichText},
@@ -71,10 +72,6 @@ fn get_version() -> String {
     built_info::PKG_VERSION.to_string()
 }
 
-fn default_interpolation_params() -> InterpolationParams {
-    InterpolationParams::default()
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
     #[serde(default = "get_version")]
@@ -91,8 +88,10 @@ struct Config {
     expr_variable: ExprVariable,
     sort_actions: bool,
     plot_data_aspect: f32,
-    #[serde(default = "default_interpolation_params")]
+    #[serde(default = "InterpolationParams::default")]
     interpolation_params: InterpolationParams,
+    #[serde(default = "ClickpackConversionSettings::default")]
+    conversion_settings: ClickpackConversionSettings,
 }
 
 impl Config {
@@ -131,7 +130,8 @@ impl Default for Config {
             expr_variable: ExprVariable::Variation,
             sort_actions: true,
             plot_data_aspect: 20.0,
-            interpolation_params: default_interpolation_params(),
+            interpolation_params: InterpolationParams::default(),
+            conversion_settings: ClickpackConversionSettings::default(),
         }
     }
 }
@@ -880,6 +880,106 @@ impl App {
                         ui.add(egui::Slider::new(&mut p.step, 0.0001..=1.0).text("Pitch step"));
                     },
                 );
+            });
+        });
+
+        ui.collapsing("Convert", |ui| {
+            let conv_settings = &mut self.conf.conversion_settings;
+
+            ui.label("Clickpack conversion. Can be used to modify sounds in batch.");
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.add(egui::DragValue::new(&mut conv_settings.volume).speed(0.1));
+                ui.label("Volume multiplier")
+            });
+
+            ui.checkbox(&mut conv_settings.reverse, "Reverse audio");
+
+            egui::ComboBox::from_label("Remove silence")
+                .selected_text(conv_settings.remove_silence.to_string())
+                .show_ui(ui, |ui| {
+                    use RemoveSilenceFrom::*;
+                    for typ in [None, Start, End] {
+                        ui.selectable_value(
+                            &mut conv_settings.remove_silence,
+                            typ,
+                            typ.to_string(),
+                        );
+                    }
+                });
+            if conv_settings.remove_silence != RemoveSilenceFrom::None {
+                ui.horizontal(|ui| {
+                    ui.add(egui::Slider::new(
+                        &mut conv_settings.silence_threshold,
+                        0.0..=1.0,
+                    ));
+                    ui.label("Silence threshold (volume)")
+                });
+            }
+
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut conv_settings.player1_dirname);
+                help_text(ui, "Name of the folder with player 1 sounds", |ui| {
+                    ui.label("Player 1 folder")
+                });
+            });
+            ui.horizontal(|ui| {
+                ui.text_edit_singleline(&mut conv_settings.player2_dirname);
+                help_text(ui, "Name of the folder with player 2 sounds", |ui| {
+                    ui.label("Player 2 folder")
+                });
+            });
+
+            let err = if conv_settings.player1_dirname.is_empty() {
+                Some("Player 1 folder name can't be empty")
+            } else if conv_settings.player2_dirname.is_empty() {
+                Some("Player 2 folder name can't be empty")
+            } else if conv_settings.player1_dirname == conv_settings.player2_dirname {
+                Some("Player 1 and 2 folder names can't be the same")
+            } else if self.clickpack_path.is_none() {
+                Some("Please select a clickpack")
+            } else {
+                None
+            };
+
+            ui.horizontal(|ui| {
+                ui.add_enabled_ui(err.is_none(), |ui| {
+                    if ui
+                        .button("Convert")
+                        .on_disabled_hover_text(err.unwrap_or(""))
+                        .clicked()
+                    {
+                        if let Some(dir) = FileDialog::new().pick_folder() {
+                            // check if the clickpack is loaded, load it if not
+                            if !self.bot.borrow().has_clicks() {
+                                self.bot.borrow_mut().load_clickpack(
+                                    &self.clickpack_path.clone().unwrap(),
+                                    self.conf.pitch,
+                                    &self.conf.interpolation_params,
+                                )
+                            }
+
+                            // convert
+                            if let Err(e) = self.bot.borrow().convert_clickpack(&dir, conv_settings)
+                            {
+                                dialog.open_dialog(
+                                    Some("Failed to convert clickpack"),
+                                    Some(e),
+                                    Some(Icon::Error),
+                                )
+                            }
+                        } else {
+                            dialog.open_dialog(
+                                Some("No directory was selected"),
+                                Some("Please select a directory"),
+                                Some(Icon::Error),
+                            )
+                        }
+                    }
+                });
+                if let Some(err) = err {
+                    ui.label(RichText::new(err).color(Color32::LIGHT_RED));
+                }
             });
         });
 

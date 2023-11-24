@@ -83,6 +83,43 @@ impl ExprVariable {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+pub enum RemoveSilenceFrom {
+    #[default]
+    None,
+    Start,
+    End,
+}
+
+impl ToString for RemoveSilenceFrom {
+    fn to_string(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct ClickpackConversionSettings {
+    pub volume: f32,
+    pub reverse: bool,
+    pub remove_silence: RemoveSilenceFrom,
+    pub silence_threshold: f32,
+    pub player1_dirname: String,
+    pub player2_dirname: String,
+}
+
+impl Default for ClickpackConversionSettings {
+    fn default() -> Self {
+        Self {
+            volume: 1.,
+            reverse: false,
+            remove_silence: RemoveSilenceFrom::None,
+            silence_threshold: 0.05,
+            player1_dirname: "player1".to_string(),
+            player2_dirname: "player2".to_string(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct VolumeSettings {
     pub enabled: bool,
@@ -109,7 +146,7 @@ impl Default for VolumeSettings {
 }
 
 fn read_clicks_in_directory(
-    dir: PathBuf,
+    dir: &PathBuf,
     pitch: Pitch,
     sample_rate: u32,
     params: &InterpolationParams,
@@ -128,7 +165,7 @@ fn read_clicks_in_directory(
     for entry in dir {
         let path = entry.unwrap().path();
         if path.is_file() {
-            let Some(f) = std::fs::File::open(path.clone()).ok() else {
+            let Some(f) = std::fs::File::open(&path).ok() else {
                 log::error!("failed to open file '{path:?}'");
                 continue;
             };
@@ -165,13 +202,13 @@ impl PlayerClicks {
             ("microreleases", &mut player.microreleases),
         ] {
             path.push(dir);
-            *clicks = read_clicks_in_directory(path.clone(), pitch, sample_rate, params);
+            *clicks = read_clicks_in_directory(&path, pitch, sample_rate, params);
             path.pop();
         }
 
         if !player.has_clicks() {
             log::warn!("no clicks found, assuming there's no subdirectories");
-            player.clicks = read_clicks_in_directory(path.clone(), pitch, sample_rate, params);
+            player.clicks = read_clicks_in_directory(&path, pitch, sample_rate, params);
         }
 
         player
@@ -538,5 +575,93 @@ impl Bot {
     #[inline]
     pub fn has_clicks(&self) -> bool {
         self.player.0.has_clicks() || self.player.1.has_clicks()
+    }
+
+    pub fn convert_clickpack(
+        &self,
+        output_path: &Path,
+        settings: &ClickpackConversionSettings,
+    ) -> Result<()> {
+        if !self.has_clicks() {
+            anyhow::bail!("no clickpack is loaded");
+        }
+
+        // create output directory
+        log::debug!("creating output directory for converted files: {output_path:?}");
+        let mut path = PathBuf::from(output_path);
+        std::fs::create_dir_all(&path)?;
+
+        let convert_player = |player: &PlayerClicks, path: &Path| -> Result<()> {
+            let mut player_path = path.to_path_buf();
+            for (dir, clicks) in [
+                ("hardclicks", &player.hardclicks),
+                ("hardreleases", &player.hardreleases),
+                ("clicks", &player.clicks),
+                ("releases", &player.releases),
+                ("softclicks", &player.softclicks),
+                ("softreleases", &player.softreleases),
+                ("microclicks", &player.microclicks),
+                ("microreleases", &player.microreleases),
+            ] {
+                // check if we have any clicks in this click type
+                if clicks.is_empty() {
+                    continue;
+                }
+
+                player_path.push(dir);
+                log::debug!("creating dir {player_path:?}");
+                std::fs::create_dir_all(&player_path)?;
+
+                for (i, click) in clicks.iter().enumerate() {
+                    // apply settings
+                    let mut click = click.clone();
+                    if settings.volume != 1. {
+                        click.set_volume(settings.volume);
+                    }
+                    if settings.reverse {
+                        click.reverse();
+                    }
+                    if settings.silence_threshold != 0. {
+                        match settings.remove_silence {
+                            RemoveSilenceFrom::Start => {
+                                click.remove_silence_from_start(settings.silence_threshold)
+                            }
+                            RemoveSilenceFrom::End => {
+                                click.remove_silence_from_end(settings.silence_threshold)
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // create click file
+                    player_path.push(format!("{}.wav", i + 1));
+                    log::debug!("creating file {player_path:?}");
+                    let f = std::fs::File::create(&player_path)?;
+
+                    // export wave file
+                    log::debug!("exporting wav file to {player_path:?}");
+                    click.export_wav(f)?;
+                    player_path.pop();
+                }
+                player_path.pop();
+            }
+
+            Ok(())
+        };
+
+        // convert each player
+        if self.player.0.has_clicks() {
+            path.push(&settings.player1_dirname);
+            std::fs::create_dir_all(&path)?;
+            convert_player(&self.player.0, &path)?;
+        }
+        path.pop(); // remove `player1` from path
+        if self.player.1.has_clicks() {
+            path.push(&settings.player2_dirname);
+            std::fs::create_dir_all(&path)?;
+            convert_player(&self.player.1, &path)?;
+        }
+
+        Ok(())
     }
 }
