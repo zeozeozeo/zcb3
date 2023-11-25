@@ -48,6 +48,140 @@ pub struct PlayerClicks {
     pub microreleases: Vec<AudioFile>,
 }
 
+impl PlayerClicks {
+    pub fn from_path(
+        path: &Path,
+        pitch: Pitch,
+        sample_rate: u32,
+        params: &InterpolationParams,
+    ) -> Self {
+        let mut player = PlayerClicks::default();
+
+        for (dir, clicks) in [
+            ("hardclicks", &mut player.hardclicks),
+            ("hardreleases", &mut player.hardreleases),
+            ("clicks", &mut player.clicks),
+            ("releases", &mut player.releases),
+            ("softclicks", &mut player.softclicks),
+            ("softreleases", &mut player.softreleases),
+            ("microclicks", &mut player.microclicks),
+            ("microreleases", &mut player.microreleases),
+        ] {
+            let mut pathbuf = path.to_path_buf();
+            pathbuf.push(dir);
+            clicks.extend(read_clicks_in_directory(
+                &pathbuf,
+                pitch,
+                sample_rate,
+                params,
+            ));
+        }
+
+        if !player.has_clicks() {
+            log::warn!("no clicks found, assuming there's no subdirectories");
+            player
+                .clicks
+                .extend(read_clicks_in_directory(path, pitch, sample_rate, params));
+        }
+
+        player
+    }
+
+    #[inline]
+    pub fn has_clicks(&self) -> bool {
+        [
+            &self.hardclicks,
+            &self.hardreleases,
+            &self.clicks,
+            &self.releases,
+            &self.softclicks,
+            &self.softreleases,
+            &self.microclicks,
+            &self.microreleases,
+        ]
+        .iter()
+        .any(|c| !c.is_empty())
+    }
+
+    /// Choose a random click based on a click type.
+    pub fn random_click(&self, click_type: ClickType) -> Option<&AudioSegment> {
+        let preferred = click_type.preferred();
+        for typ in preferred {
+            use ClickType::*;
+
+            let click = match typ {
+                HardClick => self.hardclicks.choose(&mut rand::thread_rng()),
+                HardRelease => self.hardreleases.choose(&mut rand::thread_rng()),
+                Click => self.clicks.choose(&mut rand::thread_rng()),
+                Release => self.releases.choose(&mut rand::thread_rng()),
+                SoftClick => self.softclicks.choose(&mut rand::thread_rng()),
+                SoftRelease => self.softreleases.choose(&mut rand::thread_rng()),
+                MicroClick => self.microclicks.choose(&mut rand::thread_rng()),
+                MicroRelease => self.microreleases.choose(&mut rand::thread_rng()),
+                _ => continue,
+            };
+            if let Some(click) = click {
+                return Some(click);
+            }
+        }
+        None
+    }
+
+    /// Finds the longest click amongst all clicks.
+    pub fn longest_click(&self) -> f32 {
+        let mut max = 0.0f32;
+        for segments in [
+            &self.hardclicks,
+            &self.hardreleases,
+            &self.clicks,
+            &self.releases,
+            &self.softclicks,
+            &self.softreleases,
+            &self.microclicks,
+            &self.microreleases,
+        ] {
+            for segment in segments {
+                max = max.max(segment.duration().as_secs_f32());
+            }
+        }
+        max
+    }
+
+    #[inline]
+    pub fn num_sounds(&self) -> usize {
+        [
+            &self.hardclicks,
+            &self.hardreleases,
+            &self.clicks,
+            &self.releases,
+            &self.softclicks,
+            &self.softreleases,
+            &self.microclicks,
+            &self.microreleases,
+        ]
+        .iter()
+        .map(|c| c.len())
+        .sum()
+    }
+
+    pub fn extend_with(&mut self, other: &PlayerClicks) {
+        self.hardclicks
+            .extend_from_slice(other.hardclicks.as_slice());
+        self.hardreleases
+            .extend_from_slice(other.hardreleases.as_slice());
+        self.clicks.extend_from_slice(other.clicks.as_slice());
+        self.releases.extend_from_slice(other.releases.as_slice());
+        self.softclicks
+            .extend_from_slice(other.softclicks.as_slice());
+        self.softreleases
+            .extend_from_slice(other.softreleases.as_slice());
+        self.microclicks
+            .extend_from_slice(other.microclicks.as_slice());
+        self.microreleases
+            .extend_from_slice(other.microreleases.as_slice());
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct Pitch {
     pub from: f32,
@@ -212,7 +346,7 @@ impl Default for VolumeSettings {
 }
 
 fn read_clicks_in_directory(
-    dir: &PathBuf,
+    dir: &Path,
     pitch: Pitch,
     sample_rate: u32,
     params: &InterpolationParams,
@@ -248,118 +382,6 @@ fn read_clicks_in_directory(
         }
     }
     segments
-}
-
-impl PlayerClicks {
-    pub fn from_path(
-        mut path: PathBuf,
-        pitch: Pitch,
-        sample_rate: u32,
-        params: &InterpolationParams,
-    ) -> Self {
-        let mut player = PlayerClicks::default();
-
-        for (dir, clicks) in [
-            ("hardclicks", &mut player.hardclicks),
-            ("hardreleases", &mut player.hardreleases),
-            ("clicks", &mut player.clicks),
-            ("releases", &mut player.releases),
-            ("softclicks", &mut player.softclicks),
-            ("softreleases", &mut player.softreleases),
-            ("microclicks", &mut player.microclicks),
-            ("microreleases", &mut player.microreleases),
-        ] {
-            path.push(dir);
-            clicks.extend(read_clicks_in_directory(&path, pitch, sample_rate, params));
-            path.pop();
-        }
-
-        if !player.has_clicks() {
-            log::warn!("no clicks found, assuming there's no subdirectories");
-            player
-                .clicks
-                .extend(read_clicks_in_directory(&path, pitch, sample_rate, params));
-        }
-
-        player
-    }
-
-    #[inline]
-    pub fn has_clicks(&self) -> bool {
-        [
-            &self.hardclicks,
-            &self.hardreleases,
-            &self.clicks,
-            &self.releases,
-            &self.softclicks,
-            &self.softreleases,
-            &self.microclicks,
-            &self.microreleases,
-        ]
-        .iter()
-        .any(|c| !c.is_empty())
-    }
-
-    /// Choose a random click based on a click type.
-    pub fn random_click(&self, click_type: ClickType) -> Option<&AudioSegment> {
-        let preferred = click_type.preferred();
-        for typ in preferred {
-            use ClickType::*;
-
-            let click = match typ {
-                HardClick => self.hardclicks.choose(&mut rand::thread_rng()),
-                HardRelease => self.hardreleases.choose(&mut rand::thread_rng()),
-                Click => self.clicks.choose(&mut rand::thread_rng()),
-                Release => self.releases.choose(&mut rand::thread_rng()),
-                SoftClick => self.softclicks.choose(&mut rand::thread_rng()),
-                SoftRelease => self.softreleases.choose(&mut rand::thread_rng()),
-                MicroClick => self.microclicks.choose(&mut rand::thread_rng()),
-                MicroRelease => self.microreleases.choose(&mut rand::thread_rng()),
-                _ => continue,
-            };
-            if let Some(click) = click {
-                return Some(click);
-            }
-        }
-        None
-    }
-
-    /// Finds the longest click amongst all clicks.
-    pub fn longest_click(&self) -> f32 {
-        let mut max = 0.0f32;
-        for segments in [
-            &self.hardclicks,
-            &self.hardreleases,
-            &self.clicks,
-            &self.releases,
-            &self.softclicks,
-            &self.softreleases,
-            &self.microclicks,
-            &self.microreleases,
-        ] {
-            for segment in segments {
-                max = max.max(segment.duration().as_secs_f32());
-            }
-        }
-        max
-    }
-
-    #[inline]
-    pub fn num_sounds(&self) -> usize {
-        [
-            &self.hardclicks,
-            &self.hardreleases,
-            &self.clicks,
-            &self.releases,
-            &self.softclicks,
-            &self.softreleases,
-            &self.microclicks,
-            &self.microreleases,
-        ]
-        .iter()
-        .map(|c| c.len())
-        .sum()
-    }
 }
 
 #[derive(Debug, Default)]
@@ -425,36 +447,44 @@ impl Bot {
         params: &InterpolationParams,
     ) -> Result<()> {
         assert!(self.sample_rate > 0);
-        let mut player1_path = clickpack_dir.to_path_buf();
-        player1_path.push("player1");
-        let mut player2_path = clickpack_dir.to_path_buf();
-        player2_path.push("player2");
 
-        // check if the clickpack has player1/player2 folders
-        if !player1_path.exists() && !player2_path.exists() {
-            log::warn!("clickpack directory doesn't have player1/player2 folders");
-            let clicks = PlayerClicks::from_path(
-                clickpack_dir.to_path_buf(),
+        // handle different player folder names
+        for player_dirnames in [
+            ("player1", "player2"),
+            ("player 1", "player 2"),
+            ("p1", "p2"),
+            ("1", "2"),
+            ("", ""),
+        ] {
+            let mut player1_path = clickpack_dir.to_path_buf();
+            player1_path.push(player_dirnames.0);
+            let mut player2_path = clickpack_dir.to_path_buf();
+            player2_path.push(player_dirnames.1);
+
+            // load clicks from player1 and player2 folders
+            self.player.0.extend_with(&PlayerClicks::from_path(
+                &player1_path,
                 pitch,
                 self.sample_rate,
                 params,
-            );
-            self.player = (clicks.clone(), clicks);
-            self.load_noise(clickpack_dir, params); // try to load noise
-            return if self.has_clicks() {
-                Ok(())
-            } else {
-                Err(anyhow::anyhow!(
-                    "no clicks found in clickpack, did you select the correct folder?"
-                ))
-            };
-        }
+            ));
 
-        // load clicks from player1 and player2 folders
-        self.player = (
-            PlayerClicks::from_path(player1_path.clone(), pitch, self.sample_rate, params),
-            PlayerClicks::from_path(player2_path.clone(), pitch, self.sample_rate, params),
-        );
+            // only load player2 clicks if directories are not "" (last case)
+            if !player_dirnames.1.is_empty() {
+                self.player.1.extend_with(&PlayerClicks::from_path(
+                    &player2_path,
+                    pitch,
+                    self.sample_rate,
+                    params,
+                ));
+            }
+
+            // try to load noise file in the player directories
+            self.load_noise(&player1_path, params);
+            if !player_dirnames.1.is_empty() {
+                self.load_noise(&player2_path, params);
+            }
+        }
 
         // find longest click (will be used to ensure that the end doesn't get cut off)
         self.longest_click = self
@@ -462,11 +492,9 @@ impl Bot {
             .0
             .longest_click()
             .max(self.player.1.longest_click());
-        log::debug!("longest click: {:?}", self.longest_click);
+        log::debug!("longest click: {}", self.longest_click);
 
-        // search for noise file, prefer root clickpack dir
-        self.load_noise(&player1_path, params);
-        self.load_noise(&player2_path, params);
+        // search for noise file, path to prefer root clickpack dir
         self.load_noise(clickpack_dir, params);
 
         if self.has_clicks() {
