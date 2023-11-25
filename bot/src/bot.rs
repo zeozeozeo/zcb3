@@ -139,14 +139,34 @@ impl ToString for RemoveSilenceFrom {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
+pub enum ChangeVolumeFor {
+    #[default]
+    All,
+    Clicks,
+    Releases,
+}
+
+impl ToString for ChangeVolumeFor {
+    fn to_string(&self) -> String {
+        format!("{self:?}")
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct ClickpackConversionSettings {
+    /// Volume multiplier.
     pub volume: f32,
+    /// Whether to change volume only for releases.
+    #[serde(default = "ChangeVolumeFor::default")]
+    pub change_volume_for: ChangeVolumeFor,
+    /// Whether to reverse all audio files.
     pub reverse: bool,
     pub remove_silence: RemoveSilenceFrom,
     pub silence_threshold: f32,
     pub player1_dirname: String,
     pub player2_dirname: String,
+    /// Whether to rename files to '1.wav', '2.wav', etc.
     #[serde(default = "bool::default")]
     pub rename_files: bool,
 }
@@ -155,6 +175,7 @@ impl Default for ClickpackConversionSettings {
     fn default() -> Self {
         Self {
             volume: 1.,
+            change_volume_for: ChangeVolumeFor::All,
             reverse: false,
             remove_silence: RemoveSilenceFrom::None,
             silence_threshold: 0.05,
@@ -654,15 +675,15 @@ impl Bot {
 
         let convert_player = |player: &PlayerClicks, path: &Path| -> Result<()> {
             let mut player_path = path.to_path_buf();
-            for (dir, clicks) in [
-                ("hardclicks", &player.hardclicks),
-                ("hardreleases", &player.hardreleases),
-                ("clicks", &player.clicks),
-                ("releases", &player.releases),
-                ("softclicks", &player.softclicks),
-                ("softreleases", &player.softreleases),
-                ("microclicks", &player.microclicks),
-                ("microreleases", &player.microreleases),
+            for (dir, clicks, is_clicks) in [
+                ("hardclicks", &player.hardclicks, true),
+                ("hardreleases", &player.hardreleases, false),
+                ("clicks", &player.clicks, true),
+                ("releases", &player.releases, false),
+                ("softclicks", &player.softclicks, true),
+                ("softreleases", &player.softreleases, false),
+                ("microclicks", &player.microclicks, true),
+                ("microreleases", &player.microreleases, false),
             ] {
                 // check if we have any clicks in this click type
                 if clicks.is_empty() {
@@ -676,12 +697,23 @@ impl Bot {
                 for (i, click) in clicks.iter().enumerate() {
                     // apply settings
                     let mut click = click.clone();
-                    if settings.volume != 1. {
+
+                    // change volume
+                    let change_volume = match settings.change_volume_for {
+                        ChangeVolumeFor::All => true,
+                        ChangeVolumeFor::Clicks => is_clicks,
+                        ChangeVolumeFor::Releases => !is_clicks,
+                    };
+                    if change_volume && settings.volume != 1. {
                         click.set_volume(settings.volume);
                     }
+
+                    // reverse
                     if settings.reverse {
                         click.reverse();
                     }
+
+                    // remove silence
                     if settings.silence_threshold != 0. {
                         match settings.remove_silence {
                             RemoveSilenceFrom::Start => {
@@ -700,7 +732,11 @@ impl Bot {
                     } else {
                         player_path.push(format!(
                             "{}.wav",
-                            click.filename.split('.').next().unwrap_or(&click.filename)
+                            if let Some(stem) = Path::new(&click.filename).file_stem() {
+                                stem.to_string_lossy().to_string()
+                            } else {
+                                click.filename.clone()
+                            }
                         ));
                     }
                     log::debug!("creating file {player_path:?}");

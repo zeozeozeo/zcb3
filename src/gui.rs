@@ -1,9 +1,9 @@
 use crate::built_info;
 use anyhow::{Context, Result};
 use bot::{
-    Bot, ClickpackConversionSettings, ExprVariable, ExtendedAction, InterpolationParams,
-    InterpolationType, Pitch, RemoveSilenceFrom, Replay, ReplayType, Timings, VolumeSettings,
-    WindowFunction,
+    Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction,
+    InterpolationParams, InterpolationType, Pitch, RemoveSilenceFrom, Replay, ReplayType, Timings,
+    VolumeSettings, WindowFunction,
 };
 use eframe::{
     egui::{self, IconData, Key, RichText},
@@ -919,6 +919,21 @@ impl App {
                         ui.label("Volume multiplier")
                     });
                 });
+
+                if conv_settings.volume != 1. {
+                    egui::ComboBox::from_label("Change volume for")
+                        .selected_text(conv_settings.change_volume_for.to_string())
+                        .show_ui(ui, |ui| {
+                            use ChangeVolumeFor::*;
+                            for typ in [All, Clicks, Releases] {
+                                ui.selectable_value(
+                                    &mut conv_settings.change_volume_for,
+                                    typ,
+                                    typ.to_string(),
+                                );
+                            }
+                        });
+                }
 
                 help_text(ui, "Reverse all audio files", |ui| {
                     ui.checkbox(&mut conv_settings.reverse, "Reverse audio")
