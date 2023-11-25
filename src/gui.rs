@@ -921,18 +921,20 @@ impl App {
                 });
 
                 if conv_settings.volume != 1. {
-                    egui::ComboBox::from_label("Change volume for")
-                        .selected_text(conv_settings.change_volume_for.to_string())
-                        .show_ui(ui, |ui| {
-                            use ChangeVolumeFor::*;
-                            for typ in [All, Clicks, Releases] {
-                                ui.selectable_value(
-                                    &mut conv_settings.change_volume_for,
-                                    typ,
-                                    typ.to_string(),
-                                );
-                            }
-                        });
+                    help_text(ui, "Only change volume for this click type", |ui| {
+                        egui::ComboBox::from_label("Change volume for")
+                            .selected_text(conv_settings.change_volume_for.to_string())
+                            .show_ui(ui, |ui| {
+                                use ChangeVolumeFor::*;
+                                for typ in [All, Clicks, Releases] {
+                                    ui.selectable_value(
+                                        &mut conv_settings.change_volume_for,
+                                        typ,
+                                        typ.to_string(),
+                                    );
+                                }
+                            });
+                    });
                 }
 
                 help_text(ui, "Reverse all audio files", |ui| {
