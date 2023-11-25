@@ -317,7 +317,7 @@ impl eframe::App for App {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
+            egui::ScrollArea::both().show(ui, |ui| {
                 match self.stage {
                     Stage::SelectReplay => self.show_replay_stage(ctx, ui),
                     Stage::SelectClickpack => self.show_select_clickpack_stage(ctx, ui),
