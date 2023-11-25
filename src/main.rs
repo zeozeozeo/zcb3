@@ -282,7 +282,8 @@ fn run_cli(mut args: Args) {
 
     // create bot and load clickpack
     let mut bot = Bot::new(args.sample_rate);
-    bot.load_clickpack(&PathBuf::from(args.clicks), pitch, &interp_params);
+    bot.load_clickpack(&PathBuf::from(args.clicks), pitch, &interp_params)
+        .expect("failed to load clickpack");
 
     // parse replay
     let format = ReplayType::guess_format(replay_filename).expect("failed to guess format");

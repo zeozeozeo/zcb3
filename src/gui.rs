@@ -1025,29 +1025,47 @@ impl App {
 
                                 // check if the clickpack is loaded, load it if not
                                 if !self.bot.borrow().has_clicks() {
-                                    self.bot.borrow_mut().load_clickpack(
+                                    if let Err(e) = self.bot.borrow_mut().load_clickpack(
                                         &self.clickpack_path.clone().unwrap(),
                                         Pitch::NO_PITCH, // don't generate pitch table
                                         &self.conf.interpolation_params,
-                                    )
+                                    ) {
+                                        dialog.dialog()
+                                            .with_title("Failed to load clickpack")
+                                            .with_body(e)
+                                            .with_icon(Icon::Error)
+                                            .open();
+                                    }
                                 }
 
                                 // convert
                                 if let Err(e) =
                                     self.bot.borrow().convert_clickpack(&dir, conv_settings)
                                 {
-                                    dialog.dialog().with_title("Failed to convert clickpack").with_body(e).with_icon(Icon::Error).open();
+                                    dialog.dialog()
+                                        .with_title("Failed to convert clickpack")
+                                        .with_body(e)
+                                        .with_icon(Icon::Error)
+                                        .open();
                                 } else {
-                                    dialog.dialog().with_title("Success!").with_body(format!(
-                                        "Successfully converted clickpack in {:?}.",
-                                        start.elapsed()
-                                    )).with_icon(Icon::Success).open();
+                                    dialog.dialog()
+                                        .with_title("Success!")
+                                        .with_body(format!(
+                                            "Successfully converted clickpack in {:?}.",
+                                            start.elapsed()
+                                        ))
+                                        .with_icon(Icon::Success)
+                                        .open();
                                 }
 
                                 // finished, unload clickpack
                                 *self.bot.borrow_mut() = Bot::new(self.conf.sample_rate);
                             } else {
-                                dialog.dialog().with_title("No directory was selected").with_body("Please select a directory").with_icon(Icon::Error).open();
+                                dialog.dialog()
+                                    .with_title("No directory was selected")
+                                    .with_body("Please select a directory")
+                                    .with_icon(Icon::Error)
+                                    .open();
                             }
                         }
                     });
@@ -1170,7 +1188,7 @@ impl App {
         };
 
         // load clickpack
-        self.bot.borrow_mut().load_clickpack(
+        if let Err(e) = self.bot.borrow_mut().load_clickpack(
             clickpack_path,
             if self.conf.pitch_enabled {
                 self.conf.pitch
@@ -1178,7 +1196,16 @@ impl App {
                 Pitch::NO_PITCH
             },
             &self.conf.interpolation_params,
-        );
+        ) {
+            dialog
+                .dialog()
+                .with_title("Failed to load clickpack")
+                .with_body(e)
+                .with_icon(Icon::Error)
+                .open();
+            return;
+        }
+
         self.clickpack_num_sounds =
             Some(self.bot.borrow().player.0.num_sounds() + self.bot.borrow().player.1.num_sounds());
 

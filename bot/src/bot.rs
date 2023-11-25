@@ -421,7 +421,7 @@ impl Bot {
         clickpack_dir: &Path,
         pitch: Pitch,
         params: &InterpolationParams,
-    ) {
+    ) -> Result<()> {
         assert!(self.sample_rate > 0);
         let mut player1_path = clickpack_dir.to_path_buf();
         player1_path.push("player1");
@@ -439,7 +439,13 @@ impl Bot {
             );
             self.player = (clicks.clone(), clicks);
             self.load_noise(clickpack_dir, params); // try to load noise
-            return;
+            return if self.has_clicks() {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(
+                    "no clicks found in clickpack, did you select the correct folder?"
+                ))
+            };
         }
 
         // load clicks from player1 and player2 folders
@@ -460,6 +466,14 @@ impl Bot {
         self.load_noise(&player1_path, params);
         self.load_noise(&player2_path, params);
         self.load_noise(clickpack_dir, params);
+
+        if self.has_clicks() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "no clicks found in clickpack, did you select the correct folder?"
+            ))
+        }
     }
 
     fn load_noise(&mut self, dir: &Path, params: &InterpolationParams) {
