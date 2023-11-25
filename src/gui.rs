@@ -434,11 +434,12 @@ impl App {
                     .clicked()
                 {
                     if let Err(e) = update_to_latest(&tag_string) {
-                        dialog.open_dialog(
-                            Some("Failed to perform auto-update"),
-                            Some(format!("{e}. Try updating manually.")),
-                            Some(Icon::Error),
-                        );
+                        dialog
+                            .dialog()
+                            .with_title("Failed to perform auto-update")
+                            .with_body(format!("{e}. Try updating manually."))
+                            .with_icon(Icon::Error)
+                            .open();
                     } else {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
@@ -461,24 +462,25 @@ impl App {
                 self.update_tags = Some((tag, current_tag, tag_str));
                 modal.open();
             } else {
-                dialog.open_dialog(
-                    Some("You are up-to-date!"),
-                    Some(format!(
+                dialog
+                    .dialog()
+                    .with_title("You are up-to-date!")
+                    .with_body(format!(
                         "You are running the latest version of ZCB ({}).\n\
                         You can always download new versions on GitHub or on the Discord server.",
                         get_version(),
-                    )),
-                    Some(Icon::Success),
-                );
+                    ))
+                    .with_icon(Icon::Success)
+                    .open();
             }
         } else if let Err(e) = latest_tag {
             log::error!("failed to check for updates: {e}");
-            dialog.open_dialog(
-                Some("Failed to check for updates"),
-                Some(e),
-                Some(Icon::Error),
-            );
-            return;
+            dialog
+                .dialog()
+                .with_title("Failed to check for updates")
+                .with_body(e)
+                .with_icon(Icon::Error)
+                .open();
         }
     }
 
@@ -563,14 +565,20 @@ impl App {
             .save_file()
         {
             if let Err(e) = self.conf.save(&file) {
-                dialog.open_dialog(Some("Failed to save config"), Some(e), Some(Icon::Error));
+                dialog
+                    .dialog()
+                    .with_title("Failed to save config")
+                    .with_body(e)
+                    .with_icon(Icon::Error)
+                    .open();
             }
         } else {
-            dialog.open_dialog(
-                Some("No file was selected"),
-                Some("Please select a file"),
-                Some(Icon::Error),
-            );
+            dialog
+                .dialog()
+                .with_title("No file was selected")
+                .with_body("Please select a file")
+                .with_icon(Icon::Error)
+                .open();
         }
     }
 
@@ -580,16 +588,22 @@ impl App {
             .pick_file()
         {
             if let Err(e) = self.conf.load(&file) {
-                dialog.open_dialog(Some("Failed to load config"), Some(e), Some(Icon::Error));
+                dialog
+                    .dialog()
+                    .with_title("Failed to load config")
+                    .with_body(e)
+                    .with_icon(Icon::Error)
+                    .open();
             } else {
                 self.update_expr = true;
             }
         } else {
-            dialog.open_dialog(
-                Some("No file was selected"),
-                Some("Please select a file"),
-                Some(Icon::Error),
-            );
+            dialog
+                .dialog()
+                .with_title("No file was selected")
+                .with_body("Please select a file")
+                .with_icon(Icon::Error)
+                .open();
         }
     }
 
@@ -693,18 +707,20 @@ impl App {
                 self.update_expr = true;
                 self.conf_after_replay_selected = Some(self.conf.clone());
             } else if let Err(e) = replay {
-                dialog.open_dialog(
-                    Some("Failed to parse replay file"),
-                    Some(format!("{e}. Is the format supported?")),
-                    Some(Icon::Error),
-                );
+                dialog
+                    .dialog()
+                    .with_title("Failed to parse replay file")
+                    .with_body(format!("{e}. Is the format supported?"))
+                    .with_icon(Icon::Error)
+                    .open();
             }
         } else if let Err(e) = replay_type {
-            dialog.open_dialog(
-                Some("Failed to guess replay format"),
-                Some(format!("Failed to guess replay format: {e}")),
-                Some(Icon::Error),
-            );
+            dialog
+                .dialog()
+                .with_title("Failed to guess replay format")
+                .with_body(format!("Failed to guess replay format: {e}"))
+                .with_icon(Icon::Error)
+                .open();
         }
     }
 
@@ -816,11 +832,12 @@ impl App {
                     self.load_replay(&dialog, &file);
                     self.stage = Stage::SelectClickpack;
                 } else {
-                    dialog.open_dialog(
-                        Some("No file was selected"),
-                        Some("Please select a file"),
-                        Some(Icon::Error),
-                    )
+                    dialog
+                        .dialog()
+                        .with_title("No file was selected")
+                        .with_body("Please select a file")
+                        .with_icon(Icon::Error)
+                        .open();
                 }
             }
 
@@ -1000,30 +1017,18 @@ impl App {
                                 if let Err(e) =
                                     self.bot.borrow().convert_clickpack(&dir, conv_settings)
                                 {
-                                    dialog.open_dialog(
-                                        Some("Failed to convert clickpack"),
-                                        Some(e),
-                                        Some(Icon::Error),
-                                    )
+                                    dialog.dialog().with_title("Failed to convert clickpack").with_body(e).with_icon(Icon::Error).open();
                                 } else {
-                                    dialog.open_dialog(
-                                        Some("Success!"),
-                                        Some(format!(
-                                            "Successfully converted clickpack in {:?}.",
-                                            start.elapsed()
-                                        )),
-                                        Some(Icon::Success),
-                                    )
+                                    dialog.dialog().with_title("Success!").with_body(format!(
+                                        "Successfully converted clickpack in {:?}.",
+                                        start.elapsed()
+                                    )).with_icon(Icon::Success).open();
                                 }
 
                                 // finished, unload clickpack
                                 *self.bot.borrow_mut() = Bot::new(self.conf.sample_rate);
                             } else {
-                                dialog.open_dialog(
-                                    Some("No directory was selected"),
-                                    Some("Please select a directory"),
-                                    Some(Icon::Error),
-                                )
+                                dialog.dialog().with_title("No directory was selected").with_body("Please select a directory").with_icon(Icon::Error).open();
                             }
                         }
                     });
@@ -1100,11 +1105,12 @@ impl App {
                         self.stage = Stage::Render;
                     }
                 } else {
-                    dialog.open_dialog(
-                        Some("No directory was selected"), // title
-                        Some("Please select a directory"), // body
-                        Some(Icon::Error),                 // icon
-                    )
+                    dialog
+                        .dialog()
+                        .with_title("No directory was selected")
+                        .with_body("Please select a directory")
+                        .with_icon(Icon::Error)
+                        .open();
                 }
             }
             if let Some(selected_clickpack_path) = &self.clickpack_path {
@@ -1180,31 +1186,34 @@ impl App {
 
         if let Ok(f) = f {
             if let Err(e) = segment.export_wav(f) {
-                dialog.open_dialog(
-                    Some("Failed to write output file!"),
-                    Some(format!("{e}. Try running the program as administrator.")),
-                    Some(Icon::Error),
-                );
+                dialog
+                    .dialog()
+                    .with_title("Failed to write output file!")
+                    .with_body(format!("{e}. Try running the program as administrator or selecting a different directory."))
+                    .with_icon(Icon::Error)
+                    .open();
             }
         } else if let Err(e) = f {
-            dialog.open_dialog(
-                Some("Failed to open output file!"),
-                Some(format!("{e}. Try running the program as administrator.")),
-                Some(Icon::Error),
-            );
+            dialog
+                .dialog()
+                .with_title("Failed to open output file!")
+                .with_body(format!("{e}. Try running the program as administrator or selecting a different directory."))
+                .with_icon(Icon::Error)
+                .open();
         }
 
         let num_actions = self.replay.actions.len();
         let filename = output.file_name().unwrap().to_str().unwrap();
 
-        dialog.open_dialog(
-            Some("Done!"),
-            Some(format!(
+        dialog
+            .dialog()
+            .with_title("Done!")
+            .with_body(format!(
                 "Successfully exported '{filename}' in {end:?} (~{} actions/second)",
                 num_actions as f32 / end.as_secs_f32()
-            )),
-            Some(Icon::Success),
-        );
+            ))
+            .with_icon(Icon::Success)
+            .open();
     }
 
     fn show_plot(&mut self, ui: &mut egui::Ui) {
@@ -1406,11 +1415,12 @@ impl App {
                             log::info!("selected output file: {path:?}");
                             self.output = Some(path);
                         } else {
-                            dialog.open_dialog(
-                                Some("No output file was selected"),  // title
-                                Some("Please select an output file"), // body
-                                Some(Icon::Error),                    // icon
-                            );
+                            dialog
+                                .dialog()
+                                .with_title("No output file was selected")
+                                .with_body("Please select an output file")
+                                .with_icon(Icon::Error)
+                                .open();
                         }
                     }
                 },

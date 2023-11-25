@@ -21,7 +21,7 @@ members = [".", "bot"]
 [dependencies]
 clap = { version = "4.4.8", features = ["derive"] }
 eframe = { version = "0.24.0", features = ["wgpu"] }
-egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.24.0" }
+egui-modal = "0.3.0"
 env_logger = "0.10.0"
 image = { version = "0.24.7", default-features = false, features = ["ico", "png"] }
 reqwest = { version = "0.11.22", features = ["blocking"] }
