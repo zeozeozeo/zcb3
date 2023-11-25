@@ -270,13 +270,15 @@ impl PlayerClicks {
             ("microreleases", &mut player.microreleases),
         ] {
             path.push(dir);
-            *clicks = read_clicks_in_directory(&path, pitch, sample_rate, params);
+            clicks.extend(read_clicks_in_directory(&path, pitch, sample_rate, params));
             path.pop();
         }
 
         if !player.has_clicks() {
             log::warn!("no clicks found, assuming there's no subdirectories");
-            player.clicks = read_clicks_in_directory(&path, pitch, sample_rate, params);
+            player
+                .clicks
+                .extend(read_clicks_in_directory(&path, pitch, sample_rate, params));
         }
 
         player
