@@ -44,12 +44,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      - name: Install musl-tools on Linux
-        run: sudo apt-get update --yes && sudo apt-get install --yes musl-tools
-        if: contains(matrix.platform.name, 'musl')
-      - name: Install build-essential on Linux
-        run: sudo apt-get install --yes build-essential
-        if: contains(matrix.platform.name, 'musl')
+      - name: Install build-essential and libgtk-3-dev on Linux
+        run: sudo apt-get install --yes build-essential libgtk-3-dev
+        if: contains(matrix.platform.name, 'linux')
       - name: Build binary
         uses: houseabsolute/actions-rust-cross@v0
         with:
