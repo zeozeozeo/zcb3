@@ -20,17 +20,6 @@ enum ArgExprVariable {
     TimeOffset,
 }
 
-impl From<ArgExprVariable> for ExprVariable {
-    fn from(val: ArgExprVariable) -> Self {
-        match val {
-            ArgExprVariable::None => ExprVariable::None,
-            ArgExprVariable::Variation => ExprVariable::Variation,
-            ArgExprVariable::Value => ExprVariable::Value,
-            ArgExprVariable::TimeOffset => ExprVariable::TimeOffset,
-        }
-    }
-}
-
 impl ToString for ArgExprVariable {
     fn to_string(&self) -> String {
         format!("{:?}", self)
@@ -180,6 +169,12 @@ struct Args {
     volume_expr: String,
     #[arg(long, help = "The variable that the expression should affect", default_value_t = ArgExprVariable::None)]
     expr_variable: ArgExprVariable,
+    #[arg(
+        long,
+        help = "Extend the variation range to negative numbers. Only works for variation",
+        default_value_t = true
+    )]
+    expr_negative: bool,
 
     #[arg(
         long,
@@ -319,7 +314,14 @@ fn run_cli(mut args: Args) {
         args.noise,
         args.normalize,
         if !args.volume_expr.is_empty() {
-            args.expr_variable.into()
+            match args.expr_variable {
+                ArgExprVariable::None => ExprVariable::None,
+                ArgExprVariable::Value => ExprVariable::Value,
+                ArgExprVariable::TimeOffset => ExprVariable::TimeOffset,
+                ArgExprVariable::Variation => ExprVariable::Variation {
+                    negative: args.expr_negative,
+                },
+            }
         } else {
             ExprVariable::None
         },

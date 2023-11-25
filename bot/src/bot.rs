@@ -91,12 +91,19 @@ impl Default for Timings {
     }
 }
 
+fn true_value() -> bool {
+    true
+}
+
 /// Defines the variable that the volume expression should affect.
 #[derive(Serialize, Deserialize, Debug, Copy, Clone, PartialEq, Default)]
 pub enum ExprVariable {
     #[default]
     None,
-    Variation,
+    Variation {
+        #[serde(default = "true_value")]
+        negative: bool,
+    },
     Value,
     TimeOffset,
 }
@@ -105,7 +112,7 @@ impl ToString for ExprVariable {
     fn to_string(&self) -> String {
         match self {
             Self::None => "None".to_string(),
-            Self::Variation => "Volume variation".to_string(),
+            Self::Variation { .. } => "Volume variation".to_string(),
             Self::Value => "Volume value".to_string(),
             Self::TimeOffset => "Time offset".to_string(),
         }
@@ -114,7 +121,7 @@ impl ToString for ExprVariable {
 
 impl ExprVariable {
     pub const fn is_volume_change(self) -> bool {
-        matches!(self, Self::Variation | Self::Value)
+        matches!(self, Self::Variation { .. } | Self::Value)
     }
 }
 
@@ -570,13 +577,24 @@ impl Bot {
                 // compute expression
                 self.update_namespace(&extended, replay.last_frame(), replay.fps.into());
                 let value = self.eval_expr().unwrap_or(0.) as f32;
-
                 match expr_var {
                     ExprVariable::Value => (value, 0.),
-                    ExprVariable::Variation => (
-                        rand::thread_rng().gen_range(value.min(0.0)..=value.max(0.0)),
-                        0.,
-                    ),
+                    ExprVariable::Variation { negative } => {
+                        if value == 0. {
+                            (0., 0.)
+                        } else if negative {
+                            (
+                                rand::thread_rng()
+                                    .gen_range((-value).min(value)..=value.max(-value)),
+                                0.,
+                            )
+                        } else {
+                            (
+                                rand::thread_rng().gen_range(value.min(0.0)..=value.max(0.0)),
+                                0.,
+                            )
+                        }
+                    }
                     ExprVariable::TimeOffset => (0., value),
                     _ => unreachable!(),
                 }

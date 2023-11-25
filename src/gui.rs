@@ -127,7 +127,7 @@ impl Default for Config {
             litematic_export_releases: false,
             sample_rate: 44100,
             expr_text: String::new(),
-            expr_variable: ExprVariable::Variation,
+            expr_variable: ExprVariable::Variation { negative: true },
             sort_actions: true,
             plot_data_aspect: 20.0,
             interpolation_params: InterpolationParams::default(),
@@ -154,6 +154,7 @@ struct App {
     replay_path: Option<PathBuf>,
     clickpack_num_sounds: Option<usize>,
     clickpack_has_noise: bool,
+    expr_variable_variation_negative: bool,
 }
 
 impl Default for App {
@@ -176,6 +177,7 @@ impl Default for App {
             replay_path: None,
             clickpack_num_sounds: None,
             clickpack_has_noise: false,
+            expr_variable_variation_negative: true,
         }
     }
 }
@@ -1313,8 +1315,10 @@ impl App {
                 ui.label("Change:");
                 ui.radio_value(
                     &mut self.conf.expr_variable,
-                    ExprVariable::Variation,
-                    ExprVariable::Variation.to_string(),
+                    ExprVariable::Variation {
+                        negative: self.expr_variable_variation_negative,
+                    },
+                    "Variation",
                 )
                 .on_hover_text("Changes the bounds of the random volume offset");
                 ui.radio_value(
@@ -1331,6 +1335,12 @@ impl App {
                 .on_hover_text("Offsets the time of the action");
             });
         });
+        if let ExprVariable::Variation { negative } = &mut self.conf.expr_variable {
+            help_text(ui, "Extend the variation range to negative numbers", |ui| {
+                ui.checkbox(negative, "Negate expression");
+                self.expr_variable_variation_negative = *negative;
+            });
+        }
 
         // plot data aspect
         ui.horizontal(|ui| {
