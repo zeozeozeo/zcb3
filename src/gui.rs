@@ -1235,7 +1235,10 @@ impl App {
                 dialog
                     .dialog()
                     .with_title("Failed to write output file!")
-                    .with_body(format!("{e}. Try running the program as administrator or selecting a different directory."))
+                    .with_body(format!(
+                        "{e}. Try running the program as administrator \
+                        or selecting a different directory."
+                    ))
                     .with_icon(Icon::Error)
                     .open();
             }
@@ -1243,7 +1246,10 @@ impl App {
             dialog
                 .dialog()
                 .with_title("Failed to open output file!")
-                .with_body(format!("{e}. Try running the program as administrator or selecting a different directory."))
+                .with_body(format!(
+                    "{e}. Try running the program as administrator \
+                    or selecting a different directory."
+                ))
                 .with_icon(Icon::Error)
                 .open();
         }
