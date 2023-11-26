@@ -155,7 +155,6 @@ struct App {
     clickpack_num_sounds: Option<usize>,
     clickpack_has_noise: bool,
     expr_variable_variation_negative: bool,
-    plot_prev_frame: RefCell<u32>,
 }
 
 impl Default for App {
@@ -179,7 +178,6 @@ impl Default for App {
             clickpack_num_sounds: None,
             clickpack_has_noise: false,
             expr_variable_variation_negative: true,
-            plot_prev_frame: RefCell::new(0),
         }
     }
 }
@@ -1402,7 +1400,7 @@ impl App {
         });
 
         let plot_points = if expr_changed {
-            *self.plot_prev_frame.borrow_mut() = 0;
+            let prev_frame = RefCell::new(0);
 
             // compute a brand new set of points
             let points = PlotPoints::from_parametric_callback(
@@ -1418,11 +1416,11 @@ impl App {
                     // we can use `self.bot` here because it is an Rc<RefCell<>>
                     self.bot.borrow_mut().update_namespace(
                         &action,
-                        *self.plot_prev_frame.borrow(),
+                        *prev_frame.borrow(),
                         self.replay.last_frame(),
                         self.replay.fps as _,
                     );
-                    *self.plot_prev_frame.borrow_mut() = action.frame;
+                    *prev_frame.borrow_mut() = action.frame;
 
                     // compute the expression for this action
                     let value = self.bot.borrow_mut().eval_expr().unwrap_or(0.);
