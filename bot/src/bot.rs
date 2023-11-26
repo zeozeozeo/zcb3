@@ -560,7 +560,13 @@ impl Bot {
     }
 
     /// Updates the volume variation expressions' namespace.
-    pub fn update_namespace(&mut self, a: &ExtendedAction, total_frames: u32, fps: f64) {
+    pub fn update_namespace(
+        &mut self,
+        a: &ExtendedAction,
+        prev_frame: u32,
+        total_frames: u32,
+        fps: f64,
+    ) {
         self.ns.insert("frame".to_string(), a.frame as _);
         self.ns.insert("fps".to_string(), fps);
         self.ns.insert("time".to_string(), a.frame as f64 / fps);
@@ -577,6 +583,8 @@ impl Bot {
             .insert("level_time".to_string(), total_frames as f64 / fps);
         self.ns
             .insert("rand".to_string(), rand::thread_rng().gen_range(0.0..=1.0));
+        self.ns
+            .insert("delta".to_string(), (a.frame - prev_frame) as f64);
     }
 
     pub fn eval_expr(&mut self) -> Result<f64> {
@@ -589,8 +597,11 @@ impl Bot {
     pub fn expr_range(&mut self, replay: &Replay) -> (f64, f64) {
         let mut min = f64::MAX;
         let mut max = f64::MIN;
+        let mut prev_frame = 0u32;
         for action in &replay.extended {
-            self.update_namespace(action, replay.last_frame(), replay.fps.into());
+            self.update_namespace(action, prev_frame, replay.last_frame(), replay.fps.into());
+            prev_frame = action.frame;
+
             let val = self.eval_expr().unwrap_or(0.);
             min = min.min(val);
             max = max.max(val);
@@ -622,6 +633,7 @@ impl Bot {
             replay.duration + self.longest_click + longest_time_offset,
         );
         let start = Instant::now();
+        let mut prev_frame = 0u32;
 
         for action in &replay.actions {
             // calculate the volume from the expression if needed
@@ -640,7 +652,14 @@ impl Bot {
                     .unwrap_or(ExtendedAction::default());
 
                 // compute expression
-                self.update_namespace(&extended, replay.last_frame(), replay.fps.into());
+                self.update_namespace(
+                    &extended,
+                    prev_frame,
+                    replay.last_frame(),
+                    replay.fps.into(),
+                );
+                prev_frame = extended.frame;
+
                 let value = self.eval_expr().unwrap_or(0.) as f32;
                 match expr_var {
                     ExprVariable::Value => (value, 0.),

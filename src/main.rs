@@ -303,6 +303,7 @@ fn run_cli(mut args: Args) {
         // check for undefined vars
         bot.update_namespace(
             &ExtendedAction::default(),
+            0,
             replay.last_frame(),
             replay.fps as _,
         );

@@ -155,6 +155,7 @@ struct App {
     clickpack_num_sounds: Option<usize>,
     clickpack_has_noise: bool,
     expr_variable_variation_negative: bool,
+    plot_prev_frame: RefCell<u32>,
 }
 
 impl Default for App {
@@ -178,6 +179,7 @@ impl Default for App {
             clickpack_num_sounds: None,
             clickpack_has_noise: false,
             expr_variable_variation_negative: true,
+            plot_prev_frame: RefCell::new(0),
         }
     }
 }
@@ -1281,6 +1283,7 @@ impl App {
             ui.label("• frames: Total amount of frames in replay");
             ui.label("• level_time: Total time in level, in seconds");
             ui.label("• rand: Random value in the range of 0 to 1");
+            ui.label("• delta: Frame delta between the current and previous action");
             ui.label(
                 RichText::new(
                     "NOTE: Some variables may not be set due to different replay formats",
@@ -1314,6 +1317,7 @@ impl App {
                     // update namespace so we can check for undefined variables
                     bot.update_namespace(
                         &ExtendedAction::default(),
+                        0,
                         self.replay.last_frame(),
                         self.replay.fps as _,
                     );
@@ -1398,6 +1402,8 @@ impl App {
         });
 
         let plot_points = if expr_changed {
+            *self.plot_prev_frame.borrow_mut() = 0;
+
             // compute a brand new set of points
             let points = PlotPoints::from_parametric_callback(
                 |t| {
@@ -1412,9 +1418,11 @@ impl App {
                     // we can use `self.bot` here because it is an Rc<RefCell<>>
                     self.bot.borrow_mut().update_namespace(
                         &action,
+                        *self.plot_prev_frame.borrow(),
                         self.replay.last_frame(),
                         self.replay.fps as _,
                     );
+                    *self.plot_prev_frame.borrow_mut() = action.frame;
 
                     // compute the expression for this action
                     let value = self.bot.borrow_mut().eval_expr().unwrap_or(0.);
