@@ -369,6 +369,8 @@ fn update_to_latest(tag: &str) -> Result<()> {
         "zcb3.exe"
     } else if cfg!(macos) {
         "zcb3_macos"
+    } else if cfg!(unix) {
+        "zcb3_linux" // might be any other unix-alike OS, but we only support Linux for now
     } else {
         anyhow::bail!("unsupported on this platform");
     };
