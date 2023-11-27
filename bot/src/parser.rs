@@ -737,8 +737,16 @@ impl Replay {
         Ok(())
     }
 
+    /// Also handles MHR json replays.
     fn parse_tasbot(&mut self, data: &[u8]) -> Result<()> {
         let v: Value = serde_json::from_slice(data)?;
+
+        // check if it's a mhr replay, because maybe someone renamed .mhr.json
+        // to .json by accident
+        if v["meta"]["fps"].as_f64().is_some() {
+            return self.parse_mhr(data);
+        }
+
         self.fps = v["fps"].as_f64().context("couldn't get 'fps' field")? as f32;
         let events = v["macro"]
             .as_array()
