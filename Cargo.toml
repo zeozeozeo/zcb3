@@ -19,7 +19,7 @@ opt-level = 3
 members = [".", "bot"]
 
 [dependencies]
-clap = { version = "4.4.8", features = ["derive"] }
+clap = { version = "4.4.9", features = ["derive"] }
 eframe = { version = "0.24.0", features = ["wgpu"] }
 egui-modal = "0.3.0"
 env_logger = "0.10.0"
