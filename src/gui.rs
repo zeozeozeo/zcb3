@@ -1,9 +1,8 @@
 use crate::built_info;
 use anyhow::{Context, Result};
 use bot::{
-    Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction,
-    InterpolationParams, InterpolationType, Pitch, RemoveSilenceFrom, Replay, ReplayType, Timings,
-    VolumeSettings, WindowFunction,
+    Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction, Pitch, Replay,
+    ReplayType, Timings, VolumeSettings,
 };
 use eframe::{
     egui::{self, IconData, Key, RichText},
@@ -88,8 +87,6 @@ struct Config {
     expr_variable: ExprVariable,
     sort_actions: bool,
     plot_data_aspect: f32,
-    #[serde(default = "InterpolationParams::default")]
-    interpolation_params: InterpolationParams,
     #[serde(default = "ClickpackConversionSettings::default")]
     conversion_settings: ClickpackConversionSettings,
 }
@@ -130,7 +127,6 @@ impl Default for Config {
             expr_variable: ExprVariable::Variation { negative: true },
             sort_actions: true,
             plot_data_aspect: 20.0,
-            interpolation_params: InterpolationParams::default(),
             conversion_settings: ClickpackConversionSettings::default(),
         }
     }
@@ -951,48 +947,6 @@ impl App {
                     ui.checkbox(&mut conv_settings.rename_files, "Rename files")
                 });
 
-                help_text(
-                    ui,
-                    "Remove silence from beginning or end of all audio files",
-                    |ui| {
-                        egui::ComboBox::from_label("Remove silence")
-                            .selected_text(conv_settings.remove_silence.to_string())
-                            .show_ui(ui, |ui| {
-                                use RemoveSilenceFrom::*;
-                                for typ in [None, Start, End] {
-                                    ui.selectable_value(
-                                        &mut conv_settings.remove_silence,
-                                        typ,
-                                        typ.to_string(),
-                                    );
-                                }
-                            });
-                    },
-                );
-
-                if conv_settings.remove_silence != RemoveSilenceFrom::None {
-                    help_text(
-                        ui,
-                        "The volume value at which the sound should start (beta)",
-                        |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add(egui::Slider::new(
-                                    &mut conv_settings.silence_threshold,
-                                    0.0..=1.0,
-                                ));
-                                ui.label("Silence threshold (volume)");
-                                if ui
-                                    .button("Reset")
-                                    .on_hover_text("Reset the silence threshold")
-                                    .clicked()
-                                {
-                                    conv_settings.silence_threshold = 0.05;
-                                }
-                            });
-                        },
-                    );
-                }
-
                 ui.horizontal(|ui| {
                     ui.text_edit_singleline(&mut conv_settings.player1_dirname);
                     help_text(ui, "Name of the folder with player 1 sounds", |ui| {
@@ -1033,8 +987,6 @@ impl App {
                                 if !self.bot.borrow().has_clicks() {
                                     if let Err(e) = self.bot.borrow_mut().load_clickpack(
                                         &self.clickpack_path.clone().unwrap(),
-                                        Pitch::NO_PITCH, // don't generate pitch table
-                                        &self.conf.interpolation_params,
                                     ) {
                                         dialog.dialog()
                                             .with_title("Failed to load clickpack")
@@ -1081,59 +1033,6 @@ impl App {
                 });
             })
             .fully_open(); // let is_convert_tab_open = ...
-
-        // advanced
-        ui.collapsing("Advanced", |ui| {
-            let ip = &mut self.conf.interpolation_params;
-            ui.label("Sinc interpolation parameters. If you don't know what this is, probably don't touch it.");
-            ui.horizontal(|ui| {
-                usize_edit_field(ui, &mut ip.sinc_len);
-                help_text(
-                    ui,
-                    "Length of the windowed sinc interpolation filter.",
-                    |ui| ui.label("Sinc length"),
-                );
-            });
-            ui.horizontal(|ui| {
-                f32_edit_field(ui, &mut ip.f_cutoff);
-                help_text(
-                    ui,
-                    "Relative cutoff frequency of the sinc interpolation filter.",
-                    |ui| ui.label("Frequency cutoff"),
-                );
-            });
-            ui.horizontal(|ui| {
-                usize_edit_field(ui, &mut ip.oversampling_factor);
-                help_text(
-                    ui,
-                    "The number of intermediate points to use for interpolation.",
-                    |ui| ui.label("Oversampling factor"),
-                );
-            });
-            egui::ComboBox::from_label("Interpolation type")
-                .selected_text(ip.interpolation.to_string())
-                .show_ui(ui, |ui| {
-                    use InterpolationType::*;
-                    for typ in [Cubic, Quadratic, Linear, Nearest] {
-                        ui.selectable_value(&mut ip.interpolation, typ, typ.to_string());
-                    }
-                });
-            egui::ComboBox::from_label("Window function")
-                .selected_text(ip.window.to_string())
-                .show_ui(ui, |ui| {
-                    use WindowFunction::*;
-                    for window in [
-                        Blackman,
-                        Blackman2,
-                        BlackmanHarris,
-                        BlackmanHarris2,
-                        Hann,
-                        Hann2,
-                    ] {
-                        ui.selectable_value(&mut ip.window, window, window.to_string());
-                    }
-                });
-        });
 
         ui.separator();
 
@@ -1194,15 +1093,7 @@ impl App {
         };
 
         // load clickpack
-        if let Err(e) = self.bot.borrow_mut().load_clickpack(
-            clickpack_path,
-            if self.conf.pitch_enabled {
-                self.conf.pitch
-            } else {
-                Pitch::NO_PITCH
-            },
-            &self.conf.interpolation_params,
-        ) {
+        if let Err(e) = self.bot.borrow_mut().load_clickpack(clickpack_path) {
             dialog
                 .dialog()
                 .with_title("Failed to load clickpack")
@@ -1216,7 +1107,25 @@ impl App {
             Some(self.bot.borrow().player.0.num_sounds() + self.bot.borrow().player.1.num_sounds());
 
         let start = Instant::now();
-        let segment = self.bot.borrow_mut().render_replay(
+
+        // open output file
+        let output = self
+            .output
+            .clone()
+            .unwrap_or(PathBuf::from("you_shouldnt_see_this.wav"));
+        let f = std::fs::File::create(output.clone());
+        let Ok(f) = f else {
+            dialog
+                .dialog()
+                .with_title("Failed to open output file!")
+                .with_body(f.unwrap_err())
+                .with_icon(Icon::Error)
+                .open();
+            return;
+        };
+
+        // render replay
+        if let Err(e) = self.bot.borrow_mut().render_replay(
             &self.replay,
             self.conf.noise,
             self.conf.normalize,
@@ -1226,39 +1135,19 @@ impl App {
                 ExprVariable::None
             },
             self.conf.pitch_enabled,
-        );
-        let end = start.elapsed();
-        log::info!("rendered in {end:?}");
-
-        let output = self
-            .output
-            .clone()
-            .unwrap_or(PathBuf::from("you_shouldnt_see_this.wav"));
-        let f = std::fs::File::create(output.clone());
-
-        if let Ok(f) = f {
-            if let Err(e) = segment.export_wav(f) {
-                dialog
-                    .dialog()
-                    .with_title("Failed to write output file!")
-                    .with_body(format!(
-                        "{e}. Try running the program as administrator \
-                        or selecting a different directory."
-                    ))
-                    .with_icon(Icon::Error)
-                    .open();
-            }
-        } else if let Err(e) = f {
+            f,
+        ) {
             dialog
                 .dialog()
-                .with_title("Failed to open output file!")
-                .with_body(format!(
-                    "{e}. Try running the program as administrator \
-                    or selecting a different directory."
-                ))
+                .with_title("Failed to render replay!")
+                .with_body(e)
                 .with_icon(Icon::Error)
                 .open();
+            return;
         }
+
+        let end = start.elapsed();
+        log::info!("rendered in {end:?}");
 
         let num_actions = self.replay.actions.len();
         let filename = output.file_name().unwrap().to_str().unwrap();

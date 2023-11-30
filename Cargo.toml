@@ -6,12 +6,9 @@ authors = ["zeozeozeo"]
 build = "build.rs"
 
 [profile.release]
-lto = true
-strip = true
-
-# rubato is *super* slow in debug builds, so we always build it with O3
-[profile.dev.package.rubato]
-opt-level = 3
+# lto = true
+# strip = true
+debug = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

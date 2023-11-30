@@ -1,40 +1,14 @@
-use crate::{AudioSegment, ClickType, ExtendedAction, InterpolationParams, Player, Replay};
+use crate::{AudioFile, ClickType, ExtendedAction, Player, Replay};
 use anyhow::Result;
 use fasteval2::Compiler;
+use kittyaudio::{Mixer, Sound};
 use rand::{seq::SliceRandom, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    ops::{Deref, DerefMut},
+    io::BufWriter,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
 };
-
-#[derive(Debug, Clone, Default)]
-pub struct AudioFile {
-    pub segment: AudioSegment,
-    pub filename: String,
-}
-
-impl AudioFile {
-    pub const fn new(segment: AudioSegment, filename: String) -> Self {
-        Self { segment, filename }
-    }
-}
-
-impl Deref for AudioFile {
-    type Target = AudioSegment;
-
-    fn deref(&self) -> &Self::Target {
-        &self.segment
-    }
-}
-
-impl DerefMut for AudioFile {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.segment
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct PlayerClicks {
@@ -49,12 +23,7 @@ pub struct PlayerClicks {
 }
 
 impl PlayerClicks {
-    pub fn from_path(
-        path: &Path,
-        pitch: Pitch,
-        sample_rate: u32,
-        params: &InterpolationParams,
-    ) -> Self {
+    pub fn from_path(path: &Path) -> Self {
         let mut player = PlayerClicks::default();
 
         for (dir, clicks) in [
@@ -69,19 +38,12 @@ impl PlayerClicks {
         ] {
             let mut pathbuf = path.to_path_buf();
             pathbuf.push(dir);
-            clicks.extend(read_clicks_in_directory(
-                &pathbuf,
-                pitch,
-                sample_rate,
-                params,
-            ));
+            clicks.extend(read_clicks_in_directory(&pathbuf));
         }
 
         if !player.has_clicks() {
             log::warn!("no clicks found, assuming there's no subdirectories");
-            player
-                .clicks
-                .extend(read_clicks_in_directory(path, pitch, sample_rate, params));
+            player.clicks.extend(read_clicks_in_directory(path));
         }
 
         player
@@ -104,7 +66,7 @@ impl PlayerClicks {
     }
 
     /// Choose a random click based on a click type.
-    pub fn random_click(&self, click_type: ClickType) -> Option<&AudioSegment> {
+    pub fn random_click(&self, click_type: ClickType) -> Option<Sound> {
         let preferred = click_type.preferred();
         for typ in preferred {
             use ClickType::*;
@@ -121,7 +83,7 @@ impl PlayerClicks {
                 _ => continue,
             };
             if let Some(click) = click {
-                return Some(click);
+                return Some(click.sound.clone());
             }
         }
         None
@@ -260,20 +222,6 @@ impl ExprVariable {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
-pub enum RemoveSilenceFrom {
-    #[default]
-    None,
-    Start,
-    End,
-}
-
-impl ToString for RemoveSilenceFrom {
-    fn to_string(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Default)]
 pub enum ChangeVolumeFor {
     #[default]
     All,
@@ -296,8 +244,6 @@ pub struct ClickpackConversionSettings {
     pub change_volume_for: ChangeVolumeFor,
     /// Whether to reverse all audio files.
     pub reverse: bool,
-    pub remove_silence: RemoveSilenceFrom,
-    pub silence_threshold: f32,
     pub player1_dirname: String,
     pub player2_dirname: String,
     /// Whether to rename files to '1.wav', '2.wav', etc.
@@ -311,8 +257,6 @@ impl Default for ClickpackConversionSettings {
             volume: 1.,
             change_volume_for: ChangeVolumeFor::All,
             reverse: false,
-            remove_silence: RemoveSilenceFrom::None,
-            silence_threshold: 0.05,
             player1_dirname: "player1".to_string(),
             player2_dirname: "player2".to_string(),
             rename_files: false,
@@ -345,18 +289,13 @@ impl Default for VolumeSettings {
     }
 }
 
-fn read_clicks_in_directory(
-    dir: &Path,
-    pitch: Pitch,
-    sample_rate: u32,
-    params: &InterpolationParams,
-) -> Vec<AudioFile> {
+fn read_clicks_in_directory(dir: &Path) -> Vec<AudioFile> {
     log::debug!(
         "loading clicks from directory {}",
         dir.to_str().unwrap_or("")
     );
 
-    let mut segments = Vec::new();
+    let mut sounds = Vec::new();
     let Ok(dir) = dir.read_dir() else {
         log::warn!("can't find directory {dir:?}, skipping");
         return vec![];
@@ -369,19 +308,16 @@ fn read_clicks_in_directory(
                 log::error!("failed to open file '{path:?}'");
                 continue;
             };
-            let Ok(mut segment) = AudioSegment::from_media_source(Box::new(f)) else {
+            let Ok(sound) = Sound::from_media_source(f) else {
                 log::error!("failed to decode file '{path:?}'");
                 continue;
             };
 
             let filename = path.file_name().unwrap().to_str().unwrap().to_string();
-
-            segment.resample(sample_rate, params);
-            segment.make_pitch_table(pitch.from, pitch.to, pitch.step, params);
-            segments.push(AudioFile::new(segment, filename));
+            sounds.push(AudioFile::new(sound, filename));
         }
     }
-    segments
+    sounds
 }
 
 #[derive(Debug, Default)]
@@ -390,9 +326,9 @@ pub struct Bot {
     pub player: (PlayerClicks, PlayerClicks),
     /// The longest sound (in seconds, not counting the noise sound).
     pub longest_click: f32,
-    /// Noise audio file. Will be resampled to `sample_rate`.
-    pub noise: Option<AudioSegment>,
-    /// Output sample rate. Clicks will be sinc-resampled to this rate.
+    /// Noise audio file.
+    pub noise: Option<AudioFile>,
+    /// Output sample rate.
     pub sample_rate: u32,
     /// Expression evaluator namespace. Updated with default variables every action.
     pub ns: BTreeMap<String, f64>,
@@ -415,15 +351,29 @@ pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-pub fn dir_has_noise(dir: &Path) -> bool {
-    let mut player1_path = dir.to_path_buf();
-    player1_path.push("player1");
-    let mut player2_path = dir.to_path_buf();
-    player2_path.push("player2");
+const PLAYER_DIRNAMES: [(&str, &str); 5] = [
+    ("player1", "player2"),
+    ("player 1", "player 2"),
+    ("p1", "p2"),
+    ("1", "2"),
+    ("", ""),
+];
 
-    find_noise_file(&player1_path).is_some()
-        || find_noise_file(&player2_path).is_some()
-        || find_noise_file(dir).is_some()
+pub fn dir_has_noise(dir: &Path) -> bool {
+    for player_dirnames in PLAYER_DIRNAMES {
+        let mut player1_path = dir.to_path_buf();
+        player1_path.push(player_dirnames.0);
+        let mut player2_path = dir.to_path_buf();
+        player2_path.push(player_dirnames.1);
+
+        if find_noise_file(&player1_path).is_some()
+            || find_noise_file(&player2_path).is_some()
+            || find_noise_file(dir).is_some()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 impl Bot {
@@ -440,49 +390,32 @@ impl Bot {
         self.noise.is_some()
     }
 
-    pub fn load_clickpack(
-        &mut self,
-        clickpack_dir: &Path,
-        pitch: Pitch,
-        params: &InterpolationParams,
-    ) -> Result<()> {
+    pub fn load_clickpack(&mut self, clickpack_dir: &Path) -> Result<()> {
         assert!(self.sample_rate > 0);
 
         // handle different player folder names
-        for player_dirnames in [
-            ("player1", "player2"),
-            ("player 1", "player 2"),
-            ("p1", "p2"),
-            ("1", "2"),
-            ("", ""),
-        ] {
+        for player_dirnames in PLAYER_DIRNAMES {
             let mut player1_path = clickpack_dir.to_path_buf();
             player1_path.push(player_dirnames.0);
             let mut player2_path = clickpack_dir.to_path_buf();
             player2_path.push(player_dirnames.1);
 
             // load clicks from player1 and player2 folders
-            self.player.0.extend_with(&PlayerClicks::from_path(
-                &player1_path,
-                pitch,
-                self.sample_rate,
-                params,
-            ));
+            self.player
+                .0
+                .extend_with(&PlayerClicks::from_path(&player1_path));
 
             // only load player2 clicks if directories are not "" (last case)
             if !player_dirnames.1.is_empty() {
-                self.player.1.extend_with(&PlayerClicks::from_path(
-                    &player2_path,
-                    pitch,
-                    self.sample_rate,
-                    params,
-                ));
+                self.player
+                    .1
+                    .extend_with(&PlayerClicks::from_path(&player2_path));
             }
 
             // try to load noise file in the player directories
-            self.load_noise(&player1_path, params);
+            self.load_noise(&player1_path);
             if !player_dirnames.1.is_empty() {
-                self.load_noise(&player2_path, params);
+                self.load_noise(&player2_path);
             }
         }
 
@@ -495,7 +428,7 @@ impl Bot {
         log::debug!("longest click: {}", self.longest_click);
 
         // search for noise file, path to prefer root clickpack dir
-        self.load_noise(clickpack_dir, params);
+        self.load_noise(clickpack_dir);
 
         if self.has_clicks() {
             Ok(())
@@ -506,22 +439,32 @@ impl Bot {
         }
     }
 
-    fn load_noise(&mut self, dir: &Path, params: &InterpolationParams) {
+    fn load_noise(&mut self, dir: &Path) {
         let Some(path) = find_noise_file(dir) else {
             return;
         };
-        let Ok(f) = std::fs::File::open(path) else {
+        let Ok(f) = std::fs::File::open(path.clone()) else {
             return;
         };
-        self.noise = if let Ok(mut noise) = AudioSegment::from_media_source(Box::new(f)) {
-            noise.resample(self.sample_rate, params);
-            Some(noise)
+
+        // get filename
+        let filename = path.file_name().unwrap().to_str().unwrap().to_string();
+
+        // try to load sound
+        let noise = Sound::from_media_source(f);
+
+        // check for success
+        self.noise = if let Ok(noise) = noise {
+            Some(AudioFile::new(noise, filename))
+        } else if let Err(e) = noise {
+            log::error!("failed to load noise file: {e}");
+            None
         } else {
             None
         };
     }
 
-    fn get_random_click(&mut self, player: Player, click: ClickType) -> &AudioSegment {
+    fn get_random_click(&mut self, player: Player, click: ClickType) -> Sound {
         // try to get a random click/release from the player clicks
         // if it doesn't exist for the wanted player, use the other one (guaranteed to have atleast
         // one click)
@@ -609,6 +552,57 @@ impl Bot {
         (min, max)
     }
 
+    pub fn render_replay<W>(
+        &mut self,
+        replay: &Replay,
+        noise: bool,
+        normalize: bool,
+        expr_var: ExprVariable,
+        enable_pitch: bool,
+        writer: W,
+    ) -> Result<()>
+    where
+        W: std::io::Write + std::io::Seek,
+    {
+        // create wav writer
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: self.sample_rate,
+            bits_per_sample: 32,
+            sample_format: hound::SampleFormat::Float,
+        };
+
+        // 16mb buffer
+        let mut wav =
+            hound::WavWriter::new(BufWriter::with_capacity(16 * 1024 * 1024, writer), spec)?;
+
+        let mut mixer = Mixer::new();
+        let mut time = 0.0f64;
+
+        let start = std::time::Instant::now();
+        for action in &replay.actions {
+            while time < action.time as f64 {
+                // compute next frame, write it to the wav writer
+                let out = mixer.next_frame(self.sample_rate);
+                wav.write_sample(out.left)?;
+                wav.write_sample(out.right)?;
+
+                // increment time
+                time += 1.0 / self.sample_rate as f64;
+            }
+
+            // we've reached the time of this action, we can play it and
+            // move on to the next action now
+            let click = self.get_random_click(action.player, action.click);
+            mixer.play(click);
+        }
+        println!("finished in {:?}", start.elapsed());
+
+        wav.finalize()?; // flush buffer
+        Ok(())
+    }
+
+    /*
     pub fn render_replay(
         &mut self,
         replay: &Replay,
@@ -716,6 +710,7 @@ impl Bot {
         log::info!("rendered in {:?}", start.elapsed());
         segment
     }
+    */
 
     #[inline]
     pub fn has_clicks(&self) -> bool {
@@ -774,19 +769,7 @@ impl Bot {
                     // reverse
                     if settings.reverse {
                         click.reverse();
-                    }
-
-                    // remove silence
-                    if settings.silence_threshold != 0. {
-                        match settings.remove_silence {
-                            RemoveSilenceFrom::Start => {
-                                click.remove_silence_from_start(settings.silence_threshold)
-                            }
-                            RemoveSilenceFrom::End => {
-                                click.remove_silence_from_end(settings.silence_threshold)
-                            }
-                            _ => {}
-                        }
+                        click.seek_to_end();
                     }
 
                     // create click file
