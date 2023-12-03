@@ -155,6 +155,7 @@ struct App {
     clickpack_num_sounds: Option<usize>,
     clickpack_has_noise: bool,
     expr_variable_variation_negative: bool,
+    showing_clickpack_suggestion: bool,
 }
 
 impl Default for App {
@@ -178,6 +179,7 @@ impl Default for App {
             clickpack_num_sounds: None,
             clickpack_has_noise: false,
             expr_variable_variation_negative: true,
+            showing_clickpack_suggestion: false,
         }
     }
 }
@@ -1188,7 +1190,7 @@ impl App {
         dialog.show_dialog();
     }
 
-    fn render_replay(&mut self, dialog: &Modal) {
+    fn render_replay(&mut self, dialog: &Modal, ignore_suggestion: bool) {
         let Some(clickpack_path) = &self.clickpack_path else {
             return;
         };
@@ -1209,6 +1211,12 @@ impl App {
                 .with_body(e)
                 .with_icon(Icon::Error)
                 .open();
+            return;
+        }
+
+        if self.bot.borrow().is_viper8k() && !ignore_suggestion {
+            dialog.open();
+            self.showing_clickpack_suggestion = true;
             return;
         }
 
@@ -1562,10 +1570,50 @@ impl App {
                     .on_hover_text("Start rendering the replay.\nThis might take some time!")
                     .clicked()
                 {
-                    self.render_replay(&dialog); // TODO: run this on a separate thread
+                    self.render_replay(&dialog, false); // TODO: run this on a separate thread
                 }
             },
         );
+
+        if self.showing_clickpack_suggestion {
+            dialog.show(|ui| {
+                dialog.title(ui, "Suggestion");
+                dialog.frame(ui, |ui| {
+                    dialog.body_and_icon(
+                        ui,
+                        "It seems that you're using Viper 8k clicks. \
+                        Would you like to apply the recommended settings? \
+                        (decrease pitch variation)",
+                        Icon::Info,
+                    );
+                });
+                dialog.buttons(ui, |ui| {
+                    if dialog
+                        .button(ui, "no")
+                        .on_hover_text("Don't modify any settings")
+                        .clicked()
+                    {
+                        self.render_replay(&dialog, true);
+                        self.showing_clickpack_suggestion = false;
+                    }
+                    if dialog
+                        .button(ui, "yes")
+                        .on_hover_text("Use recommended settings")
+                        .clicked()
+                    {
+                        // decrease pitch variation, because with viper 8k it sounds
+                        // too unnatural
+                        self.conf.pitch = Pitch {
+                            from: 0.98,
+                            to: 1.02,
+                            step: 0.001,
+                        };
+                        self.render_replay(&dialog, true);
+                        self.showing_clickpack_suggestion = false;
+                    }
+                });
+            });
+        }
 
         dialog.show_dialog();
     }
