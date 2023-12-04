@@ -382,11 +382,9 @@ fn update_to_latest(tag: &str) -> Result<()> {
         std::fs::write(&new_binary, resp)?;
 
         // replace executable
-        self_replace::self_replace(&new_binary).or_else(|e| {
-            Err(anyhow::anyhow!(
+        self_replace::self_replace(&new_binary).map_err(|e| anyhow::anyhow!(
                 "{e}. Try using this executable: {new_binary}"
-            ))
-        })?;
+            ))?;
 
         if std::path::Path::new(&new_binary).try_exists()? {
             std::fs::remove_file(new_binary)?;
