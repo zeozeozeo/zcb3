@@ -1196,7 +1196,7 @@ impl Replay {
 
     /// Amethyst stores replays like this:
     ///
-    /// ```no_run
+    /// ```ignore
     /// /* for player1 clicks */
     /// {num actions}
     /// {action time}...

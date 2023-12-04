@@ -6,7 +6,7 @@ authors = ["zeozeozeo"]
 build = "build.rs"
 
 [profile.release]
-# lto = true
+lto = true
 strip = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
