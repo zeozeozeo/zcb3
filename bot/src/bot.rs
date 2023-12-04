@@ -1,4 +1,4 @@
-use crate::{AudioSegment, ClickType, ExtendedAction, InterpolationParams, Player, Replay};
+use crate::{AudioSegment, ClickType, ExtendedAction, Player, Replay};
 use anyhow::Result;
 use fasteval2::Compiler;
 use rand::{seq::SliceRandom, Rng};
@@ -49,12 +49,7 @@ pub struct PlayerClicks {
 }
 
 impl PlayerClicks {
-    pub fn from_path(
-        path: &Path,
-        pitch: Pitch,
-        sample_rate: u32,
-        params: &InterpolationParams,
-    ) -> Self {
+    pub fn from_path(path: &Path, pitch: Pitch, sample_rate: u32) -> Self {
         let mut player = PlayerClicks::default();
 
         for (dir, clicks) in [
@@ -69,19 +64,14 @@ impl PlayerClicks {
         ] {
             let mut pathbuf = path.to_path_buf();
             pathbuf.push(dir);
-            clicks.extend(read_clicks_in_directory(
-                &pathbuf,
-                pitch,
-                sample_rate,
-                params,
-            ));
+            clicks.extend(read_clicks_in_directory(&pathbuf, pitch, sample_rate));
         }
 
         if !player.has_clicks() {
             log::warn!("no clicks found, assuming there's no subdirectories");
             player
                 .clicks
-                .extend(read_clicks_in_directory(path, pitch, sample_rate, params));
+                .extend(read_clicks_in_directory(path, pitch, sample_rate));
         }
 
         player
@@ -345,12 +335,7 @@ impl Default for VolumeSettings {
     }
 }
 
-fn read_clicks_in_directory(
-    dir: &Path,
-    pitch: Pitch,
-    sample_rate: u32,
-    params: &InterpolationParams,
-) -> Vec<AudioFile> {
+fn read_clicks_in_directory(dir: &Path, pitch: Pitch, sample_rate: u32) -> Vec<AudioFile> {
     log::debug!(
         "loading clicks from directory {}",
         dir.to_str().unwrap_or("")
@@ -376,8 +361,8 @@ fn read_clicks_in_directory(
 
             let filename = path.file_name().unwrap().to_str().unwrap().to_string();
 
-            segment.resample(sample_rate, params);
-            segment.make_pitch_table(pitch.from, pitch.to, pitch.step, params);
+            segment.resample(sample_rate);
+            segment.make_pitch_table(pitch.from, pitch.to, pitch.step);
             segments.push(AudioFile::new(segment, filename));
         }
     }
@@ -440,12 +425,7 @@ impl Bot {
         self.noise.is_some()
     }
 
-    pub fn load_clickpack(
-        &mut self,
-        clickpack_dir: &Path,
-        pitch: Pitch,
-        params: &InterpolationParams,
-    ) -> Result<()> {
+    pub fn load_clickpack(&mut self, clickpack_dir: &Path, pitch: Pitch) -> Result<()> {
         assert!(self.sample_rate > 0);
 
         // handle different player folder names
@@ -466,7 +446,6 @@ impl Bot {
                 &player1_path,
                 pitch,
                 self.sample_rate,
-                params,
             ));
 
             // only load player2 clicks if directories are not "" (last case)
@@ -475,14 +454,13 @@ impl Bot {
                     &player2_path,
                     pitch,
                     self.sample_rate,
-                    params,
                 ));
             }
 
             // try to load noise file in the player directories
-            self.load_noise(&player1_path, params);
+            self.load_noise(&player1_path);
             if !player_dirnames.1.is_empty() {
-                self.load_noise(&player2_path, params);
+                self.load_noise(&player2_path);
             }
         }
 
@@ -495,7 +473,7 @@ impl Bot {
         log::debug!("longest click: {}", self.longest_click);
 
         // search for noise file, path to prefer root clickpack dir
-        self.load_noise(clickpack_dir, params);
+        self.load_noise(clickpack_dir);
 
         if self.has_clicks() {
             Ok(())
@@ -506,7 +484,7 @@ impl Bot {
         }
     }
 
-    fn load_noise(&mut self, dir: &Path, params: &InterpolationParams) {
+    fn load_noise(&mut self, dir: &Path) {
         let Some(path) = find_noise_file(dir) else {
             return;
         };
@@ -514,7 +492,7 @@ impl Bot {
             return;
         };
         self.noise = if let Ok(mut noise) = AudioSegment::from_media_source(Box::new(f)) {
-            noise.resample(self.sample_rate, params);
+            noise.resample(self.sample_rate);
             Some(noise)
         } else {
             None

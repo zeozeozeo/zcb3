@@ -26,60 +26,6 @@ impl ToString for ArgExprVariable {
     }
 }
 
-#[derive(ValueEnum, Debug, Clone)]
-pub enum ArgInterpolationType {
-    Cubic,
-    Quadratic,
-    Linear,
-    Nearest,
-}
-
-impl ToString for ArgInterpolationType {
-    fn to_string(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-impl From<ArgInterpolationType> for InterpolationType {
-    fn from(val: ArgInterpolationType) -> Self {
-        match val {
-            ArgInterpolationType::Cubic => InterpolationType::Cubic,
-            ArgInterpolationType::Quadratic => InterpolationType::Quadratic,
-            ArgInterpolationType::Linear => InterpolationType::Linear,
-            ArgInterpolationType::Nearest => InterpolationType::Nearest,
-        }
-    }
-}
-
-#[derive(ValueEnum, Debug, Clone)]
-pub enum ArgWindowFunction {
-    Blackman,
-    Blackman2,
-    BlackmanHarris,
-    BlackmanHarris2,
-    Hann,
-    Hann2,
-}
-
-impl ToString for ArgWindowFunction {
-    fn to_string(&self) -> String {
-        format!("{self:?}")
-    }
-}
-
-impl From<ArgWindowFunction> for WindowFunction {
-    fn from(val: ArgWindowFunction) -> Self {
-        match val {
-            ArgWindowFunction::Blackman => WindowFunction::Blackman,
-            ArgWindowFunction::Blackman2 => WindowFunction::Blackman2,
-            ArgWindowFunction::BlackmanHarris => WindowFunction::BlackmanHarris,
-            ArgWindowFunction::BlackmanHarris2 => WindowFunction::BlackmanHarris2,
-            ArgWindowFunction::Hann => WindowFunction::Hann,
-            ArgWindowFunction::Hann2 => WindowFunction::Hann2,
-        }
-    }
-}
-
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Run without any arguments to launch GUI.", long_about = None)]
 struct Args {
@@ -175,29 +121,6 @@ struct Args {
         default_value_t = true
     )]
     expr_negative: bool,
-
-    #[arg(
-        long,
-        help = "Length of the windowed sinc interpolation filter",
-        default_value_t = 256
-    )]
-    interp_sinc_len: usize,
-    #[arg(
-        long,
-        help = "Relative cutoff frequency of the sinc interpolation filter",
-        default_value_t = 0.95
-    )]
-    interp_f_cutoff: f32,
-    #[arg(
-        long,
-        help = "The number of intermediate points to use for interpolation",
-        default_value_t = 256
-    )]
-    interp_oversampling_factor: usize,
-    #[arg(long, help = "Interpolation methods that can be selected", default_value_t = ArgInterpolationType::Linear)]
-    interp_interpolation: ArgInterpolationType,
-    #[arg(long, help = "Window function to use", default_value_t = ArgWindowFunction::BlackmanHarris2)]
-    interp_window: ArgWindowFunction,
 }
 
 #[cfg(windows)]
@@ -272,17 +195,9 @@ fn run_cli(mut args: Args) {
         volume_var: args.volume_var,
     };
 
-    let interp_params = InterpolationParams {
-        sinc_len: args.interp_sinc_len,
-        f_cutoff: args.interp_f_cutoff,
-        oversampling_factor: args.interp_oversampling_factor,
-        interpolation: args.interp_interpolation.into(),
-        window: args.interp_window.into(),
-    };
-
     // create bot and load clickpack
     let mut bot = Bot::new(args.sample_rate);
-    bot.load_clickpack(&PathBuf::from(args.clicks), pitch, &interp_params)
+    bot.load_clickpack(&PathBuf::from(args.clicks), pitch)
         .expect("failed to load clickpack");
 
     // parse replay

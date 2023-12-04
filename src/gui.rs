@@ -1,9 +1,8 @@
 use crate::built_info;
 use anyhow::{Context, Result};
 use bot::{
-    Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction,
-    InterpolationParams, InterpolationType, Pitch, RemoveSilenceFrom, Replay, ReplayType, Timings,
-    VolumeSettings, WindowFunction,
+    Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction, Pitch,
+    RemoveSilenceFrom, Replay, ReplayType, Timings, VolumeSettings,
 };
 use eframe::{
     egui::{self, IconData, Key, RichText},
@@ -88,8 +87,6 @@ struct Config {
     expr_variable: ExprVariable,
     sort_actions: bool,
     plot_data_aspect: f32,
-    #[serde(default = "InterpolationParams::default")]
-    interpolation_params: InterpolationParams,
     #[serde(default = "ClickpackConversionSettings::default")]
     conversion_settings: ClickpackConversionSettings,
 }
@@ -130,7 +127,6 @@ impl Default for Config {
             expr_variable: ExprVariable::Variation { negative: true },
             sort_actions: true,
             plot_data_aspect: 20.0,
-            interpolation_params: InterpolationParams::default(),
             conversion_settings: ClickpackConversionSettings::default(),
         }
     }
@@ -190,24 +186,6 @@ fn u32_edit_field_min1(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
     let res = ui.text_edit_singleline(&mut tmp_value);
     if let Ok(result) = tmp_value.parse::<u32>() {
         *value = result.max(1);
-    }
-    res
-}
-
-fn usize_edit_field(ui: &mut egui::Ui, value: &mut usize) -> egui::Response {
-    let mut tmp_value = format!("{value}");
-    let res = ui.text_edit_singleline(&mut tmp_value);
-    if let Ok(result) = tmp_value.parse::<usize>() {
-        *value = result;
-    }
-    res
-}
-
-fn f32_edit_field(ui: &mut egui::Ui, value: &mut f32) -> egui::Response {
-    let mut tmp_value = format!("{value}");
-    let res = ui.text_edit_singleline(&mut tmp_value);
-    if let Ok(result) = tmp_value.parse::<f32>() {
-        *value = result;
     }
     res
 }
@@ -1036,7 +1014,6 @@ impl App {
                                     if let Err(e) = self.bot.borrow_mut().load_clickpack(
                                         &self.clickpack_path.clone().unwrap(),
                                         Pitch::NO_PITCH, // don't generate pitch table
-                                        &self.conf.interpolation_params,
                                     ) {
                                         dialog.dialog()
                                             .with_title("Failed to load clickpack")
@@ -1083,59 +1060,6 @@ impl App {
                 });
             })
             .fully_open(); // let is_convert_tab_open = ...
-
-        // advanced
-        ui.collapsing("Advanced", |ui| {
-            let ip = &mut self.conf.interpolation_params;
-            ui.label("Sinc interpolation parameters. If you don't know what this is, probably don't touch it.");
-            ui.horizontal(|ui| {
-                usize_edit_field(ui, &mut ip.sinc_len);
-                help_text(
-                    ui,
-                    "Length of the windowed sinc interpolation filter.",
-                    |ui| ui.label("Sinc length"),
-                );
-            });
-            ui.horizontal(|ui| {
-                f32_edit_field(ui, &mut ip.f_cutoff);
-                help_text(
-                    ui,
-                    "Relative cutoff frequency of the sinc interpolation filter.",
-                    |ui| ui.label("Frequency cutoff"),
-                );
-            });
-            ui.horizontal(|ui| {
-                usize_edit_field(ui, &mut ip.oversampling_factor);
-                help_text(
-                    ui,
-                    "The number of intermediate points to use for interpolation.",
-                    |ui| ui.label("Oversampling factor"),
-                );
-            });
-            egui::ComboBox::from_label("Interpolation type")
-                .selected_text(ip.interpolation.to_string())
-                .show_ui(ui, |ui| {
-                    use InterpolationType::*;
-                    for typ in [Cubic, Quadratic, Linear, Nearest] {
-                        ui.selectable_value(&mut ip.interpolation, typ, typ.to_string());
-                    }
-                });
-            egui::ComboBox::from_label("Window function")
-                .selected_text(ip.window.to_string())
-                .show_ui(ui, |ui| {
-                    use WindowFunction::*;
-                    for window in [
-                        Blackman,
-                        Blackman2,
-                        BlackmanHarris,
-                        BlackmanHarris2,
-                        Hann,
-                        Hann2,
-                    ] {
-                        ui.selectable_value(&mut ip.window, window, window.to_string());
-                    }
-                });
-        });
 
         ui.separator();
 
@@ -1203,7 +1127,6 @@ impl App {
             } else {
                 Pitch::NO_PITCH
             },
-            &self.conf.interpolation_params,
         ) {
             dialog
                 .dialog()
