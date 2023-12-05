@@ -385,6 +385,16 @@ pub struct Bot {
     pub compiled_expr: fasteval2::Instruction,
 }
 
+const PLAYER_DIRNAMES: [(&str, &str); 7] = [
+    ("player1", "player2"),
+    ("player 1", "player 2"),
+    ("sounds1", "sounds2"),
+    ("sounds 1", "sounds 2"),
+    ("p1", "p2"),
+    ("1", "2"),
+    ("", ""),
+];
+
 pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
     let Ok(dir) = dir.read_dir() else {
         return None;
@@ -392,8 +402,13 @@ pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
     for entry in dir {
         let path = entry.unwrap().path();
         let filename = path.file_name().unwrap().to_str().unwrap();
-        // if it's a noise* or whitenoise* file we should try to load it
-        if path.is_file() && (filename.starts_with("noise") || filename.starts_with("whitenoise")) {
+        // if it's a noise*, etc file we should try to load it
+        if path.is_file()
+            && (filename.starts_with("noise")
+                || filename.starts_with("whitenoise")
+                || filename.starts_with("pcnoise")
+                || filename.starts_with("background"))
+        {
             return Some(path);
         }
     }
@@ -401,14 +416,20 @@ pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
 }
 
 pub fn dir_has_noise(dir: &Path) -> bool {
-    let mut player1_path = dir.to_path_buf();
-    player1_path.push("player1");
-    let mut player2_path = dir.to_path_buf();
-    player2_path.push("player2");
+    for player_dirnames in PLAYER_DIRNAMES {
+        let mut player1_path = dir.to_path_buf();
+        player1_path.push(player_dirnames.0);
+        let mut player2_path = dir.to_path_buf();
+        player2_path.push(player_dirnames.1);
 
-    find_noise_file(&player1_path).is_some()
-        || find_noise_file(&player2_path).is_some()
-        || find_noise_file(dir).is_some()
+        if find_noise_file(&player1_path).is_some()
+            || find_noise_file(&player2_path).is_some()
+            || find_noise_file(dir).is_some()
+        {
+            return true;
+        }
+    }
+    false
 }
 
 impl Bot {
@@ -429,13 +450,7 @@ impl Bot {
         assert!(self.sample_rate > 0);
 
         // handle different player folder names
-        for player_dirnames in [
-            ("player1", "player2"),
-            ("player 1", "player 2"),
-            ("p1", "p2"),
-            ("1", "2"),
-            ("", ""),
-        ] {
+        for player_dirnames in PLAYER_DIRNAMES {
             let mut player1_path = clickpack_dir.to_path_buf();
             player1_path.push(player_dirnames.0);
             let mut player2_path = clickpack_dir.to_path_buf();

@@ -1194,22 +1194,22 @@ impl Replay {
         Ok(())
     }
 
-    /// Amethyst stores replays like this:
-    ///
-    /// ```ignore
-    /// /* for player1 clicks */
-    /// {num actions}
-    /// {action time}...
-    /// /* for player1 releases */
-    /// {num actions}
-    /// {action time}...
-    /// /* for player2 clicks */
-    /// {num actions}
-    /// {action time}...
-    /// /* for player2 releases */
-    /// {num actions}
-    /// {action time}...
-    /// ```
+    // Amethyst stores replays like this:
+    //
+    // ```
+    // /* for player1 clicks */
+    // {num actions}
+    // {action time}...
+    // /* for player1 releases */
+    // {num actions}
+    // {action time}...
+    // /* for player2 clicks */
+    // {num actions}
+    // {action time}...
+    // /* for player2 releases */
+    // {num actions}
+    // {action time}...
+    // ```
     fn parse_amethyst(&mut self, data: &[u8]) -> Result<()> {
         let data = String::from_utf8(data.to_vec())?;
         let mut lines = data.split('\n');
