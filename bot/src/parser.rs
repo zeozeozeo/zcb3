@@ -87,21 +87,91 @@ impl ClickType {
     }
 
     /// Order of which clicks should be selected depending on the actual click type
-    #[rustfmt::skip]
     pub fn preferred(self) -> [Self; 8] {
         use ClickType::*;
 
-        // this is perfect
         match self {
-            HardClick =>    [HardClick,    Click,        SoftClick,   MicroClick  , HardRelease,  Release,      SoftRelease, MicroRelease],
-            HardRelease =>  [HardRelease,  Release,      SoftRelease, MicroRelease, HardRelease,  Release,      SoftRelease, MicroRelease],
-            Click =>        [Click,        HardClick,    SoftClick,   MicroClick  , Release,      HardRelease,  SoftRelease, MicroRelease],
-            Release =>      [Release,      HardRelease,  SoftRelease, MicroRelease, Release,      HardRelease,  SoftRelease, MicroRelease],
-            SoftClick =>    [SoftClick,    MicroClick,   Click,       HardClick   , SoftRelease,  MicroRelease, Release,     HardRelease ],
-            SoftRelease =>  [SoftRelease,  MicroRelease, Release,     HardRelease , SoftRelease,  MicroRelease, Release,     HardRelease ],
-            MicroClick =>   [MicroClick,   SoftClick,    Click,       HardClick   , MicroRelease, SoftRelease,  Release,     HardRelease ],
-            MicroRelease => [MicroRelease, SoftRelease,  Release,     HardRelease , MicroRelease, SoftRelease,  Release,     HardRelease ],
-            None =>         [None,         None,         None,        None        , None,         None,         None,        None        ],
+            HardClick => [
+                HardClick,
+                Click,
+                SoftClick,
+                MicroClick,
+                HardRelease,
+                Release,
+                SoftRelease,
+                MicroRelease,
+            ],
+            HardRelease => [
+                HardRelease,
+                Release,
+                SoftRelease,
+                MicroRelease,
+                HardClick,
+                Click,
+                SoftClick,
+                MicroClick,
+            ],
+            Click => [
+                Click,
+                HardClick,
+                SoftClick,
+                MicroClick,
+                Release,
+                HardRelease,
+                SoftRelease,
+                MicroRelease,
+            ],
+            Release => [
+                Release,
+                HardRelease,
+                SoftRelease,
+                MicroRelease,
+                Click,
+                HardClick,
+                SoftClick,
+                MicroClick,
+            ],
+            SoftClick => [
+                SoftClick,
+                MicroClick,
+                Click,
+                HardClick,
+                SoftRelease,
+                MicroRelease,
+                Release,
+                HardRelease,
+            ],
+            SoftRelease => [
+                SoftRelease,
+                MicroRelease,
+                Release,
+                HardRelease,
+                SoftClick,
+                MicroClick,
+                Click,
+                HardClick,
+            ],
+            MicroClick => [
+                MicroClick,
+                SoftClick,
+                Click,
+                HardClick,
+                MicroRelease,
+                SoftRelease,
+                Release,
+                HardRelease,
+            ],
+            MicroRelease => [
+                MicroRelease,
+                SoftRelease,
+                Release,
+                HardRelease,
+                MicroClick,
+                SoftClick,
+                Click,
+                HardClick,
+            ],
+            None => [None, None, None, None, None, None, None, None],
         }
     }
 
