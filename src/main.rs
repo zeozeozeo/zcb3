@@ -39,6 +39,8 @@ struct Args {
         default_value_t = false
     )]
     noise: bool,
+    #[arg(long, help = "Noise volume multiplier", default_value_t = 1.0)]
+    noise_volume: f32,
     #[arg(long, short, help = "Path to output file", default_value_t = String::from("output.wav"))]
     output: String,
     #[arg(
@@ -121,6 +123,12 @@ struct Args {
         default_value_t = true
     )]
     expr_negative: bool,
+    #[arg(
+        long,
+        help = "Cut overlapping sounds. Changes the sound significantly in spams",
+        default_value_t = true
+    )]
+    cut_sounds: bool,
 }
 
 #[cfg(windows)]
@@ -229,6 +237,7 @@ fn run_cli(mut args: Args) {
     let segment = bot.render_replay(
         &replay,
         args.noise,
+        args.noise_volume,
         args.normalize,
         if !args.volume_expr.is_empty() {
             match args.expr_variable {
@@ -243,6 +252,7 @@ fn run_cli(mut args: Args) {
             ExprVariable::None
         },
         args.pitch_enabled,
+        args.cut_sounds,
     );
 
     // save

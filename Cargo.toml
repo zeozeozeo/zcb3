@@ -6,8 +6,9 @@ authors = ["zeozeozeo"]
 build = "build.rs"
 
 [profile.release]
-lto = true
+lto = "fat"
 strip = true
+codegen-units = 1
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

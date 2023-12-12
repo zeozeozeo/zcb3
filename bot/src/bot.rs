@@ -606,9 +606,11 @@ impl Bot {
         &mut self,
         replay: &Replay,
         noise: bool,
+        noise_volume: f32,
         normalize: bool,
         expr_var: ExprVariable,
         enable_pitch: bool,
+        cut_sounds: bool,
     ) -> AudioSegment {
         log::info!(
             "starting render, {} actions, noise: {noise}",
@@ -628,7 +630,7 @@ impl Bot {
         let start = Instant::now();
         let mut prev_frame = 0u32;
 
-        for action in &replay.actions {
+        for (i, action) in replay.actions.iter().enumerate() {
             // calculate the volume from the expression if needed
             let (expr_vol, time_offset) = if expr_var != ExprVariable::None {
                 // get extended action
@@ -684,11 +686,24 @@ impl Bot {
                 click = click.random_pitch(); // if no pitch table is generated, returns self
             }
 
+            let mut until_next = f32::INFINITY;
+            if cut_sounds {
+                // find the time until the next action, so we know when to cut
+                // off this sound
+                for next in replay.actions.iter().skip(i + 1) {
+                    if action.player == next.player && next.click.is_click() {
+                        until_next = next.time - action.time;
+                        break;
+                    }
+                }
+            }
+
             // overlay
             segment.overlay_at_vol(
                 action.time + time_offset,
                 click,
                 1.0 + action.vol_offset + expr_vol,
+                until_next,
             );
         }
 
@@ -697,7 +712,12 @@ impl Bot {
             let noise_segment = self.noise.as_ref().unwrap();
 
             while noise_duration < segment.duration() {
-                segment.overlay_at(noise_duration.as_secs_f32(), noise_segment);
+                segment.overlay_at_vol(
+                    noise_duration.as_secs_f32(),
+                    noise_segment,
+                    noise_volume,
+                    f32::INFINITY, // don't cut off
+                );
                 noise_duration += noise_segment.duration();
             }
         }

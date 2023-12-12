@@ -5,7 +5,8 @@ use bot::{
     RemoveSilenceFrom, Replay, ReplayType, Timings, VolumeSettings,
 };
 use eframe::{
-    egui::{self, IconData, Key, RichText},
+    egui::{self, DragValue, IconData, Key, RichText},
+    emath,
     epaint::Color32,
 };
 use egui_modal::{Icon, Modal};
@@ -14,7 +15,7 @@ use image::io::Reader as ImageReader;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{cell::RefCell, io::Cursor, path::Path, time::Instant};
+use std::{cell::RefCell, io::Cursor, ops::RangeInclusive, path::Path, time::Instant};
 use std::{io::Read, path::PathBuf};
 
 const MAX_PLOT_POINTS: usize = 4096;
@@ -71,6 +72,14 @@ fn get_version() -> String {
     built_info::PKG_VERSION.to_string()
 }
 
+fn true_bool() -> bool {
+    true
+}
+
+fn f32_one() -> f32 {
+    1.0
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 struct Config {
     #[serde(default = "get_version")]
@@ -89,6 +98,10 @@ struct Config {
     plot_data_aspect: f32,
     #[serde(default = "ClickpackConversionSettings::default")]
     conversion_settings: ClickpackConversionSettings,
+    #[serde(default = "true_bool")]
+    cut_sounds: bool,
+    #[serde(default = "f32_one")]
+    noise_volume: f32,
 }
 
 impl Config {
@@ -128,6 +141,8 @@ impl Default for Config {
             sort_actions: true,
             plot_data_aspect: 20.0,
             conversion_settings: ClickpackConversionSettings::default(),
+            cut_sounds: true,
+            noise_volume: 1.0,
         }
     }
 }
@@ -191,9 +206,38 @@ fn u32_edit_field_min1(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
 }
 
 fn help_text<R>(ui: &mut egui::Ui, help: &str, add_contents: impl FnOnce(&mut egui::Ui) -> R) {
+    if help.is_empty() {
+        add_contents(ui); // don't show help icon if there's no help text
+        return;
+    }
     ui.horizontal(|ui| {
         add_contents(ui);
         ui.add_enabled_ui(false, |ui| ui.label("(?)").on_disabled_hover_text(help));
+    });
+}
+
+fn drag_value<Num: emath::Numeric>(
+    ui: &mut egui::Ui,
+    value: &mut Num,
+    text: impl Into<String>,
+    clamp_range: RangeInclusive<Num>,
+    help: &str,
+) {
+    help_text(ui, help, |ui| {
+        let dragged = ui
+            .add(
+                DragValue::new(value)
+                    .clamp_range(clamp_range.clone())
+                    .speed(0.01),
+            )
+            .dragged();
+        ui.label(
+            if dragged && (clamp_range.start() == value || clamp_range.end() == value) {
+                RichText::new(text).color(Color32::LIGHT_RED)
+            } else {
+                RichText::new(text)
+            },
+        );
     });
 }
 
@@ -382,9 +426,8 @@ fn update_to_latest(tag: &str) -> Result<()> {
         std::fs::write(&new_binary, resp)?;
 
         // replace executable
-        self_replace::self_replace(&new_binary).map_err(|e| anyhow::anyhow!(
-                "{e}. Try using this executable: {new_binary}"
-            ))?;
+        self_replace::self_replace(&new_binary)
+            .map_err(|e| anyhow::anyhow!("{e}. Try using this executable: {new_binary}"))?;
 
         if std::path::Path::new(&new_binary).try_exists()? {
             std::fs::remove_file(new_binary)?;
@@ -408,9 +451,10 @@ impl App {
         modal.show(|ui| {
             modal.title(ui, "New version available");
             modal.frame(ui, |ui| {
-                modal.body_and_icon(ui, format!("A new version of ZCB is available (latest: {tag}, this: {current_tag}).\n\
-                                    Download the new version on the GitHub page, Discord server or use the auto-updater."),
-                                    Icon::Info);
+                modal.body_and_icon(ui,
+                    format!("A new version of ZCB is available (latest: {tag}, this: {current_tag}).\n\
+                    Download the new version on the GitHub page, Discord server or use the auto-updater."),
+                    Icon::Info);
             });
             modal.buttons(ui, |ui| {
                 if modal.button(ui, "auto-update")
@@ -720,18 +764,14 @@ impl App {
                     If the delay between the current and previous action is bigger than the specified \
                     timing, the corresponding click type is used.");
             let t = &mut self.conf.timings;
-            help_text(ui, "Hardclick/hardrelease timing", |ui| {
-                ui.add(egui::Slider::new(&mut t.hard, t.regular..=30.0).text("Hard timing"));
-            });
-            help_text(ui, "Click/release timing", |ui| {
-                ui.add(
-                    egui::Slider::new(&mut t.regular, t.soft..=t.hard)
-                        .text("Regular timing"),
-                );
-            });
-            help_text(ui, "Softclick/softrelease timing", |ui| {
-                ui.add(egui::Slider::new(&mut t.soft, 0.0..=t.regular).text("Soft timing"));
-            });
+
+            drag_value(ui, &mut t.hard, "Hard timing",
+            t.regular..=f32::INFINITY,
+            "Hardclick/hardrelease timing");
+            drag_value(ui, &mut t.regular, "Regular timing", t.soft..=t.hard,
+            "Click/release timing");
+            drag_value(ui, &mut t.soft, "Soft timing", 0.0..=t.regular,
+            "Softclick/softrelease timing");
             ui.label(format!("Everything below {}s are microclicks/microreleases.", t.soft));
         });
 
@@ -739,12 +779,20 @@ impl App {
             ui.label("General volume settings.");
 
             let vol = &mut self.conf.vol_settings;
-            help_text(ui, "Maximum volume variation for each action (+/-)", |ui| {
-                ui.add(egui::Slider::new(&mut vol.volume_var, 0.0..=1.0).text("Volume variation"));
-            });
-            help_text(ui, "Constant volume multiplier for all actions", |ui| {
-                ui.add(egui::Slider::new(&mut vol.global_volume, 0.0..=20.0).text("Global volume"));
-            });
+            drag_value(
+                ui,
+                &mut vol.volume_var,
+                "Volume variation",
+                0.0..=f32::INFINITY,
+                "Maximum volume variation for each action (+/-)",
+            );
+            drag_value(
+                ui,
+                &mut vol.global_volume,
+                "Global volume",
+                0.0..=f32::INFINITY,
+                "Constant volume multiplier for all actions",
+            );
         });
 
         ui.collapsing("Spam volume changes", |ui| {
@@ -762,28 +810,27 @@ impl App {
                 help_text(ui, "Apply spam volume changes to releases", |ui| {
                     ui.checkbox(&mut vol.change_releases_volume, "Change releases volume");
                 });
-                help_text(
+                drag_value(
                     ui,
-                    "Time between actions when they can be considered spam",
-                    |ui| {
-                        ui.add(
-                            egui::Slider::new(&mut vol.spam_time, 0.0..=1.0)
-                                .text("Spam time (between actions)"),
-                        );
-                    },
+                    &mut vol.spam_time,
+                    "Spam time (between actions)",
+                    0.0..=f32::INFINITY,
+                    "Time between clicks which are considered spam clicks",
                 );
-                help_text(ui, "Volume offset factor for spam actions", |ui| {
-                    ui.add(
-                        egui::Slider::new(&mut vol.spam_vol_offset_factor, 0.0..=30.0)
-                            .text("Spam volume offset factor"),
-                    );
-                });
-                help_text(ui, "Maximum value of the volume offset factor", |ui| {
-                    ui.add(
-                        egui::Slider::new(&mut vol.max_spam_vol_offset, 0.0..=30.0)
-                            .text("Maximum spam volume offset"),
-                    );
-                });
+                drag_value(
+                    ui,
+                    &mut vol.spam_vol_offset_factor,
+                    "Spam volume offset factor",
+                    0.0..=f32::INFINITY,
+                    "The value which the volume offset factor is multiplied by",
+                );
+                drag_value(
+                    ui,
+                    &mut vol.max_spam_vol_offset,
+                    "Maximum spam volume offset",
+                    0.0..=f32::INFINITY,
+                    "The maximum value of the volume offset factor",
+                );
             });
         });
 
@@ -874,18 +921,26 @@ impl App {
             ui.checkbox(&mut self.conf.pitch_enabled, "Enable pitch variation");
             ui.add_enabled_ui(self.conf.pitch_enabled, |ui| {
                 let p = &mut self.conf.pitch;
-                help_text(ui, "Minimum pitch value. 1 = no change", |ui| {
-                    ui.add(egui::Slider::new(&mut p.from, 0.0..=p.to).text("Minimum pitch"));
-                });
-                help_text(ui, "Maximum pitch value. 1 = no change", |ui| {
-                    ui.add(egui::Slider::new(&mut p.to, p.from..=50.0).text("Maxiumum pitch"));
-                });
-                help_text(
+                drag_value(
                     ui,
+                    &mut p.from,
+                    "Minimum pitch",
+                    0.0..=p.to,
+                    "Minimum pitch value, 1 means no change",
+                );
+                drag_value(
+                    ui,
+                    &mut p.to,
+                    "Maximum pitch",
+                    p.from..=f32::INFINITY,
+                    "Maximum pitch value, 1 means no change",
+                );
+                drag_value(
+                    ui,
+                    &mut p.step,
+                    "Pitch step",
+                    0.0001..=f32::INFINITY,
                     "Step between pitch values. The more = the better & the slower",
-                    |ui| {
-                        ui.add(egui::Slider::new(&mut p.step, 0.0001..=1.0).text("Pitch step"));
-                    },
                 );
             });
         });
@@ -897,12 +952,13 @@ impl App {
                 ui.label("Clickpack conversion. Can be used to modify sounds in batch.");
                 ui.separator();
 
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut conv_settings.volume).speed(0.1));
-                    help_text(ui, "Change the volume of each audio file", |ui| {
-                        ui.label("Volume multiplier")
-                    });
-                });
+                drag_value(
+                    ui,
+                    &mut conv_settings.volume,
+                    "Volume multiplier",
+                    0.0..=f32::INFINITY,
+                    "Change the volume of each audio file",
+                );
 
                 if conv_settings.volume != 1. {
                     help_text(ui, "Only change volume for this click type", |ui| {
@@ -1001,7 +1057,10 @@ impl App {
                         if ui
                             .button("Convert")
                             .on_disabled_hover_text(err.unwrap_or(""))
-                            .on_hover_text("Convert the clickpack.\nNote that all files will be converted to .wav")
+                            .on_hover_text(
+                                "Convert the clickpack.\n\
+                                Note that all files will be converted to .wav",
+                            )
                             .clicked()
                         {
                             if let Some(dir) = FileDialog::new().pick_folder() {
@@ -1013,7 +1072,8 @@ impl App {
                                         &self.clickpack_path.clone().unwrap(),
                                         Pitch::NO_PITCH, // don't generate pitch table
                                     ) {
-                                        dialog.dialog()
+                                        dialog
+                                            .dialog()
                                             .with_title("Failed to load clickpack")
                                             .with_body(e)
                                             .with_icon(Icon::Error)
@@ -1025,13 +1085,15 @@ impl App {
                                 if let Err(e) =
                                     self.bot.borrow().convert_clickpack(&dir, conv_settings)
                                 {
-                                    dialog.dialog()
+                                    dialog
+                                        .dialog()
                                         .with_title("Failed to convert clickpack")
                                         .with_body(e)
                                         .with_icon(Icon::Error)
                                         .open();
                                 } else {
-                                    dialog.dialog()
+                                    dialog
+                                        .dialog()
                                         .with_title("Success!")
                                         .with_body(format!(
                                             "Successfully converted clickpack in {:?}.",
@@ -1044,7 +1106,8 @@ impl App {
                                 // finished, unload clickpack
                                 *self.bot.borrow_mut() = Bot::new(self.conf.sample_rate);
                             } else {
-                                dialog.dialog()
+                                dialog
+                                    .dialog()
                                     .with_title("No directory was selected")
                                     .with_body("Please select a directory")
                                     .with_icon(Icon::Error)
@@ -1106,7 +1169,10 @@ impl App {
                     the more random the pitch is. Pitch 1.0 = no pitch.");
         });
         ui.collapsing("Supported audio formats", |ui| {
-            ui.label("AAC, ADPCM, ALAC, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files.");
+            ui.label(
+                "AAC, ADPCM, ALAC, FLAC, MKV, MP1, MP2, \
+                MP3, MP4, OGG, Vorbis, WAV, and WebM audio files.",
+            );
         });
 
         dialog.show_dialog();
@@ -1148,6 +1214,7 @@ impl App {
         let segment = self.bot.borrow_mut().render_replay(
             &self.replay,
             self.conf.noise,
+            self.conf.noise_volume,
             self.conf.normalize,
             if !self.conf.expr_text.is_empty() && self.expr_error.is_empty() {
                 self.conf.expr_variable
@@ -1155,6 +1222,7 @@ impl App {
                 ExprVariable::None
             },
             self.conf.pitch_enabled,
+            self.conf.cut_sounds,
         );
         let end = start.elapsed();
         log::info!("rendered in {end:?}");
@@ -1331,12 +1399,15 @@ impl App {
 
         // plot data aspect
         ui.horizontal(|ui| {
-            ui.add(
-                egui::Slider::new(&mut self.conf.plot_data_aspect, 0.001..=30.0)
-                    .text("Data aspect"),
+            drag_value(
+                ui,
+                &mut self.conf.plot_data_aspect,
+                "Data aspect",
+                0.001..=f32::INFINITY,
+                "",
             );
             if ui.button("Reset").clicked() {
-                self.conf.plot_data_aspect = 20.;
+                self.conf.plot_data_aspect = 20.0;
             }
         });
 
@@ -1444,10 +1515,25 @@ impl App {
 
             // overlay noise checkbox
             ui.add_enabled_ui(self.clickpack_has_noise, |ui| {
-                ui.checkbox(&mut self.conf.noise, "Overlay noise")
-                    .on_disabled_hover_text("Your clickpack doesn't have a noise file")
-                    .on_hover_text("Overlays the noise file that's in the clickpack directory");
+                ui.horizontal(|ui| {
+                    ui.checkbox(&mut self.conf.noise, "Overlay noise")
+                        .on_disabled_hover_text("Your clickpack doesn't have a noise file")
+                        .on_hover_text("Overlays the noise file that's in the clickpack directory");
+                    drag_value(
+                        ui,
+                        &mut self.conf.noise_volume,
+                        "Noise volume",
+                        0.0..=f32::INFINITY,
+                        "Noise volume multiplier",
+                    );
+                });
             });
+
+            help_text(
+                ui,
+                "Cut overlapping click sounds, changes the sound significantly in spams",
+                |ui| ui.checkbox(&mut self.conf.cut_sounds, "Cut sounds"),
+            );
 
             // normalize audio checkbox
             ui.checkbox(&mut self.conf.normalize, "Normalize audio")

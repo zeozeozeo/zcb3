@@ -321,11 +321,12 @@ impl AudioSegment {
     }
 
     #[inline]
-    pub fn overlay_at_vol(&mut self, time: f32, other: &AudioSegment, volume: f32) {
+    pub fn overlay_at_vol(&mut self, time: f32, other: &AudioSegment, volume: f32, dur: f32) {
         assert!(self.sample_rate == other.sample_rate);
 
         let start = self.time_to_frame(time);
-        let end = (start + other.frames.len()).min(self.frames.len().saturating_sub(1));
+        let end = (start + other.frames.len().min(self.time_to_frame(dur)))
+            .min(self.frames.len().saturating_sub(1));
         self.frames[start..end]
             .par_iter_mut() // run in parallel
             .zip(&other.frames)
@@ -348,16 +349,18 @@ impl AudioSegment {
         let mut fractional_position = 0.0f64;
         let mut iter = self.frames.iter();
         let mut frames = [Frame::ZERO; 4]; // prev, cur, next, next next
-        let push_frame = |frame: Frame, frames: &mut [Frame]| {
-            for i in 0..frames.len() - 1 {
-                frames[i] = frames[i + 1];
-            }
-            frames[frames.len() - 1] = frame;
-        };
+        macro_rules! push_frame {
+            ($frame:expr) => {
+                for i in 0..frames.len() - 1 {
+                    frames[i] = frames[i + 1];
+                }
+                frames[frames.len() - 1] = $frame;
+            };
+        }
 
         // fill resampler with 3 frames
         for _ in 0..3 {
-            push_frame(iter.next().copied().unwrap_or(Frame::ZERO), &mut frames);
+            push_frame!(iter.next().copied().unwrap_or(Frame::ZERO));
         }
 
         let mut resampled_frames = Vec::with_capacity(self.frames.len());
@@ -378,7 +381,7 @@ impl AudioSegment {
                 let Some(frame) = iter.next().copied() else {
                     break 'outer;
                 };
-                push_frame(frame, &mut frames);
+                push_frame!(frame);
             }
         }
 
@@ -388,7 +391,12 @@ impl AudioSegment {
     }
 
     pub fn normalize(&mut self) {
-        let max: Frame = self.frames.iter().fold(Frame::ZERO, |acc, f| acc + *f);
+        let mut max = Frame::ZERO;
+        for frame in &self.frames {
+            if frame.left > max.left || frame.right > max.right {
+                max = *frame;
+            }
+        }
         for frame in &mut self.frames {
             frame.left /= max.left;
             frame.right /= max.right;
