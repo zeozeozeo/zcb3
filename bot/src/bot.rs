@@ -49,22 +49,54 @@ pub struct PlayerClicks {
 }
 
 impl PlayerClicks {
+    // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
+    fn recognize_dir_and_load_files(&mut self, path: &Path, pitch: Pitch, sample_rate: u32) {
+        let path_str = path.to_str().unwrap();
+        let patterns = [
+            ("hard", "click", &mut self.hardclicks),
+            ("hard", "release", &mut self.hardreleases),
+            ("", "click", &mut self.clicks),
+            ("", "release", &mut self.releases),
+            ("soft", "click", &mut self.softclicks),
+            ("soft", "release", &mut self.softreleases),
+            ("micro", "click", &mut self.microclicks),
+            ("micro", "release", &mut self.microreleases),
+        ];
+        let mut matched_any = false;
+        for (pat1, pat2, clicks) in patterns {
+            let is_pat = if !pat1.is_empty() {
+                path_str.contains(pat1) && path_str.contains(pat2)
+            } else {
+                path_str.contains(pat2)
+            };
+            if is_pat {
+                log::debug!("directory {path:?} matched pattern (\"{pat1}\", \"{pat2}\")");
+                matched_any = true;
+                clicks.extend(read_clicks_in_directory(path, pitch, sample_rate));
+            }
+        }
+        if !matched_any {
+            log::warn!("directory {path:?} did not match any pattern");
+        }
+    }
+
     pub fn from_path(path: &Path, pitch: Pitch, sample_rate: u32) -> Self {
         let mut player = PlayerClicks::default();
 
-        for (dir, clicks) in [
-            ("hardclicks", &mut player.hardclicks),
-            ("hardreleases", &mut player.hardreleases),
-            ("clicks", &mut player.clicks),
-            ("releases", &mut player.releases),
-            ("softclicks", &mut player.softclicks),
-            ("softreleases", &mut player.softreleases),
-            ("microclicks", &mut player.microclicks),
-            ("microreleases", &mut player.microreleases),
-        ] {
-            let mut pathbuf = path.to_path_buf();
-            pathbuf.push(dir);
-            clicks.extend(read_clicks_in_directory(&pathbuf, pitch, sample_rate));
+        let Ok(dir) = path
+            .read_dir()
+            .map_err(|e| log::error!("failed to read directory {path:?}: {e}"))
+        else {
+            return player;
+        };
+
+        for entry in dir {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                player.recognize_dir_and_load_files(&path, pitch, sample_rate);
+            } else {
+                log::debug!("skipping file {path:?}");
+            }
         }
 
         if !player.has_clicks() {
