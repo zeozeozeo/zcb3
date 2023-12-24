@@ -634,6 +634,7 @@ impl Bot {
         (min, max)
     }
 
+    #[allow(clippy::too_many_arguments)] // TODO
     pub fn render_replay(
         &mut self,
         replay: &Replay,

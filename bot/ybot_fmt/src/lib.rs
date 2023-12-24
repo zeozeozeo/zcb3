@@ -273,6 +273,7 @@ impl<T: Read + Seek> Macro<T> {
     }
 
     /// Returns the next action, or `None` if there are no more actions.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<Option<TimedAction>> {
         TimedAction::try_read(&mut self.inner)
     }
