@@ -320,7 +320,9 @@ impl eframe::App for App {
 
                             // reload replay if it was loaded
                             if let Some(replay_path) = &self.replay_path.clone() {
-                                self.load_replay(&dialog, replay_path);
+                                let _ = self
+                                    .load_replay(&dialog, replay_path)
+                                    .map_err(|e| log::error!("failed to reload replay: {e}"));
                             }
                         }
                         ui.style_mut().spacing.item_spacing.x = 5.;
@@ -713,7 +715,7 @@ impl App {
         });
     }
 
-    fn load_replay(&mut self, dialog: &Modal, file: &Path) {
+    fn load_replay(&mut self, dialog: &Modal, file: &Path) -> Result<()> {
         let filename = file.file_name().unwrap().to_str().unwrap();
 
         // read replay file
@@ -743,6 +745,7 @@ impl App {
                     .with_body(format!("{e}. Is the format supported?"))
                     .with_icon(Icon::Error)
                     .open();
+                return Err(e);
             }
         } else if let Err(e) = replay_type {
             dialog
@@ -751,7 +754,9 @@ impl App {
                 .with_body(format!("Failed to guess replay format: {e}"))
                 .with_icon(Icon::Error)
                 .open();
+            return Err(e);
         }
+        Ok(())
     }
 
     fn show_replay_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -847,7 +852,9 @@ impl App {
                     );
                     if let Some(replay_path) = &self.replay_path.clone() {
                         if ui.button("Reload").on_hover_text("Reload replay").clicked() {
-                            self.load_replay(&dialog, replay_path);
+                            let _ = self
+                                .load_replay(&dialog, replay_path)
+                                .map_err(|e| log::error!("failed to reload replay: {e}"));
                         }
                     }
                 });
@@ -862,8 +869,9 @@ impl App {
                     .pick_file()
                 {
                     self.replay_path = Some(file.clone());
-                    self.load_replay(&dialog, &file);
-                    self.stage = Stage::SelectClickpack;
+                    if self.load_replay(&dialog, &file).is_ok() {
+                        self.stage = Stage::SelectClickpack;
+                    }
                 } else {
                     dialog
                         .dialog()

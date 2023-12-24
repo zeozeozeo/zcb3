@@ -304,6 +304,8 @@ pub enum ReplayType {
     Xbot,
     // GatoBot .gatobot files
     // GatoBot,
+    /// yBot 2 .ybot files
+    Ybot2,
 }
 
 impl ReplayType {
@@ -340,6 +342,7 @@ impl ReplayType {
             "ddhor" => Ddhor,
             "xbot" => Xbot,
             // "gatobot" => GatoBot,
+            "ybot" => Ybot2,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -427,6 +430,7 @@ impl Replay {
         "re",
         "ddhor",
         "xbot",
+        "ybot",
         // "gatobot",
     ];
 
@@ -475,6 +479,7 @@ impl Replay {
             ReplayType::ReplayEngine => self.parse_re(data)?,
             ReplayType::Ddhor => self.parse_ddhor(data)?,
             ReplayType::Xbot => self.parse_xbot(data)?,
+            ReplayType::Ybot2 => self.parse_ybot2(data)?,
             // MacroType::GatoBot => self.parse_gatobot(data)?,
         }
 
@@ -511,7 +516,6 @@ impl Replay {
             ReplayType::Obot => self.write_obot2(writer)?,
             ReplayType::Ybotf => self.write_ybotf(writer)?,
             ReplayType::Echo => self.write_echo(writer)?,
-            ReplayType::Amethyst => self.write_amethyst(writer)?,
             _ => anyhow::bail!("unsupported format"),
         }
         Ok(self)
@@ -1313,16 +1317,6 @@ impl Replay {
         Ok(())
     }
 
-    fn write_amethyst<W: Write>(&self, _writer: W) -> Result<()> {
-        let mut prev_down = false;
-        for action in &self.extended {
-            if action.down != prev_down {
-                prev_down = action.down;
-            }
-        }
-        Ok(())
-    }
-
     // https://osu.ppy.sh/wiki/en/Client/File_formats/osr_%28file_format%29
     fn parse_osr(&mut self, data: &[u8]) -> Result<()> {
         let mut cursor = Cursor::new(data);
@@ -1776,6 +1770,54 @@ impl Replay {
             } else {
                 self.process_action_p1(time, down, frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_ybot2(&mut self, data: &[u8]) -> Result<()> {
+        use ybot_fmt::*;
+        let mut replay = Macro::open(Cursor::new(data))?;
+        let date = replay.get(Meta::DATE)?;
+        let presses = replay.get(Meta::PRESSES)?;
+        let frames = replay.get(Meta::FRAMES)?;
+        let mut current_fps = replay.get(Meta::FPS)?;
+        self.fps = current_fps;
+        let total_presses = replay.get(Meta::TOTAL_PRESSES)?;
+        let version = replay.version();
+        log::info!(
+            "ybot2 replay: version {version}, {presses} presses, \
+            {frames} frames, {current_fps} FPS, {total_presses} total presses"
+        );
+
+        // log datetime
+        use chrono::prelude::*;
+        log::info!(
+            "replay created at {} (UNIX timestamp: {date})",
+            Utc.timestamp_opt(date, 0).unwrap()
+        );
+
+        let mut frame = 0;
+        for timed_action in replay.actions() {
+            let timed_action = timed_action?;
+            frame += timed_action.delta;
+
+            match timed_action.action {
+                Action::Button(p1, push, button) => {
+                    let time = frame as f32 / current_fps;
+                    if p1 || button == PlayerButton::Left || button == PlayerButton::Jump {
+                        self.process_action_p1(time, push, frame as u32);
+                        self.extended_p1(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
+                    } else {
+                        self.process_action_p2(time, push, frame as u32);
+                        self.extended_p2(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
+                    }
+                }
+                Action::FPS(fps) => {
+                    self.fps_change(fps);
+                    current_fps = fps;
+                }
             }
         }
 

@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.3.2"
+version = "3.3.3"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -13,7 +13,7 @@ codegen-units = 1
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = [".", "bot"]
+members = [".", "bot", "bot/ybot_fmt"]
 
 [dependencies]
 clap = { version = "4.4.11", features = ["derive"] }
