@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ijson::IValue;
 use rand::Rng;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
@@ -458,29 +458,29 @@ impl Replay {
         self
     }
 
-    pub fn parse(mut self, typ: ReplayType, data: &[u8]) -> Result<Self> {
-        log::debug!("parsing replay, strlen {}, replay type {typ:?}", data.len());
+    pub fn parse<R: Read + Seek>(mut self, typ: ReplayType, reader: R) -> Result<Self> {
+        log::info!("parsing replay, replay type {typ:?}");
 
         match typ {
-            ReplayType::Mhr => self.parse_mhr(data)?,
-            ReplayType::TasBot => self.parse_tasbot(data)?,
-            ReplayType::Zbot => self.parse_zbf(data)?,
-            ReplayType::Obot => self.parse_obot2(data)?, // will also handle obot3 and replaybot replays
-            ReplayType::Ybotf => self.parse_ybotf(data)?,
-            ReplayType::MhrBin => self.parse_mhrbin(data)?,
-            ReplayType::Echo => self.parse_echo(data)?, // will handle all 3 replay versions
-            ReplayType::Amethyst => self.parse_amethyst(data)?,
-            ReplayType::OsuReplay => self.parse_osr(data)?,
-            ReplayType::Gdmo => self.parse_gdmo(data)?,
-            ReplayType::ReplayBot => self.parse_replaybot(data)?,
-            ReplayType::Rush => self.parse_rush(data)?,
-            ReplayType::Kdbot => self.parse_kdbot(data)?,
-            ReplayType::Txt => self.parse_txt(data)?,
-            ReplayType::ReplayEngine => self.parse_re(data)?,
-            ReplayType::Ddhor => self.parse_ddhor(data)?,
-            ReplayType::Xbot => self.parse_xbot(data)?,
-            ReplayType::Ybot2 => self.parse_ybot2(data)?,
-            // MacroType::GatoBot => self.parse_gatobot(data)?,
+            ReplayType::Mhr => self.parse_mhr(reader)?,
+            ReplayType::TasBot => self.parse_tasbot(reader)?,
+            ReplayType::Zbot => self.parse_zbf(reader)?,
+            ReplayType::Obot => self.parse_obot2(reader)?, // will also handle obot3 and replaybot replays
+            ReplayType::Ybotf => self.parse_ybotf(reader)?,
+            ReplayType::MhrBin => self.parse_mhrbin(reader)?,
+            ReplayType::Echo => self.parse_echo(reader)?, // will handle all 3 replay versions
+            ReplayType::Amethyst => self.parse_amethyst(reader)?,
+            ReplayType::OsuReplay => self.parse_osr(reader)?,
+            ReplayType::Gdmo => self.parse_gdmo(reader)?,
+            ReplayType::ReplayBot => self.parse_replaybot(reader)?,
+            ReplayType::Rush => self.parse_rush(reader)?,
+            ReplayType::Kdbot => self.parse_kdbot(reader)?,
+            ReplayType::Txt => self.parse_txt(reader)?,
+            ReplayType::ReplayEngine => self.parse_re(reader)?,
+            ReplayType::Ddhor => self.parse_ddhor(reader)?,
+            ReplayType::Xbot => self.parse_xbot(reader)?,
+            ReplayType::Ybot2 => self.parse_ybot2(reader)?,
+            // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
         // sort actions by time / frame
@@ -638,16 +638,13 @@ impl Replay {
         }
     }
 
-    fn parse_ybotf(&mut self, data: &[u8]) -> Result<()> {
-        // honestly i don't know if this works
-        let mut cursor = Cursor::new(data);
-
-        self.fps = cursor.read_f32::<LittleEndian>()?;
-        let num_actions = cursor.read_i32::<LittleEndian>()?;
+    fn parse_ybotf<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        self.fps = reader.read_f32::<LittleEndian>()?;
+        let num_actions = reader.read_i32::<LittleEndian>()?;
 
         for _ in (12..12 + num_actions * 8).step_by(8) {
-            let frame = cursor.read_u32::<LittleEndian>()?;
-            let state = cursor.read_u32::<LittleEndian>()?;
+            let frame = reader.read_u32::<LittleEndian>()?;
+            let state = reader.read_u32::<LittleEndian>()?;
             let down = (state & 0b10) == 2;
             let p2 = (state & 0b01) == 1;
             let time = frame as f32 / self.fps;
@@ -678,12 +675,18 @@ impl Replay {
     }
 
     /// Will also handle obot3 and replaybot replays.
-    fn parse_obot2(&mut self, data: &[u8]) -> Result<()> {
-        if data.len() >= 4 && &data[..4] == b"RPLY" {
-            return self.parse_replaybot(data);
+    fn parse_obot2<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        reader.seek(SeekFrom::Start(0))?;
+
+        // check if its a replaybot macro
+        if &data[..4] == b"RPLY" {
+            return self.parse_replaybot(reader);
         }
-        let Ok(decoded) = bincode::deserialize::<Obot2Replay>(data) else {
-            return self.parse_obot3(data);
+        // check if its a obot3 macro
+        let Ok(decoded) = bincode::deserialize::<Obot2Replay>(&data) else {
+            return self.parse_obot3(reader);
         };
 
         if decoded.replay_type == Obot2ReplayType::XPos {
@@ -769,21 +772,22 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_zbf(&mut self, data: &[u8]) -> Result<()> {
-        let mut cursor = Cursor::new(data);
+    fn parse_zbf<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let len = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
 
-        let delta = cursor.read_f32::<LittleEndian>()?;
-        let mut speedhack = cursor.read_f32::<LittleEndian>()?;
+        let delta = reader.read_f32::<LittleEndian>()?;
+        let mut speedhack = reader.read_f32::<LittleEndian>()?;
         if speedhack == 0.0 {
             log::error!("zbf speedhack is 0.0, defaulting to 1.0");
             speedhack = 1.0; // reset to 1 so we don't get Infinity as fps
         }
         self.fps = 1.0 / delta / speedhack;
 
-        for _ in (8..data.len()).step_by(6).enumerate() {
-            let frame = cursor.read_i32::<LittleEndian>()?;
-            let down = cursor.read_u8()? == 0x31;
-            let p1 = cursor.read_u8()? == 0x31;
+        for _ in (8..len).step_by(6).enumerate() {
+            let frame = reader.read_i32::<LittleEndian>()?;
+            let down = reader.read_u8()? == 0x31;
+            let p1 = reader.read_u8()? == 0x31;
             let time = frame as f32 / self.fps;
 
             if p1 {
@@ -812,15 +816,15 @@ impl Replay {
     }
 
     /// Also handles MHR json replays.
-    fn parse_tasbot(&mut self, data: &[u8]) -> Result<()> {
-        let v: IValue = serde_json::from_slice(data)?;
+    fn parse_tasbot<R: Read + Seek>(&mut self, reader: R) -> Result<()> {
+        let v: IValue = serde_json::from_reader(reader)?;
 
         // check if it's a mhr replay, because maybe someone renamed .mhr.json
         // to .json by accident
         if let Some(meta) = v.get("meta") {
             if let Some(fps) = meta.get("fps") {
                 if fps.to_f64().is_some() {
-                    return self.parse_mhr(data);
+                    return self.parse_mhr_from_ivalue(v);
                 }
             }
         }
@@ -954,21 +958,7 @@ impl Replay {
         serde_json::to_writer_pretty(writer, &replay)?;
         Ok(())
     }
-
-    fn parse_mhr(&mut self, data: &[u8]) -> Result<()> {
-        let v: serde_json::Result<IValue> = serde_json::from_slice(data);
-
-        // if we can't parse the JSON, try parsing the binary format
-        if v.is_err() && self.parse_mhrbin(data).is_ok() {
-            return Ok(());
-        } else {
-            // failed to parse binary format
-            self.actions.clear();
-            self.extended.clear();
-        }
-
-        let v = v?;
-
+    fn parse_mhr_from_ivalue(&mut self, v: IValue) -> Result<()> {
         self.fps = v
             .get("meta")
             .context("failed to get 'meta' field")?
@@ -1033,6 +1023,11 @@ impl Replay {
         Ok(())
     }
 
+    fn parse_mhr<R: Read + Seek>(&mut self, reader: R) -> Result<()> {
+        let v: serde_json::Result<IValue> = serde_json::from_reader(reader);
+        self.parse_mhr_from_ivalue(v?)
+    }
+
     fn write_mhr<W: Write>(&self, writer: W) -> Result<()> {
         #[derive(Serialize)]
         struct MhrMeta {
@@ -1084,37 +1079,40 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_mhrbin(&mut self, data: &[u8]) -> Result<()> {
+    fn parse_mhrbin<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        reader.seek(SeekFrom::Start(0))?;
+
         // if it's a json replay, load from json instead
-        if serde_json::from_slice::<IValue>(data).is_ok() {
-            return self.parse_mhr(data);
+        if serde_json::from_slice::<IValue>(&data).is_ok() {
+            return self.parse_mhr(reader);
         }
 
         use byteorder::BigEndian;
-        let mut cursor = Cursor::new(data);
 
-        let magic = cursor.read_u32::<BigEndian>()?;
+        let magic = reader.read_u32::<BigEndian>()?;
         if magic != 0x4841434B {
             // HACK
             log::error!("invalid mhrbin magic: {}", magic);
             anyhow::bail!("unknown mhrbin magic: {}", magic)
         }
 
-        cursor.set_position(12);
-        self.fps = cursor.read_u32::<LittleEndian>()? as f32;
+        reader.seek(SeekFrom::Start(12))?;
+        self.fps = reader.read_u32::<LittleEndian>()? as f32;
         log::debug!("fps: {}", self.fps);
-        cursor.set_position(28);
-        let num_actions = cursor.read_u32::<LittleEndian>()?;
+        reader.seek(SeekFrom::Start(28))?;
+        let num_actions = reader.read_u32::<LittleEndian>()?;
         log::debug!("num_actions: {}", num_actions);
 
         for _ in 0..num_actions {
-            cursor.set_position(cursor.position() + 2);
-            let down = cursor.read_u8()? == 1;
-            let p1 = cursor.read_u8()? == 0;
-            let frame = cursor.read_u32::<LittleEndian>()?;
+            reader.seek(SeekFrom::Current(2))?;
+            let down = reader.read_u8()? == 1;
+            let p1 = reader.read_u8()? == 0;
+            let frame = reader.read_u32::<LittleEndian>()?;
             let time = frame as f32 / self.fps;
             // skip 24 bytes
-            cursor.set_position(cursor.position() + 24);
+            reader.seek(SeekFrom::Current(24))?;
 
             if p1 {
                 self.process_action_p1(time, down, frame);
@@ -1129,52 +1127,54 @@ impl Replay {
     }
 
     /// Parses the new Echo replay format.
-    fn parse_echobin(&mut self, data: &[u8]) -> Result<()> {
+    fn parse_echobin<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         use byteorder::BigEndian;
-        let mut cursor = Cursor::new(data);
 
-        let magic = cursor.read_u32::<BigEndian>()?;
+        let len = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
+
+        let magic = reader.read_u32::<BigEndian>()?;
         if magic != 0x4D455441 {
             log::error!("invalid echobin magic: {}", magic);
             anyhow::bail!("unknown echobin magic: {}", magic)
         }
 
-        let replay_type = cursor.read_u32::<BigEndian>()?;
+        let replay_type = reader.read_u32::<BigEndian>()?;
         let action_size = if replay_type == 0x44424700 { 24 } else { 6 };
         let dbg = action_size == 24;
-        cursor.set_position(24);
-        self.fps = cursor.read_f32::<LittleEndian>()?;
-        cursor.set_position(48);
+        reader.seek(SeekFrom::Start(24))?;
+        self.fps = reader.read_f32::<LittleEndian>()?;
+        reader.seek(SeekFrom::Start(48))?;
 
-        for _ in (48..data.len()).step_by(action_size) {
-            let frame = cursor.read_u32::<LittleEndian>()?;
-            let down = cursor.read_u8()? == 1;
-            let p1 = cursor.read_u8()? == 0;
+        for _ in (48..len).step_by(action_size) {
+            let frame = reader.read_u32::<LittleEndian>()?;
+            let down = reader.read_u8()? == 1;
+            let p1 = reader.read_u8()? == 0;
             let time = frame as f32 / self.fps;
 
             // read extra vars (only saved in debug mode)
             let x = if dbg {
-                cursor.read_f32::<LittleEndian>()?
+                reader.read_f32::<LittleEndian>()?
             } else {
                 0.
             };
             let y_accel = if dbg {
-                cursor.read_f64::<LittleEndian>()?
+                reader.read_f64::<LittleEndian>()?
             } else {
                 0.
             };
             let _x_accel = if dbg {
-                cursor.read_f64::<LittleEndian>()?
+                reader.read_f64::<LittleEndian>()?
             } else {
                 0.
             };
             let y = if dbg {
-                cursor.read_f32::<LittleEndian>()?
+                reader.read_f32::<LittleEndian>()?
             } else {
                 0.
             };
             let rot = if dbg {
-                cursor.read_f32::<LittleEndian>()?
+                reader.read_f32::<LittleEndian>()?
             } else {
                 0.
             };
@@ -1256,9 +1256,13 @@ impl Replay {
     }
 
     /// Parses .echo files (both old json and new binary formats).
-    fn parse_echo(&mut self, data: &[u8]) -> Result<()> {
-        let Ok(v) = serde_json::from_slice::<IValue>(data) else {
-            return self.parse_echobin(data); // can't parse json, parse binary
+    fn parse_echo<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        reader.seek(SeekFrom::Start(0))?;
+
+        let Ok(v) = serde_json::from_slice::<IValue>(&data) else {
+            return self.parse_echobin(reader); // can't parse json, parse binary
         };
 
         // try parsing old json format
@@ -1395,8 +1399,9 @@ impl Replay {
     // {num actions}
     // {action time}...
     // ```
-    fn parse_amethyst(&mut self, data: &[u8]) -> Result<()> {
-        let data = String::from_utf8(data.to_vec())?;
+    fn parse_amethyst<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        let mut data = String::new();
+        reader.read_to_string(&mut data)?;
         let mut lines = data.split('\n');
 
         let mut get_times = |player, is_clicks| -> Result<Vec<(Player, bool, f32)>> {
@@ -1429,8 +1434,12 @@ impl Replay {
     }
 
     // https://osu.ppy.sh/wiki/en/Client/File_formats/osr_%28file_format%29
-    fn parse_osr(&mut self, data: &[u8]) -> Result<()> {
-        let mut cursor = Cursor::new(data);
+    fn parse_osr<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let len = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
+        let mut data = vec![0; len as usize];
+        reader.read_exact(&mut data)?;
+        let mut cursor = Cursor::new(&data);
 
         self.fps = 1000.0;
 
@@ -1520,14 +1529,12 @@ impl Replay {
     }
 
     // https://github.com/maxnut/GDMegaOverlay/blob/3bc9c191e3fcdde838b0f69f8411af782afa3ba7/src/Replay.cpp#L124-L140
-    fn parse_gdmo(&mut self, data: &[u8]) -> Result<()> {
+    fn parse_gdmo<R: Read>(&mut self, mut reader: R) -> Result<()> {
         use std::mem::size_of;
+        self.fps = reader.read_f32::<LittleEndian>()?;
 
-        let mut cursor = Cursor::new(data);
-        self.fps = cursor.read_f32::<LittleEndian>()?;
-
-        let num_actions = cursor.read_u32::<LittleEndian>()?;
-        let _num_frame_captures = cursor.read_u32::<LittleEndian>()?;
+        let num_actions = reader.read_u32::<LittleEndian>()?;
+        let _num_frame_captures = reader.read_u32::<LittleEndian>()?;
 
         #[repr(C)]
         struct GdmoAction {
@@ -1541,7 +1548,7 @@ impl Replay {
 
         for _ in 0..num_actions {
             let mut buf = [0; size_of::<GdmoAction>()];
-            cursor.read_exact(&mut buf)?;
+            reader.read_exact(&mut buf)?;
             let action: GdmoAction = unsafe { std::mem::transmute(buf) };
 
             let time = action.frame as f32 / self.fps;
@@ -1571,33 +1578,32 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_replaybot(&mut self, data: &[u8]) -> Result<()> {
+    fn parse_replaybot<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         const REPLAYBOT_MAGIC: &[u8; 4] = b"RPLY";
-
-        let mut cursor = Cursor::new(data);
+        let len = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
 
         // check if its a version 2 frame replay
-        if data.len() < 4 || &data[..4] != REPLAYBOT_MAGIC {
+        let mut magicbuf = [0; 4];
+        if reader.read_exact(&mut magicbuf).is_err() || &magicbuf != REPLAYBOT_MAGIC {
             anyhow::bail!(
                 "old replaybot replay format is not supported, as it does not store frames"
             )
         }
 
-        cursor.set_position(4); // skip magic
-
-        let version = cursor.read_u8()?;
+        let version = reader.read_u8()?;
         if version != 2 {
             anyhow::bail!("unsupported replaybot version {version} (only v2 is supported, because v1 doesn't store frames)")
         }
-        if cursor.read_u8()? != 1 {
+        if reader.read_u8()? != 1 {
             anyhow::bail!("only frame replays are supported")
         }
 
-        self.fps = cursor.read_f32::<LittleEndian>()?;
-        for _ in (10..data.len()).step_by(5) {
-            let frame = cursor.read_u32::<LittleEndian>()?;
+        self.fps = reader.read_f32::<LittleEndian>()?;
+        for _ in (10..len).step_by(5) {
+            let frame = reader.read_u32::<LittleEndian>()?;
             let time = frame as f32 / self.fps;
-            let state = cursor.read_u8()?;
+            let state = reader.read_u8()?;
             let down = state & 0x1 != 0;
             let player2 = state >> 1 != 0;
 
@@ -1613,14 +1619,16 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_rush(&mut self, data: &[u8]) -> Result<()> {
-        let mut cursor = Cursor::new(data);
-        self.fps = cursor.read_i16::<LittleEndian>()? as f32;
+    fn parse_rush<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let len = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
 
-        for _ in (2..data.len()).step_by(5) {
-            let frame = cursor.read_i32::<LittleEndian>()?;
+        self.fps = reader.read_i16::<LittleEndian>()? as f32;
+
+        for _ in (2..len).step_by(5) {
+            let frame = reader.read_i32::<LittleEndian>()?;
             let time = frame as f32 / self.fps;
-            let state = cursor.read_u8()?;
+            let state = reader.read_u8()?;
             let down = (state & 1) != 0;
             let p2 = (state >> 1) != 0;
 
@@ -1636,15 +1644,17 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_kdbot(&mut self, data: &[u8]) -> Result<()> {
-        let mut cursor = Cursor::new(data);
-        self.fps = cursor.read_f32::<LittleEndian>()?;
+    fn parse_kdbot<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let len = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
 
-        for _ in (4..data.len()).step_by(6) {
-            let frame = cursor.read_i32::<LittleEndian>()?;
+        self.fps = reader.read_f32::<LittleEndian>()?;
+
+        for _ in (4..len).step_by(6) {
+            let frame = reader.read_i32::<LittleEndian>()?;
             let time = frame as f32 / self.fps;
-            let down = cursor.read_u8()? == 1;
-            let p2 = cursor.read_u8()? == 1;
+            let down = reader.read_u8()? == 1;
+            let p2 = reader.read_u8()? == 1;
 
             if p2 {
                 self.process_action_p2(time, down, frame as _);
@@ -1658,9 +1668,10 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_txt(&mut self, data: &[u8]) -> Result<()> {
-        let lines = String::from_utf8(data.to_vec())?;
-        let mut lines = lines.split('\n');
+    fn parse_txt<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        let mut string = String::new();
+        reader.read_to_string(&mut string)?;
+        let mut lines = string.split('\n');
         self.fps = lines.next().context("failed to get fps")?.parse()?;
 
         for line in lines {
@@ -1685,10 +1696,11 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_obot3(&mut self, mut data: &[u8]) -> Result<()> {
-        let mut deserializer = dlhn::Deserializer::new(&mut data);
+    fn parse_obot3<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let mut deserializer = dlhn::Deserializer::new(&mut reader);
         let Ok(replay) = Obot3Replay::deserialize(&mut deserializer) else {
-            return self.parse_obot2(data);
+            reader.seek(SeekFrom::Start(0))?;
+            return self.parse_obot2(reader);
         };
 
         self.fps = replay.initial_fps;
@@ -1724,13 +1736,12 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_re(&mut self, data: &[u8]) -> Result<()> {
+    fn parse_re<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         use std::mem::size_of;
-        let mut cursor = Cursor::new(data);
 
-        self.fps = cursor.read_f32::<LittleEndian>()?;
-        let num_actions = cursor.read_i32::<LittleEndian>()?;
-        let num_actions2 = cursor.read_i32::<LittleEndian>()?;
+        self.fps = reader.read_f32::<LittleEndian>()?;
+        let num_actions = reader.read_i32::<LittleEndian>()?;
+        let num_actions2 = reader.read_i32::<LittleEndian>()?;
 
         #[repr(C)]
         struct FrameData {
@@ -1749,22 +1760,24 @@ impl Replay {
         }
 
         // read action data
-        let prev_pos = cursor.position();
-        cursor.set_position(num_actions as u64 * size_of::<FrameData>() as u64);
+        let prev_pos = reader.stream_position()?;
+        reader.seek(SeekFrom::Start(
+            num_actions as u64 * size_of::<FrameData>() as u64,
+        ))?;
         let mut actions: Vec<ActionData> =
             Vec::with_capacity(num_actions2 as usize * size_of::<ActionData>());
 
         for _ in 0..num_actions2 {
             let mut buf = [0; size_of::<ActionData>()];
-            cursor.read_exact(&mut buf)?;
+            reader.read_exact(&mut buf)?;
             actions.push(unsafe { std::mem::transmute(buf) });
         }
 
         // read frame data
-        cursor.set_position(prev_pos);
+        reader.seek(SeekFrom::Start(prev_pos))?;
         for _ in 0..num_actions {
             let mut buf = [0; size_of::<FrameData>()];
-            cursor.read_exact(&mut buf)?;
+            reader.read_exact(&mut buf)?;
             let data: FrameData = unsafe { std::mem::transmute(buf) };
 
             // find action for this frame
@@ -1801,29 +1814,28 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_ddhor(&mut self, data: &[u8]) -> Result<()> {
+    fn parse_ddhor<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         const DDHOR_MAGIC: &[u8; 4] = b"DDHR";
+        let len = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
 
-        let mut cursor = Cursor::new(data);
         let mut magicbuf = [0; DDHOR_MAGIC.len()];
-        cursor.read_exact(&mut magicbuf)?;
-
-        if magicbuf != *DDHOR_MAGIC {
+        if reader.read_exact(&mut magicbuf).is_err() || magicbuf != *DDHOR_MAGIC {
             anyhow::bail!(
                 "ddhor json is not supported, as it doesn't store frames.\n\
                            try using an older ddhor version with frame mode"
             );
         }
 
-        self.fps = cursor.read_i16::<LittleEndian>()? as f32;
-        let num_p1 = cursor.read_i32::<LittleEndian>()?; // num p1 actions
-        let _num_p2 = cursor.read_i32::<LittleEndian>()?; // num p2 actions
+        self.fps = reader.read_i16::<LittleEndian>()? as f32;
+        let num_p1 = reader.read_i32::<LittleEndian>()?; // num p1 actions
+        let _num_p2 = reader.read_i32::<LittleEndian>()?; // num p2 actions
 
-        for i in (14..data.len()).step_by(5) {
-            let frame = cursor.read_f32::<LittleEndian>()?;
+        for i in (14..len).step_by(5) {
+            let frame = reader.read_f32::<LittleEndian>()?;
             let time = frame / self.fps;
-            let down = cursor.read_u8()? == 0;
-            let p2 = i - 14 >= num_p1 as usize * 5;
+            let down = reader.read_u8()? == 0;
+            let p2 = i - 14 >= num_p1 as u64 * 5;
 
             if p2 {
                 self.process_action_p2(time, down, frame as _);
@@ -1837,9 +1849,10 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_xbot(&mut self, data: &[u8]) -> Result<()> {
-        let text = String::from_utf8(data.to_vec())?;
-        let mut lines = text.split('\n');
+    fn parse_xbot<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        let mut string = String::new();
+        reader.read_to_string(&mut string)?;
+        let mut lines = string.split('\n');
 
         self.fps = lines
             .next()
@@ -1887,9 +1900,9 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_ybot2(&mut self, data: &[u8]) -> Result<()> {
+    fn parse_ybot2<R: Read + Seek>(&mut self, reader: R) -> Result<()> {
         use ybot_fmt::*;
-        let mut replay = Macro::open(Cursor::new(data))?;
+        let mut replay = Macro::open(reader)?;
         let date = replay.get(Meta::DATE)?;
         let presses = replay.get(Meta::PRESSES)?;
         let frames = replay.get(Meta::FRAMES)?;
@@ -1936,7 +1949,7 @@ impl Replay {
     }
 
     /* gato
-    fn parse_gatobot(&mut self, data: &[u8]) -> Result<()> {
+    fn parse_gatobot<R: Read>(&mut self, mut reader: R) -> Result<()> {
         use base64::{engine::general_purpose, Engine as _};
         use flate2::read::GzDecoder;
 

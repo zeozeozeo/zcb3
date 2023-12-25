@@ -16,7 +16,7 @@ use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{cell::RefCell, io::Cursor, ops::RangeInclusive, path::Path, time::Instant};
-use std::{io::Read, path::PathBuf};
+use std::{io::BufReader, path::PathBuf};
 
 const MAX_PLOT_POINTS: usize = 4096;
 
@@ -718,10 +718,8 @@ impl App {
     fn load_replay(&mut self, dialog: &Modal, file: &Path) -> Result<()> {
         let filename = file.file_name().unwrap().to_str().unwrap();
 
-        // read replay file
-        let mut f = std::fs::File::open(file).unwrap();
-        let mut data = Vec::new();
-        f.read_to_end(&mut data).unwrap();
+        // open replay file
+        let f = std::fs::File::open(file).unwrap();
 
         let replay_type = ReplayType::guess_format(filename);
 
@@ -732,7 +730,7 @@ impl App {
                 .with_vol_settings(self.conf.vol_settings)
                 .with_extended(true)
                 .with_sort_actions(self.conf.sort_actions)
-                .parse(replay_type, &data);
+                .parse(replay_type, BufReader::new(f));
 
             if let Ok(replay) = replay {
                 self.replay = replay;

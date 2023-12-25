@@ -1,9 +1,8 @@
 mod gui;
 use bot::*;
-
 use clap::{Parser, ValueEnum};
 use std::{
-    io::Read,
+    io::BufReader,
     path::{Path, PathBuf},
 };
 
@@ -165,11 +164,8 @@ fn main() {
 
 /// Run command line interface
 fn run_cli(mut args: Args) {
-    // read replay
-    let mut f = std::fs::File::open(args.replay.clone()).expect("failed to open replay file");
-    let mut data = Vec::new();
-    f.read_to_end(&mut data)
-        .expect("failed to read replay file");
+    // open replay
+    let f = std::fs::File::open(args.replay.clone()).expect("failed to open replay file");
 
     let replay_filename = Path::new(&args.replay)
         .file_name()
@@ -215,7 +211,7 @@ fn run_cli(mut args: Args) {
         .with_vol_settings(vol_settings)
         .with_extended(true)
         .with_sort_actions(args.sort_actions)
-        .parse(format, &data)
+        .parse(format, BufReader::new(f))
         .unwrap();
 
     // try to compile volume expression to check for errors
