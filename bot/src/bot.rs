@@ -572,7 +572,6 @@ impl Bot {
 
     pub fn compile_expression(&mut self, expr: &str) -> Result<()> {
         let parser = fasteval2::Parser::new();
-        // a [`fasteval2::Slab`] can't be cloned, so we wrap it in a refcell
         self.slab = fasteval2::Slab::new();
         self.ns = BTreeMap::new();
 

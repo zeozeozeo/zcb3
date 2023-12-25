@@ -14,6 +14,7 @@ chrono = "0.4.31"
 dlhn = "0.1.6"
 fasteval2 = { git = "https://github.com/zeozeozeo/fasteval2.git", branch = "sqrt-builtin", default-features = false, features = ["alpha-keywords"]}
 hound = "3.5.1"
+ijson = "0.1.3"
 leb128 = "0.2.5"
 log = "0.4.20"
 lzma-rs = "0.3.0"

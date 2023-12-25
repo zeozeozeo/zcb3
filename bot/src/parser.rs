@@ -1,8 +1,8 @@
 use crate::{Timings, VolumeSettings};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use ijson::IValue;
 use rand::Rng;
-use serde_json::Value;
 use std::io::{Cursor, Read, Write};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -813,28 +813,28 @@ impl Replay {
 
     /// Also handles MHR json replays.
     fn parse_tasbot(&mut self, data: &[u8]) -> Result<()> {
-        let v: Value = serde_json::from_slice(data)?;
+        let v: IValue = serde_json::from_slice(data)?;
 
         // check if it's a mhr replay, because maybe someone renamed .mhr.json
         // to .json by accident
-        if v["meta"]["fps"].as_f64().is_some() {
+        if v["meta"]["fps"].to_f64().is_some() {
             return self.parse_mhr(data);
         }
 
-        self.fps = v["fps"].as_f64().context("couldn't get 'fps' field")? as f32;
+        self.fps = v["fps"].to_f64().context("couldn't get 'fps' field")? as f32;
         let events = v["macro"]
             .as_array()
             .context("couldn't get 'macro' array")?;
 
         for ev in events {
-            let frame = ev["frame"].as_u64().context("couldn't get 'frame' field")?;
+            let frame = ev["frame"].to_u64().context("couldn't get 'frame' field")?;
             let time = frame as f32 / self.fps;
 
             let p1 = ev["player_1"]["click"]
-                .as_i64()
+                .to_i64()
                 .context("failed to get p1 'click' field")?;
             let p2 = ev["player_2"]["click"]
-                .as_i64()
+                .to_i64()
                 .context("failed to get p2 'click' field")?;
 
             self.process_action_p1(time, p1 == 1, frame as _);
@@ -843,7 +843,7 @@ impl Replay {
             self.extended_p1(
                 p1 == 1,
                 frame as u32,
-                ev["player_1"]["x_position"].as_f64().unwrap_or(0.) as f32,
+                ev["player_1"]["x_position"].to_f64().unwrap_or(0.) as f32,
                 0.,
                 0.,
                 0.,
@@ -851,7 +851,7 @@ impl Replay {
             self.extended_p2(
                 p2 == 1,
                 frame as u32,
-                ev["player_2"]["x_position"].as_f64().unwrap_or(0.) as f32,
+                ev["player_2"]["x_position"].to_f64().unwrap_or(0.) as f32,
                 0.,
                 0.,
                 0.,
@@ -922,7 +922,7 @@ impl Replay {
     }
 
     fn parse_mhr(&mut self, data: &[u8]) -> Result<()> {
-        let v: serde_json::Result<Value> = serde_json::from_slice(data);
+        let v: serde_json::Result<IValue> = serde_json::from_slice(data);
 
         // if we can't parse the JSON, try parsing the binary format
         if v.is_err() && self.parse_mhrbin(data).is_ok() {
@@ -936,7 +936,7 @@ impl Replay {
         let v = v?;
 
         self.fps = v["meta"]["fps"]
-            .as_f64()
+            .to_f64()
             .context("couldn't get 'fps' field (does 'meta' exist?)")? as f32;
 
         let events = v["events"]
@@ -944,24 +944,24 @@ impl Replay {
             .context("couldn't get 'events' array")?;
 
         for ev in events {
-            let frame = ev["frame"].as_u64().context("couldn't get 'frame' field")?;
+            let frame = ev["frame"].to_u64().context("couldn't get 'frame' field")?;
             let time = frame as f32 / self.fps;
 
-            let Some(down) = ev["down"].as_bool() else {
+            let Some(down) = ev["down"].to_bool() else {
                 continue;
             };
 
             // 'p2' always seems to be true if it exists, but we'll still query the value just to be safe
             let p2 = if let Some(p2) = ev.get("p2") {
-                p2.as_bool().context("couldn't get 'p2' field")?
+                p2.to_bool().context("couldn't get 'p2' field")?
             } else {
                 false
             };
 
-            let y_accel = ev["a"].as_f64().unwrap_or(0.) as f32;
-            let x = ev["x"].as_f64().unwrap_or(0.) as f32;
-            let y = ev["y"].as_f64().unwrap_or(0.) as f32;
-            let rot = ev["r"].as_f64().unwrap_or(0.) as f32;
+            let y_accel = ev["a"].to_f64().unwrap_or(0.) as f32;
+            let x = ev["x"].to_f64().unwrap_or(0.) as f32;
+            let y = ev["y"].to_f64().unwrap_or(0.) as f32;
+            let rot = ev["r"].to_f64().unwrap_or(0.) as f32;
 
             if p2 {
                 self.process_action_p2(time, down, frame as _);
@@ -1028,7 +1028,7 @@ impl Replay {
 
     fn parse_mhrbin(&mut self, data: &[u8]) -> Result<()> {
         // if it's a json replay, load from json instead
-        if serde_json::from_slice::<Value>(data).is_ok() {
+        if serde_json::from_slice::<IValue>(data).is_ok() {
             return self.parse_mhr(data);
         }
 
@@ -1134,30 +1134,30 @@ impl Replay {
     }
 
     /// Parses the old Echo json format.
-    fn parse_echo_old(&mut self, v: Value) -> Result<()> {
-        self.fps = v["FPS"].as_f64().context("couldn't get 'FPS' field")? as f32;
-        let starting_frame = v["Starting Frame"].as_u64().unwrap_or(0);
+    fn parse_echo_old(&mut self, v: IValue) -> Result<()> {
+        self.fps = v["FPS"].to_f64().context("couldn't get 'FPS' field")? as f32;
+        let starting_frame = v["Starting Frame"].to_u64().unwrap_or(0);
 
         for action in v["Echo Replay"]
             .as_array()
             .context("couldn't get 'Echo Replay' field")?
         {
             let frame = action["Frame"]
-                .as_u64()
+                .to_u64()
                 .context("couldn't get 'Frame' field")?
                 + starting_frame;
             let time = frame as f32 / self.fps;
             let p2 = action["Player 2"]
-                .as_bool()
+                .to_bool()
                 .context("couldn't get 'Player 2' field")?;
             let down = action["Hold"]
-                .as_bool()
+                .to_bool()
                 .context("couldn't get 'Hold' field")?;
 
-            let x = action["X Position"].as_f64().unwrap_or(0.) as f32;
-            let y = action["Y Position"].as_f64().unwrap_or(0.) as f32;
-            let y_accel = action["Y Acceleration"].as_f64().unwrap_or(0.) as f32;
-            let rot = action["Rotation"].as_f64().unwrap_or(0.) as f32;
+            let x = action["X Position"].to_f64().unwrap_or(0.) as f32;
+            let y = action["Y Position"].to_f64().unwrap_or(0.) as f32;
+            let y_accel = action["Y Acceleration"].to_f64().unwrap_or(0.) as f32;
+            let rot = action["Rotation"].to_f64().unwrap_or(0.) as f32;
 
             if p2 {
                 self.process_action_p2(time, down, frame as _);
@@ -1172,7 +1172,7 @@ impl Replay {
 
     /// Parses .echo files (both old json and new binary formats).
     fn parse_echo(&mut self, data: &[u8]) -> Result<()> {
-        let Ok(v) = serde_json::from_slice::<Value>(data) else {
+        let Ok(v) = serde_json::from_slice::<IValue>(data) else {
             return self.parse_echobin(data); // can't parse json, parse binary
         };
 
@@ -1185,20 +1185,20 @@ impl Replay {
         }
 
         // parse new json format
-        self.fps = v["fps"].as_f64().context("no 'fps' field")? as f32;
+        self.fps = v["fps"].to_f64().context("no 'fps' field")? as f32;
         for action in v["inputs"].as_array().context("no 'inputs' field")? {
-            let frame = action["frame"].as_u64().context("no 'frame' field")?;
+            let frame = action["frame"].to_u64().context("no 'frame' field")?;
             let time = frame as f32 / self.fps;
-            let down = action["holding"].as_bool().context("no 'holding' field")?;
-            let p2 = if let Some(p2) = action["player_2"].as_bool() {
+            let down = action["holding"].to_bool().context("no 'holding' field")?;
+            let p2 = if let Some(p2) = action["player_2"].to_bool() {
                 p2
             } else {
                 false
             };
-            let x = action["x_position"].as_f64().unwrap_or(0.);
-            let y_accel = action["y_vel"].as_f64().unwrap_or(0.);
-            // let _x_accel = action["x_vel"].as_f64().unwrap_or(0.);
-            let rot = action["rotation"].as_f64().unwrap_or(0.);
+            let x = action["x_position"].to_f64().unwrap_or(0.);
+            let y_accel = action["y_vel"].to_f64().unwrap_or(0.);
+            // let _x_accel = action["x_vel"].to_f64().unwrap_or(0.);
+            let rot = action["rotation"].to_f64().unwrap_or(0.);
 
             if p2 {
                 self.process_action_p2(time, down, frame as _);
