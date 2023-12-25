@@ -817,25 +817,47 @@ impl Replay {
 
         // check if it's a mhr replay, because maybe someone renamed .mhr.json
         // to .json by accident
-        if v["meta"]["fps"].to_f64().is_some() {
-            return self.parse_mhr(data);
+        if let Some(meta) = v.get("meta") {
+            if let Some(fps) = meta.get("fps") {
+                if fps.to_f64().is_some() {
+                    return self.parse_mhr(data);
+                }
+            }
         }
 
-        self.fps = v["fps"].to_f64().context("couldn't get 'fps' field")? as f32;
-        let events = v["macro"]
+        self.fps = v
+            .get("fps")
+            .context("couldn't get 'fps' field")?
+            .to_f64()
+            .context("couldn't convert 'fps' field to float")? as f32;
+        let events = v
+            .get("macro")
+            .context("couldn't get 'macro' field")?
             .as_array()
-            .context("couldn't get 'macro' array")?;
+            .context("'macro' is not an array")?;
 
         for ev in events {
-            let frame = ev["frame"].to_u64().context("couldn't get 'frame' field")?;
+            let frame = ev
+                .get("frame")
+                .context("couldn't get 'frame' field")?
+                .to_u64()
+                .context("'frame' is not a number")?;
             let time = frame as f32 / self.fps;
 
-            let p1 = ev["player_1"]["click"]
+            let p1 = ev
+                .get("player_1")
+                .context("couldn't get 'player_1' field")?
+                .get("click")
+                .context("couldn't get p1 'click' field")?
                 .to_i64()
-                .context("failed to get p1 'click' field")?;
-            let p2 = ev["player_2"]["click"]
+                .context("p1 'click' field is not a number")?;
+            let p2 = ev
+                .get("player_2")
+                .context("couldn't get 'player_2' field")?
+                .get("click")
+                .context("couldn't get p2 'click' field")?
                 .to_i64()
-                .context("failed to get p2 'click' field")?;
+                .context("p2 'click' field is not a number")?;
 
             self.process_action_p1(time, p1 == 1, frame as _);
             self.process_action_p2(time, p2 == 1, frame as _);
@@ -843,7 +865,13 @@ impl Replay {
             self.extended_p1(
                 p1 == 1,
                 frame as u32,
-                ev["player_1"]["x_position"].to_f64().unwrap_or(0.) as f32,
+                ev.get("player_1")
+                    .map(|v| {
+                        v.get("x_position")
+                            .map(|v| v.to_f64().unwrap_or(0.) as f32)
+                            .unwrap_or(0.0)
+                    })
+                    .unwrap_or(0.0),
                 0.,
                 0.,
                 0.,
@@ -851,7 +879,13 @@ impl Replay {
             self.extended_p2(
                 p2 == 1,
                 frame as u32,
-                ev["player_2"]["x_position"].to_f64().unwrap_or(0.) as f32,
+                ev.get("player_2")
+                    .map(|v| {
+                        v.get("x_position")
+                            .map(|v| v.to_f64().unwrap_or(0.) as f32)
+                            .unwrap_or(0.0)
+                    })
+                    .unwrap_or(0.0),
                 0.,
                 0.,
                 0.,
@@ -935,19 +969,31 @@ impl Replay {
 
         let v = v?;
 
-        self.fps = v["meta"]["fps"]
+        self.fps = v
+            .get("meta")
+            .context("failed to get 'meta' field")?
+            .get("fps")
+            .context("failed to get 'fps' field")?
             .to_f64()
-            .context("couldn't get 'fps' field (does 'meta' exist?)")? as f32;
+            .context("'fps' field is not a float")? as f32;
 
-        let events = v["events"]
+        let events = v
+            .get("events")
+            .context("failed to get 'events' field")?
             .as_array()
-            .context("couldn't get 'events' array")?;
+            .context("'events' field is not an array")?;
 
         for ev in events {
-            let frame = ev["frame"].to_u64().context("couldn't get 'frame' field")?;
+            let frame = ev
+                .get("frame")
+                .context("failed to get 'frame' field")?
+                .to_u64()
+                .context("'frame' field is not a number")?;
             let time = frame as f32 / self.fps;
 
-            let Some(down) = ev["down"].to_bool() else {
+            let down = if let Some(down) = ev.get("down") {
+                down.to_bool().context("'down' field is not a bool")?
+            } else {
                 continue;
             };
 
@@ -958,10 +1004,22 @@ impl Replay {
                 false
             };
 
-            let y_accel = ev["a"].to_f64().unwrap_or(0.) as f32;
-            let x = ev["x"].to_f64().unwrap_or(0.) as f32;
-            let y = ev["y"].to_f64().unwrap_or(0.) as f32;
-            let rot = ev["r"].to_f64().unwrap_or(0.) as f32;
+            let y_accel = ev
+                .get("a")
+                .map(|v| v.to_f32().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            let x = ev
+                .get("x")
+                .map(|v| v.to_f32().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            let y = ev
+                .get("y")
+                .map(|v| v.to_f32().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            let rot = ev
+                .get("r")
+                .map(|v| v.to_f32().unwrap_or(0.0))
+                .unwrap_or(0.0);
 
             if p2 {
                 self.process_action_p2(time, down, frame as _);
@@ -1135,29 +1193,56 @@ impl Replay {
 
     /// Parses the old Echo json format.
     fn parse_echo_old(&mut self, v: IValue) -> Result<()> {
-        self.fps = v["FPS"].to_f64().context("couldn't get 'FPS' field")? as f32;
-        let starting_frame = v["Starting Frame"].to_u64().unwrap_or(0);
+        self.fps = v
+            .get("FPS")
+            .context("couldn't get 'FPS' field")?
+            .to_f64()
+            .context("'FPS' field is not a float")? as f32;
+        let starting_frame = v
+            .get("Starting Frame")
+            .map(|v| v.to_u64().unwrap_or(0))
+            .unwrap_or(0);
 
-        for action in v["Echo Replay"]
+        for action in v
+            .get("Echo Replay")
+            .context("failed to get 'Echo Replay' field")?
             .as_array()
-            .context("couldn't get 'Echo Replay' field")?
+            .context("'Echo Replay' field is not an array")?
         {
-            let frame = action["Frame"]
-                .to_u64()
+            let frame = action
+                .get("Frame")
                 .context("couldn't get 'Frame' field")?
+                .to_u64()
+                .context("'Frame' field is not a number")?
                 + starting_frame;
             let time = frame as f32 / self.fps;
-            let p2 = action["Player 2"]
+            let p2 = action
+                .get("Player 2")
+                .context("couldn't get 'Player 2' field")?
                 .to_bool()
-                .context("couldn't get 'Player 2' field")?;
-            let down = action["Hold"]
+                .context("'Player 2' field is not a bool")?;
+            let down = action
+                .get("Hold")
+                .context("couldn't get 'Hold' field")?
                 .to_bool()
-                .context("couldn't get 'Hold' field")?;
+                .context("'Hold' field is not a bool")?;
 
-            let x = action["X Position"].to_f64().unwrap_or(0.) as f32;
-            let y = action["Y Position"].to_f64().unwrap_or(0.) as f32;
-            let y_accel = action["Y Acceleration"].to_f64().unwrap_or(0.) as f32;
-            let rot = action["Rotation"].to_f64().unwrap_or(0.) as f32;
+            let x = action
+                .get("X Position")
+                .map(|v| v.to_f32().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            let y = action
+                .get("Y Position")
+                .map(|v| v.to_f32().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            let y_accel = action
+                .get("Y Acceleration")
+                .map(|v| v.to_f32().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            let rot = action
+                .get("Rotation")
+                .map(|v| v.to_f32().unwrap_or(0.0))
+                .unwrap_or(0.0);
 
             if p2 {
                 self.process_action_p2(time, down, frame as _);
@@ -1185,20 +1270,46 @@ impl Replay {
         }
 
         // parse new json format
-        self.fps = v["fps"].to_f64().context("no 'fps' field")? as f32;
-        for action in v["inputs"].as_array().context("no 'inputs' field")? {
-            let frame = action["frame"].to_u64().context("no 'frame' field")?;
+        self.fps = v
+            .get("fps")
+            .context("no 'fps' field")?
+            .to_f32()
+            .context("'fps' field is not a float")?;
+        for action in v
+            .get("inputs")
+            .context("no 'inputs' field")?
+            .as_array()
+            .context("'inputs' field is not an array")?
+        {
+            let frame = action
+                .get("frame")
+                .context("no 'frame' field")?
+                .to_u64()
+                .context("'frame' field is not a number")?;
             let time = frame as f32 / self.fps;
-            let down = action["holding"].to_bool().context("no 'holding' field")?;
-            let p2 = if let Some(p2) = action["player_2"].to_bool() {
-                p2
+            let down = action
+                .get("holding")
+                .context("no 'holding' field")?
+                .to_bool()
+                .context("'holding' field is not a bool")?;
+            let p2 = if let Some(p2) = action.get("player_2") {
+                p2.to_bool().unwrap_or(false)
             } else {
                 false
             };
-            let x = action["x_position"].to_f64().unwrap_or(0.);
-            let y_accel = action["y_vel"].to_f64().unwrap_or(0.);
-            // let _x_accel = action["x_vel"].to_f64().unwrap_or(0.);
-            let rot = action["rotation"].to_f64().unwrap_or(0.);
+            let x = action
+                .get("x_position")
+                .map(|v| v.to_f64().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            let y_accel = action
+                .get("y_vel")
+                .map(|v| v.to_f64().unwrap_or(0.0))
+                .unwrap_or(0.0);
+            // let _x_accel = action.get("x_vel").context("no 'x_vel' field").to_f64().unwrap_or(0.);
+            let rot = action
+                .get("rotation")
+                .map(|v| v.to_f64().unwrap_or(0.0))
+                .unwrap_or(0.0);
 
             if p2 {
                 self.process_action_p2(time, down, frame as _);
