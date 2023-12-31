@@ -125,7 +125,7 @@ struct Args {
     #[arg(
         long,
         help = "Cut overlapping sounds. Changes the sound significantly in spams",
-        default_value_t = true
+        default_value_t = false
     )]
     cut_sounds: bool,
 }

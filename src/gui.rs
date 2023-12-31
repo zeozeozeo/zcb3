@@ -72,10 +72,6 @@ fn get_version() -> String {
     built_info::PKG_VERSION.to_string()
 }
 
-fn true_bool() -> bool {
-    true
-}
-
 fn f32_one() -> f32 {
     1.0
 }
@@ -98,7 +94,7 @@ struct Config {
     plot_data_aspect: f32,
     #[serde(default = "ClickpackConversionSettings::default")]
     conversion_settings: ClickpackConversionSettings,
-    #[serde(default = "true_bool")]
+    #[serde(default = "bool::default")]
     cut_sounds: bool,
     #[serde(default = "f32_one")]
     noise_volume: f32,
@@ -141,7 +137,7 @@ impl Default for Config {
             sort_actions: true,
             plot_data_aspect: 20.0,
             conversion_settings: ClickpackConversionSettings::default(),
-            cut_sounds: true,
+            cut_sounds: false,
             noise_volume: 1.0,
         }
     }
