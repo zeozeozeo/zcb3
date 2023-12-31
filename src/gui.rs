@@ -904,7 +904,7 @@ impl App {
             ui.label("• ReplayBot Replay (.replay)");
             ui.label("• KD-BOT Replay (.kd)");
             ui.label("• Rush Replay (.rsh)");
-            ui.label("• Plaintext Replay (.txt, generated from mat's macro converter)");
+            ui.label("• Plaintext & GDH Plaintext (v2) Replay (.txt)");
             ui.label("• ReplayEngine Replay (.re)");
             ui.label("• DDHOR Replay (.ddhor, old frame format)");
             ui.label("• xBot Frame (.xbot)");

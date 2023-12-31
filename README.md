@@ -24,7 +24,7 @@ Free and easy to use Geometry Dash clickbot.
 * ReplayBot Replay (.replay)
 * KD-BOT Replay (.kd)
 * Rush Replay (.rsh)
-* Plaintext Replay (.txt, generated from mat's macro converter)
+* Plaintext & GDH Plaintext (v2) Replay (.txt)
 * ReplayEngine Replay (.re)
 * DDHOR Replay (.ddhor, old frame format)
 * xBot Frame (.xbot)
