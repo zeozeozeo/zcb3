@@ -3,7 +3,7 @@ use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ijson::IValue;
 use rand::Rng;
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
@@ -475,7 +475,7 @@ impl Replay {
             ReplayType::ReplayBot => self.parse_replaybot(reader)?,
             ReplayType::Rush => self.parse_rush(reader)?,
             ReplayType::Kdbot => self.parse_kdbot(reader)?,
-            ReplayType::Txt => self.parse_txt(reader)?,
+            ReplayType::Txt => self.parse_plaintext(reader)?,
             ReplayType::ReplayEngine => self.parse_re(reader)?,
             ReplayType::Ddhor => self.parse_ddhor(reader)?,
             ReplayType::Xbot => self.parse_xbot(reader)?,
@@ -1668,31 +1668,42 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_txt<R: Read>(&mut self, mut reader: R) -> Result<()> {
-        let mut string = String::new();
-        reader.read_to_string(&mut string)?;
-        let mut lines = string.split('\n');
-        self.fps = lines.next().context("failed to get fps")?.parse()?;
-
-        for line in lines {
-            let mut split = line.split(' ');
-            if split.clone().count() != 3 {
-                continue;
-            }
-            let frame_or_xpos: f32 = split.next().unwrap().parse()?;
-            let time = frame_or_xpos / self.fps;
-            let down = split.next().unwrap().parse::<u8>()? == 1;
-            let p2 = split.next().unwrap().parse::<u8>()? == 1;
-
-            if p2 {
-                self.process_action_p2(time, down, frame_or_xpos as _);
-                self.extended_p2(down, frame_or_xpos as u32, 0., 0., 0., 0.);
-            } else {
-                self.process_action_p1(time, down, frame_or_xpos as _);
-                self.extended_p1(down, frame_or_xpos as u32, 0., 0., 0., 0.);
-            }
+    fn parse_plaintext<R: Read>(&mut self, reader: R) -> Result<()> {
+        let mut reader = BufReader::new(reader);
+        {
+            let mut fps_string = String::new();
+            reader.read_line(&mut fps_string)?;
+            self.fps = fps_string.trim().parse()?;
         }
 
+        for (i, line) in reader.lines().enumerate() {
+            let line = line?;
+            let mut split = line.trim().split(' ');
+            if split.clone().count() < 3 {
+                log::warn!("plaintext: line {i} length < 3, skipping");
+                continue;
+            }
+            let frame: f32 = split.next().unwrap().parse()?;
+            let time = frame / self.fps;
+            let down = split.next().unwrap().parse::<u8>()? == 1;
+            let pbutton: u8 = split.next().unwrap().parse()?; // TODO: support button == 3 (2.2 platformer thing)
+
+            let p2 = if let Some(player1) = split.next() {
+                // if fourth number is 1 then its p1, if 0 it is p2
+                player1.parse::<u8>()? == 0
+            } else {
+                // no fourth number, player is 2 if pbutton is 1
+                pbutton == 1
+            };
+
+            if p2 {
+                self.process_action_p2(time, down, frame as _);
+                self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
+            } else {
+                self.process_action_p1(time, down, frame as _);
+                self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
+            }
+        }
         Ok(())
     }
 
