@@ -16,7 +16,7 @@ codegen-units = 1
 members = [".", "bot", "bot/ybot_fmt"]
 
 [dependencies]
-clap = { version = "4.4.12", features = ["derive"] }
+clap = { version = "4.4.13", features = ["derive"] }
 eframe = "0.24.1"
 egui-modal = "0.3.1"
 env_logger = "0.10.1"
