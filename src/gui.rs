@@ -934,7 +934,7 @@ impl App {
             ui.label("• Echo (.echo, new binary format, new json format and old json format)");
             ui.label("• Amethyst Replay (.thyst)");
             ui.label("• osu! replay (.osr)");
-            ui.label("• GDMO Replay (.macro)");
+            ui.label("• GDMO Replay & 2.2 GDMO Replay (.macro)");
             ui.label("• ReplayBot Replay (.replay)");
             ui.label("• KD-BOT Replay (.kd)");
             ui.label("• Rush Replay (.rsh)");

@@ -20,7 +20,7 @@ Free and easy to use Geometry Dash clickbot.
 * Echo (.echo, new binary format, new json format and old json format)
 * Amethyst Replay (.thyst)
 * osu! replay (.osr)
-* GDMO Replay (.macro)
+* GDMO Replay & 2.2 GDMO Replay (.macro)
 * ReplayBot Replay (.replay)
 * KD-BOT Replay (.kd)
 * Rush Replay (.rsh)
