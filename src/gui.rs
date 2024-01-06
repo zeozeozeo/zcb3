@@ -205,15 +205,6 @@ fn u32_edit_field_min1(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
     res
 }
 
-fn f32_edit_field(ui: &mut egui::Ui, value: &mut f32) -> egui::Response {
-    let mut tmp_value = format!("{value}");
-    let res = ui.text_edit_singleline(&mut tmp_value);
-    if let Ok(result) = tmp_value.parse::<f32>() {
-        *value = result;
-    }
-    res
-}
-
 fn help_text<R>(ui: &mut egui::Ui, help: &str, add_contents: impl FnOnce(&mut egui::Ui) -> R) {
     if help.is_empty() {
         add_contents(ui); // don't show help icon if there's no help text
