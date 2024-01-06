@@ -163,6 +163,8 @@ struct App {
     clickpack_has_noise: bool,
     expr_variable_variation_negative: bool,
     showing_clickpack_suggestion: bool,
+    override_fps_enabled: bool,
+    override_fps: f32,
 }
 
 impl Default for App {
@@ -187,6 +189,8 @@ impl Default for App {
             clickpack_has_noise: false,
             expr_variable_variation_negative: true,
             showing_clickpack_suggestion: false,
+            override_fps_enabled: false,
+            override_fps: 0.0,
         }
     }
 }
@@ -197,6 +201,15 @@ fn u32_edit_field_min1(ui: &mut egui::Ui, value: &mut u32) -> egui::Response {
     let res = ui.text_edit_singleline(&mut tmp_value);
     if let Ok(result) = tmp_value.parse::<u32>() {
         *value = result.max(1);
+    }
+    res
+}
+
+fn f32_edit_field(ui: &mut egui::Ui, value: &mut f32) -> egui::Response {
+    let mut tmp_value = format!("{value}");
+    let res = ui.text_edit_singleline(&mut tmp_value);
+    if let Ok(result) = tmp_value.parse::<f32>() {
+        *value = result;
     }
     res
 }
@@ -726,6 +739,11 @@ impl App {
                 .with_vol_settings(self.conf.vol_settings)
                 .with_extended(true)
                 .with_sort_actions(self.conf.sort_actions)
+                .with_override_fps(if self.override_fps_enabled {
+                    Some(self.override_fps)
+                } else {
+                    None
+                })
                 .parse(replay_type, BufReader::new(f));
 
             if let Ok(replay) = replay {
@@ -838,21 +856,39 @@ impl App {
         });
         ui.separator();
 
-        if let Some(conf_after_replay_selected) = &self.conf_after_replay_selected {
-            if conf_after_replay_selected.replay_changed(&self.conf) {
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Reload replay to apply settings").color(Color32::LIGHT_RED),
-                    );
-                    if let Some(replay_path) = &self.replay_path.clone() {
-                        if ui.button("Reload").on_hover_text("Reload replay").clicked() {
-                            let _ = self
-                                .load_replay(&dialog, replay_path)
-                                .map_err(|e| log::error!("failed to reload replay: {e}"));
-                        }
-                    }
-                });
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut self.override_fps_enabled, "Override FPS");
+            if self.override_fps_enabled {
+                drag_value(ui, &mut self.override_fps, "FPS", 0.0..=f32::INFINITY, "");
+            } else {
+                self.override_fps = self.replay.fps;
             }
+        });
+
+        let num_actions = self.replay.actions.len();
+        let replay_changed =
+            if let Some(conf_after_replay_selected) = &self.conf_after_replay_selected {
+                conf_after_replay_selected.replay_changed(&self.conf)
+            } else {
+                false
+            };
+
+        if (self.override_fps_enabled && num_actions > 0 && self.override_fps != self.replay.fps)
+            || self.override_fps_enabled != self.replay.override_fps.is_some()
+            || replay_changed
+        {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Reload replay to apply settings").color(Color32::LIGHT_RED),
+                );
+                if let Some(replay_path) = &self.replay_path.clone() {
+                    if ui.button("Reload").on_hover_text("Reload replay").clicked() {
+                        let _ = self
+                            .load_replay(&dialog, replay_path)
+                            .map_err(|e| log::error!("failed to reload replay: {e}"));
+                    }
+                }
+            });
         }
 
         ui.horizontal(|ui| {
@@ -876,14 +912,16 @@ impl App {
                 }
             }
 
-            let num_actions = self.replay.actions.len();
             let num_extended = self.replay.extended.len();
             if num_actions > 0 {
                 ui.label(format!(
-                    "Number of actions in replay: {num_actions} / {num_extended}"
+                    "Number of actions in replay: {num_actions} actions, {num_extended} physics"
                 ));
             }
         });
+        if num_actions > 0 {
+            ui.label(format!("Replay FPS: {:.2}", self.replay.fps));
+        }
 
         ui.collapsing("Supported file formats", |ui| {
             ui.label("• Mega Hack Replay JSON (.mhr.json)");

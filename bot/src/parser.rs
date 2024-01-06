@@ -264,6 +264,7 @@ pub struct Replay {
 
     /// Whether to sort actions.
     sort_actions: bool,
+    pub override_fps: Option<f32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -443,6 +444,11 @@ impl Replay {
         self
     }
 
+    pub fn with_override_fps(mut self, override_fps: Option<f32>) -> Self {
+        self.override_fps = override_fps;
+        self
+    }
+
     pub fn with_vol_settings(mut self, vol_settings: VolumeSettings) -> Self {
         self.vol_settings = vol_settings;
         self
@@ -493,7 +499,7 @@ impl Replay {
         }
 
         log::debug!(
-            "replay fps: {}; replay duration: {:?}",
+            "replay fps: {}; replay duration: {:?}s",
             self.fps,
             self.duration
         );
@@ -638,8 +644,16 @@ impl Replay {
         }
     }
 
+    fn get_fps(&self, actual: f32) -> f32 {
+        if let Some(override_fps) = self.override_fps {
+            override_fps
+        } else {
+            actual
+        }
+    }
+
     fn parse_ybotf<R: Read>(&mut self, mut reader: R) -> Result<()> {
-        self.fps = reader.read_f32::<LittleEndian>()?;
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
         let num_actions = reader.read_i32::<LittleEndian>()?;
 
         for _ in (12..12 + num_actions * 8).step_by(8) {
@@ -694,7 +708,7 @@ impl Replay {
             anyhow::bail!("xpos replays not supported, because they doesn't store frames")
         };
 
-        self.fps = decoded.initial_fps;
+        self.fps = self.get_fps(decoded.initial_fps);
         let mut current_fps = self.fps;
 
         for action in decoded.clicks {
@@ -782,7 +796,7 @@ impl Replay {
             log::error!("zbf speedhack is 0.0, defaulting to 1.0");
             speedhack = 1.0; // reset to 1 so we don't get Infinity as fps
         }
-        self.fps = 1.0 / delta / speedhack;
+        self.fps = self.get_fps(1.0 / delta / speedhack);
 
         for _ in (8..len).step_by(6).enumerate() {
             let frame = reader.read_i32::<LittleEndian>()?;
@@ -829,11 +843,12 @@ impl Replay {
             }
         }
 
-        self.fps = v
-            .get("fps")
-            .context("couldn't get 'fps' field")?
-            .to_f64()
-            .context("couldn't convert 'fps' field to float")? as f32;
+        self.fps = self.get_fps(
+            v.get("fps")
+                .context("couldn't get 'fps' field")?
+                .to_f64()
+                .context("couldn't convert 'fps' field to float")? as f32,
+        );
         let events = v
             .get("macro")
             .context("couldn't get 'macro' field")?
@@ -959,13 +974,14 @@ impl Replay {
         Ok(())
     }
     fn parse_mhr_from_ivalue(&mut self, v: IValue) -> Result<()> {
-        self.fps = v
-            .get("meta")
-            .context("failed to get 'meta' field")?
-            .get("fps")
-            .context("failed to get 'fps' field")?
-            .to_f64()
-            .context("'fps' field is not a float")? as f32;
+        self.fps = self.get_fps(
+            v.get("meta")
+                .context("failed to get 'meta' field")?
+                .get("fps")
+                .context("failed to get 'fps' field")?
+                .to_f64()
+                .context("'fps' field is not a float")? as f32,
+        );
 
         let events = v
             .get("events")
@@ -1099,7 +1115,7 @@ impl Replay {
         }
 
         reader.seek(SeekFrom::Start(12))?;
-        self.fps = reader.read_u32::<LittleEndian>()? as f32;
+        self.fps = self.get_fps(reader.read_u32::<LittleEndian>()? as f32);
         log::debug!("fps: {}", self.fps);
         reader.seek(SeekFrom::Start(28))?;
         let num_actions = reader.read_u32::<LittleEndian>()?;
@@ -1143,7 +1159,7 @@ impl Replay {
         let action_size = if replay_type == 0x44424700 { 24 } else { 6 };
         let dbg = action_size == 24;
         reader.seek(SeekFrom::Start(24))?;
-        self.fps = reader.read_f32::<LittleEndian>()?;
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
         reader.seek(SeekFrom::Start(48))?;
 
         for _ in (48..len).step_by(action_size) {
@@ -1193,11 +1209,12 @@ impl Replay {
 
     /// Parses the old Echo json format.
     fn parse_echo_old(&mut self, v: IValue) -> Result<()> {
-        self.fps = v
-            .get("FPS")
-            .context("couldn't get 'FPS' field")?
-            .to_f64()
-            .context("'FPS' field is not a float")? as f32;
+        self.fps = self.get_fps(
+            v.get("FPS")
+                .context("couldn't get 'FPS' field")?
+                .to_f64()
+                .context("'FPS' field is not a float")? as f32,
+        );
         let starting_frame = v
             .get("Starting Frame")
             .map(|v| v.to_u64().unwrap_or(0))
@@ -1274,11 +1291,12 @@ impl Replay {
         }
 
         // parse new json format
-        self.fps = v
-            .get("fps")
-            .context("no 'fps' field")?
-            .to_f32()
-            .context("'fps' field is not a float")?;
+        self.fps = self.get_fps(
+            v.get("fps")
+                .context("no 'fps' field")?
+                .to_f32()
+                .context("'fps' field is not a float")?,
+        );
         for action in v
             .get("inputs")
             .context("no 'inputs' field")?
@@ -1441,7 +1459,7 @@ impl Replay {
         reader.read_exact(&mut data)?;
         let mut cursor = Cursor::new(&data);
 
-        self.fps = 1000.0;
+        self.fps = self.get_fps(1000.0);
 
         cursor.set_position(5);
         let bm_md5_exists = cursor.read_u8()? == 0x0b;
@@ -1528,10 +1546,135 @@ impl Replay {
         Ok(())
     }
 
-    // https://github.com/maxnut/GDMegaOverlay/blob/3bc9c191e3fcdde838b0f69f8411af782afa3ba7/src/Replay.cpp#L124-L140
-    fn parse_gdmo<R: Read>(&mut self, mut reader: R) -> Result<()> {
+    fn parse_gdmo_22<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         use std::mem::size_of;
-        self.fps = reader.read_f32::<LittleEndian>()?;
+        log::info!("trying to parse 2.2 gdmo macro");
+
+        #[repr(C)]
+        struct GdmoAction {
+            time: f64,
+            key: i32,
+            press: bool,
+            player1: bool,
+        }
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct PlayerCheckpoint {
+            y_vel: f64,
+            x_vel: f64,
+            x_pos: f32,
+            y_pos: f32,
+            node_x_pos: f32,
+            node_y_pos: f32,
+            rotation: f32,
+            // ignored fields
+            // rotation_rate: f32,
+            // random_properties: [f32; 2268],
+        }
+        #[repr(C)]
+        #[derive(Copy, Clone)]
+        struct Correction {
+            time: f64,
+            player1: bool,
+            checkpoint: PlayerCheckpoint,
+        }
+
+        let num_actions = reader.read_u32::<LittleEndian>()?;
+        self.fps = self.get_fps(240.0);
+
+        for _ in 0..num_actions {
+            let mut buf = [0; size_of::<GdmoAction>()];
+            reader.read_exact(&mut buf)?;
+            let action: GdmoAction = unsafe { std::mem::transmute(buf) };
+            let frame = (action.time * self.fps as f64) as u32;
+            if action.player1 {
+                self.process_action_p1(action.time as f32, action.press, frame);
+            } else {
+                self.process_action_p2(action.time as f32, action.press, frame);
+            }
+        }
+
+        let num_corrections = reader.read_u32::<LittleEndian>()?;
+        let current_pos = reader.stream_position()?;
+        let end = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(current_pos))?;
+        let correction_size = (end - current_pos) / num_corrections as u64;
+        log::debug!("correction size: {correction_size}");
+        if correction_size != 0x23a8 && correction_size != 56 {
+            anyhow::bail!(
+                "invalid correction size {correction_size}, expected {} or 56",
+                0x23a8
+            )
+        }
+        log::debug!("reading {num_corrections} corrections");
+
+        for _ in 0..num_corrections {
+            let mut buf = vec![0; correction_size as usize];
+            reader.read_exact(&mut buf)?;
+            let correction: Correction = unsafe { *(buf.as_ptr() as *const Correction) };
+            let frame = (correction.time * self.fps as f64) as u32;
+            let push = self
+                .actions
+                .binary_search_by(|a| a.frame.cmp(&frame))
+                .unwrap_or(0);
+            let push = self
+                .actions
+                .get(push)
+                .map(|a| a.click.is_click())
+                .unwrap_or(false);
+
+            if correction.player1 {
+                self.extended_p1(
+                    push,
+                    frame,
+                    correction.checkpoint.x_pos,
+                    correction.checkpoint.y_pos,
+                    correction.checkpoint.y_vel as f32,
+                    correction.checkpoint.rotation,
+                );
+            } else {
+                self.extended_p2(
+                    push,
+                    frame,
+                    correction.checkpoint.x_pos,
+                    correction.checkpoint.y_pos,
+                    correction.checkpoint.y_vel as f32,
+                    correction.checkpoint.rotation,
+                );
+            }
+        }
+
+        let current_pos = reader.stream_position()?;
+        log::debug!("cur: {current_pos}, end: {end}");
+        if current_pos != end {
+            reader.seek(SeekFrom::Start(0))?;
+            anyhow::bail!(
+                "didn't read entire file, {} leftover bytes",
+                end - current_pos
+            );
+        }
+        log::info!("parsed 2.2 gdmo macro");
+
+        Ok(())
+    }
+
+    // https://github.com/maxnut/GDMegaOverlay/blob/3bc9c191e3fcdde838b0f69f8411af782afa3ba7/src/Replay.cpp#L124-L140
+    fn parse_gdmo<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        // identify if its a 2.2 gdmo macro
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        reader.seek(SeekFrom::Start(0))?;
+        if self
+            .parse_gdmo_22(reader)
+            .map_err(|e| log::error!("failed to parse 2.2 gdmo macro: {e}"))
+            .is_ok()
+        {
+            return Ok(());
+        }
+        let mut reader = Cursor::new(data);
+
+        use std::mem::size_of;
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
 
         let num_actions = reader.read_u32::<LittleEndian>()?;
         let _num_frame_captures = reader.read_u32::<LittleEndian>()?;
@@ -1599,7 +1742,7 @@ impl Replay {
             anyhow::bail!("only frame replays are supported")
         }
 
-        self.fps = reader.read_f32::<LittleEndian>()?;
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
         for _ in (10..len).step_by(5) {
             let frame = reader.read_u32::<LittleEndian>()?;
             let time = frame as f32 / self.fps;
@@ -1623,7 +1766,7 @@ impl Replay {
         let len = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(0))?;
 
-        self.fps = reader.read_i16::<LittleEndian>()? as f32;
+        self.fps = self.get_fps(reader.read_i16::<LittleEndian>()? as f32);
 
         for _ in (2..len).step_by(5) {
             let frame = reader.read_i32::<LittleEndian>()?;
@@ -1648,7 +1791,7 @@ impl Replay {
         let len = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(0))?;
 
-        self.fps = reader.read_f32::<LittleEndian>()?;
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
 
         for _ in (4..len).step_by(6) {
             let frame = reader.read_i32::<LittleEndian>()?;
@@ -1673,7 +1816,7 @@ impl Replay {
         {
             let mut fps_string = String::new();
             reader.read_line(&mut fps_string)?;
-            self.fps = fps_string.trim().parse()?;
+            self.fps = self.get_fps(fps_string.trim().parse()?);
         }
 
         for (i, line) in reader.lines().enumerate() {
@@ -1714,7 +1857,7 @@ impl Replay {
             return self.parse_obot2(reader);
         };
 
-        self.fps = replay.initial_fps;
+        self.fps = self.get_fps(replay.initial_fps);
         let mut current_fps = self.fps;
 
         for action in replay.clicks {
@@ -1750,7 +1893,7 @@ impl Replay {
     fn parse_re<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         use std::mem::size_of;
 
-        self.fps = reader.read_f32::<LittleEndian>()?;
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
         let num_actions = reader.read_i32::<LittleEndian>()?;
         let num_actions2 = reader.read_i32::<LittleEndian>()?;
 
@@ -1838,7 +1981,7 @@ impl Replay {
             );
         }
 
-        self.fps = reader.read_i16::<LittleEndian>()? as f32;
+        self.fps = self.get_fps(reader.read_i16::<LittleEndian>()? as f32);
         let num_p1 = reader.read_i32::<LittleEndian>()?; // num p1 actions
         let _num_p2 = reader.read_i32::<LittleEndian>()?; // num p2 actions
 
@@ -1865,11 +2008,13 @@ impl Replay {
         reader.read_to_string(&mut string)?;
         let mut lines = string.split('\n');
 
-        self.fps = lines
-            .next()
-            .context("first fps line doesn't exist, did you select an empty file?")?
-            .trim()
-            .parse::<u64>()? as f32;
+        self.fps = self.get_fps(
+            lines
+                .next()
+                .context("first fps line doesn't exist, did you select an empty file?")?
+                .trim()
+                .parse::<u64>()? as f32,
+        );
 
         if lines.next().context("second line doesn't exist")?.trim() != "frames" {
             anyhow::bail!("the xBot parser only supports xBot Frame replays");
@@ -1917,7 +2062,7 @@ impl Replay {
         let date = replay.get(Meta::DATE)?;
         let presses = replay.get(Meta::PRESSES)?;
         let frames = replay.get(Meta::FRAMES)?;
-        let mut current_fps = replay.get(Meta::FPS)?;
+        let mut current_fps = self.get_fps(replay.get(Meta::FPS)?);
         self.fps = current_fps;
         let total_presses = replay.get(Meta::TOTAL_PRESSES)?;
         let version = replay.version();
