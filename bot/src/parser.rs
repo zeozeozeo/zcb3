@@ -528,6 +528,9 @@ impl Replay {
     }
 
     fn process_action_p1(&mut self, time: f32, down: bool, frame: u32) {
+        if !down && self.actions.is_empty() {
+            return;
+        }
         // if action is the same, skip it
         if let Some(typ) = self.prev_action.0 {
             if down == typ.is_click() {
@@ -546,6 +549,9 @@ impl Replay {
 
     // .0 is changed to .1 here, because it's the second player
     fn process_action_p2(&mut self, time: f32, down: bool, frame: u32) {
+        if !down && self.actions.is_empty() {
+            return;
+        }
         if let Some(typ) = self.prev_action.1 {
             if down == typ.is_click() {
                 return;
@@ -1595,6 +1601,9 @@ impl Replay {
         }
 
         let num_corrections = reader.read_u32::<LittleEndian>()?;
+        if num_corrections == 0 {
+            return Ok(());
+        }
         let current_pos = reader.stream_position()?;
         let end = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(current_pos))?;

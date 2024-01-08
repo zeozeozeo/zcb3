@@ -1164,7 +1164,11 @@ impl App {
                     self.clickpack_path = Some(dir);
                     self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
                     if !is_convert_tab_open {
-                        self.stage = Stage::Render;
+                        self.stage = if self.replay.actions.is_empty() {
+                            Stage::SelectClickpack
+                        } else {
+                            Stage::Render
+                        };
                     }
                 } else {
                     dialog

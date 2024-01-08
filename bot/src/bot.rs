@@ -85,7 +85,7 @@ impl PlayerClicks {
 
         let Ok(dir) = path
             .read_dir()
-            .map_err(|e| log::error!("failed to read directory {path:?}: {e}"))
+            .map_err(|e| log::warn!("failed to read directory {path:?}: {e}"))
         else {
             return player;
         };
