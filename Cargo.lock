@@ -1122,9 +1122,6 @@ name = "ecolor"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b7637fc2e74d17e52931bac90ff4fc061ac776ada9c7fa272f24cdca5991972"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "ecolor"
@@ -1133,6 +1130,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "57539aabcdbb733b6806ef421b66dec158dc1582107ad6d51913db3600303354"
 dependencies = [
  "bytemuck",
+ "serde",
 ]
 
 [[package]]
@@ -1171,11 +1169,9 @@ version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c55bcb864b764eb889515a38b8924757657a250738ad15126637ee2df291ee6b"
 dependencies = [
- "accesskit",
  "ahash",
  "epaint 0.24.1",
  "nohash-hasher",
- "serde",
 ]
 
 [[package]]
@@ -1189,6 +1185,7 @@ dependencies = [
  "epaint 0.25.0",
  "log",
  "nohash-hasher",
+ "serde",
 ]
 
 [[package]]
@@ -1219,11 +1216,11 @@ dependencies = [
 
 [[package]]
 name = "egui_extras"
-version = "0.24.2"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97624eaf17a16058265d3a3e712e167798655baf7c8f693de25be75cdd6c57b5"
+checksum = "753c36d3e2f7a32425af5290af2e52efb3471ea3a263b87f003b5433351b0fd7"
 dependencies = [
- "egui 0.24.1",
+ "egui 0.25.0",
  "enum-map",
  "image",
  "log",
@@ -1266,9 +1263,6 @@ name = "emath"
 version = "0.24.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a045c6c0b44b35e98513fc1e9d183ab42881ac27caccb9fa345465601f56cce4"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "emath"
@@ -1277,6 +1271,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ee58355767587db7ba3738930d93cad3052cd834c2b48b9ef6ef26fe4823b7e"
 dependencies = [
  "bytemuck",
+ "serde",
 ]
 
 [[package]]
@@ -1366,7 +1361,6 @@ dependencies = [
  "emath 0.24.1",
  "nohash-hasher",
  "parking_lot",
- "serde",
 ]
 
 [[package]]
@@ -1383,6 +1377,7 @@ dependencies = [
  "log",
  "nohash-hasher",
  "parking_lot",
+ "serde",
 ]
 
 [[package]]
