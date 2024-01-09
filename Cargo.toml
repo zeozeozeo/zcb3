@@ -18,7 +18,7 @@ members = [".", "bot", "bot/ybot_fmt"]
 [dependencies]
 clap = { version = "4.4.14", features = ["derive"] }
 eframe = "0.25.0"
-egui-modal = "0.3.1"
+egui-modal = "0.3.2"
 env_logger = "0.10.1"
 image = { version = "0.24.7", default-features = false, features = ["ico", "png"] }
 reqwest = { version = "0.11.23", features = ["blocking"] }
@@ -30,7 +30,7 @@ anyhow = "1.0.79"
 rayon = "1.8.0"
 egui_extras = { version = "0.25.0", features = ["image"] }
 rustmatica = "0.1.1"
-egui_plot = "0.24.2"
+egui_plot = "0.25.0"
 serde = "1.0.194"
 rand = "0.8.5"
 self-replace = "1.3.7"
