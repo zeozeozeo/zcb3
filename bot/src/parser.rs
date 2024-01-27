@@ -464,6 +464,11 @@ impl Replay {
         self
     }
 
+    #[inline]
+    pub fn has_actions(&self) -> bool {
+        !self.actions.is_empty()
+    }
+
     pub fn parse<R: Read + Seek>(mut self, typ: ReplayType, reader: R) -> Result<Self> {
         log::info!("parsing replay, replay type {typ:?}");
 

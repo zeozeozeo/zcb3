@@ -641,7 +641,7 @@ impl App {
 
     fn show_secret_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
         // this is so epic
-        ui.add_enabled_ui(!self.replay.actions.is_empty(), |ui| {
+        ui.add_enabled_ui(self.replay.has_actions(), |ui| {
             ui.horizontal(|ui| {
                 if ui
                     .button("Export replay to .litematic")
@@ -1164,10 +1164,10 @@ impl App {
                     self.clickpack_path = Some(dir);
                     self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
                     if !is_convert_tab_open {
-                        self.stage = if self.replay.actions.is_empty() {
-                            Stage::SelectReplay
-                        } else {
+                        self.stage = if self.replay.has_actions() {
                             Stage::Render
+                        } else {
+                            Stage::SelectReplay
                         };
                     }
                 } else {
@@ -1598,25 +1598,30 @@ impl App {
 
         let has_output = self.output.is_some();
         let has_clicks = self.clickpack_path.is_some();
-        ui.add_enabled_ui(
-            has_output && has_clicks && !self.replay.actions.is_empty(),
-            |ui| {
+        let has_actions = self.replay.has_actions();
+        let is_enabled = has_output && has_clicks && has_actions;
+        let error_text = if !has_output {
+            "Please select an output file"
+        } else if !has_clicks {
+            "Please select a clickpack"
+        } else {
+            "Please load a replay"
+        };
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(is_enabled, |ui| {
                 if ui
                     .button("Render!")
-                    .on_disabled_hover_text(if !has_output {
-                        "Please select an output file"
-                    } else if !has_clicks {
-                        "Please select a clickpack"
-                    } else {
-                        "Please load a replay"
-                    })
+                    .on_disabled_hover_text(error_text)
                     .on_hover_text("Start rendering the replay.\nThis might take some time!")
                     .clicked()
                 {
                     self.render_replay(&dialog, false); // TODO: run this on a separate thread
                 }
-            },
-        );
+            });
+            if !is_enabled {
+                ui.label(error_text);
+            }
+        });
 
         if self.showing_clickpack_suggestion {
             dialog.show(|ui| {
