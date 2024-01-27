@@ -15,7 +15,13 @@ use image::io::Reader as ImageReader;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{cell::RefCell, io::Cursor, ops::RangeInclusive, path::Path, time::Instant};
+use std::{
+    cell::RefCell,
+    io::Cursor,
+    ops::RangeInclusive,
+    path::Path,
+    time::{Duration, Instant},
+};
 use std::{io::BufReader, path::PathBuf};
 
 const MAX_PLOT_POINTS: usize = 4096;
@@ -361,17 +367,22 @@ impl eframe::App for App {
 
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/37.0.2062.94 Chrome/37.0.2062.94 Safari/537.36";
 
-fn get_latest_tag() -> Result<(usize, String)> {
-    let client = reqwest::blocking::Client::builder()
+fn ureq_agent() -> ureq::Agent {
+    ureq::AgentBuilder::new()
+        .timeout_read(Duration::from_secs(15))
+        .timeout_write(Duration::from_secs(15))
         .user_agent(USER_AGENT)
-        .build()?;
-    let resp = client
-        .get("https://api.github.com/repos/zeozeozeo/zcb3/tags")
-        .send()?
-        .text()?;
+        .build()
+}
 
-    log::debug!("response text: '{resp}'");
-    let v: Value = serde_json::from_str(&resp)?;
+fn get_latest_tag() -> Result<(usize, String)> {
+    let body = ureq_agent()
+        .get("https://api.github.com/repos/zeozeozeo/zcb3/tags")
+        .call()?
+        .into_string()?;
+
+    log::debug!("response text: '{body}'");
+    let v: Value = serde_json::from_str(&body)?;
     let tags = v.as_array().context("not an array")?;
     let latest_tag = tags.get(0).context("couldn't latest tags")?;
     let name = latest_tag.get("name").context("couldn't get tag name")?;
@@ -381,15 +392,13 @@ fn get_latest_tag() -> Result<(usize, String)> {
 }
 
 fn update_to_latest(tag: &str) -> Result<()> {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent(USER_AGENT)
-        .build()?;
-    let resp = client
+    let body = ureq_agent()
         .get("https://api.github.com/repos/zeozeozeo/zcb3/releases/latest")
-        .send()?
-        .text()?;
-    log::debug!("releases response text: '{resp}'");
-    let v: Value = serde_json::from_str(&resp)?;
+        .call()?
+        .into_string()?;
+
+    log::debug!("releases response text: '{body}'");
+    let v: Value = serde_json::from_str(&body)?;
 
     let filename = if cfg!(windows) {
         "zcb3.exe"
@@ -410,8 +419,7 @@ fn update_to_latest(tag: &str) -> Result<()> {
         .find(|url| url.contains(filename));
 
     if let Some(url) = asset_url {
-        let resp = client.get(url).send()?.bytes()?;
-        log::info!("response data length: {}", resp.len());
+        let mut reader = ureq_agent().get(url).call()?.into_reader();
 
         // generate random string
         use rand::Rng;
@@ -425,7 +433,10 @@ fn update_to_latest(tag: &str) -> Result<()> {
             "zcb3_update_{tag}_{random_str}{}",
             if cfg!(windows) { ".exe" } else { "" }
         );
-        std::fs::write(&new_binary, resp)?;
+
+        // write the file
+        let mut f = std::fs::File::create(&new_binary)?;
+        std::io::copy(&mut reader, &mut f)?;
 
         // replace executable
         self_replace::self_replace(&new_binary)
