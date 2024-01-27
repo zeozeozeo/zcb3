@@ -70,3 +70,7 @@ By donating you'll get a custom role on the Discord server (dm me) and early acc
 * [Liberapay](https://liberapay.com/zeo)
 * [DonationAlerts](https://donationalerts.com/r/zeozeozeo)
 * [Boosty](https://boosty.to/zeozeozeo/donate)
+
+# License
+
+Boost Software License - Version 1.0 - August 17th, 2003
