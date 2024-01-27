@@ -175,15 +175,9 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-<<<<<<< HEAD
 version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6e2e1ebcb11de5c03c67de28a7df593d32191b44939c482e97702baaaa6ab6a5"
-=======
-version = "0.6.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd2405b3ac1faab2990b74d728624cd9fd115651fcecc7c2d8daf01376275ba"
->>>>>>> b5ab99fe62785c0033e0c911ff421d42407e5b22
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -1314,17 +1308,10 @@ dependencies = [
 ]
 
 [[package]]
-<<<<<<< HEAD
 name = "env_filter"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a009aa4810eb158359dda09d0c87378e4bbb89b5a801f016885a4707ba24f7ea"
-=======
-name = "env_logger"
-version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd405aab171cb85d6735e5c8d9db038c17d3ca007a4d2c25f337935c3d90580"
->>>>>>> b5ab99fe62785c0033e0c911ff421d42407e5b22
 dependencies = [
  "log",
  "regex",
