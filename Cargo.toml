@@ -33,7 +33,7 @@ egui_plot = "0.25.0"
 serde = "1.0.196"
 rand = "0.8.5"
 self-replace = "1.3.7"
-ureq = "2.9.1"
+ureq = "2.9.4"
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]
