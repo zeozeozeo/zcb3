@@ -2134,6 +2134,9 @@ impl Replay {
 
         for line in reader.lines() {
             let line = line?;
+            if line.len() == 0 {
+                continue;
+            }
             let mut split = line.split('|');
             let frame = split
                 .next()
