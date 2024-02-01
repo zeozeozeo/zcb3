@@ -28,6 +28,7 @@ Free and easy to use Geometry Dash clickbot.
 * ReplayEngine Replay (.re)
 * DDHOR Replay (.ddhor, old frame format)
 * xBot Frame (.xbot)
+* [xdBot (.xd)](https://geode-sdk.org/mods/zilko.xdbot/)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 

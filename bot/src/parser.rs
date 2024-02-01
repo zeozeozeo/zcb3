@@ -307,6 +307,8 @@ pub enum ReplayType {
     // GatoBot,
     /// yBot 2 .ybot files
     Ybot2,
+    /// xdBot .xd files
+    XdBot,
 }
 
 impl ReplayType {
@@ -344,6 +346,7 @@ impl ReplayType {
             "xbot" => Xbot,
             // "gatobot" => GatoBot,
             "ybot" => Ybot2,
+            "xd" => XdBot,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -433,6 +436,7 @@ impl Replay {
         "xbot",
         "ybot",
         // "gatobot",
+        "xd",
     ];
 
     pub fn build() -> Self {
@@ -491,6 +495,7 @@ impl Replay {
             ReplayType::Ddhor => self.parse_ddhor(reader)?,
             ReplayType::Xbot => self.parse_xbot(reader)?,
             ReplayType::Ybot2 => self.parse_ybot2(reader)?,
+            ReplayType::XdBot => self.parse_xdbot(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -2115,6 +2120,42 @@ impl Replay {
             }
         }
 
+        Ok(())
+    }
+
+    fn parse_xdbot<R: Read>(&mut self, reader: R) -> Result<()> {
+        let reader = BufReader::new(reader);
+
+        self.fps = if let Some(override_fps) = self.override_fps {
+            override_fps
+        } else {
+            240.0
+        };
+
+        for line in reader.lines() {
+            let line = line?;
+            let mut split = line.split('|');
+            let frame = split
+                .next()
+                .context("failed to get frame")?
+                .parse::<u32>()?;
+            let push = split
+                .next()
+                .context("failed to get holding state")?
+                .parse::<u8>()?
+                == 1;
+            // TODO: skip button, as ZCB doesn't support left/right actions yet
+            split.next().context("failed to get button")?;
+            let p1 = split
+                .next()
+                .context("failed to get player1 state")?
+                .parse::<u8>()?
+                == 1;
+            if p1 {
+                self.process_action_p1(frame as f32 / self.fps, push, frame as u32);
+                self.extended_p1(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
+            }
+        }
         Ok(())
     }
 

@@ -944,6 +944,7 @@ impl App {
             ui.label("• ReplayEngine Replay (.re)");
             ui.label("• DDHOR Replay (.ddhor, old frame format)");
             ui.label("• xBot Frame (.xbot)");
+            ui.label("• xdBot (.xd)");
         });
 
         // show dialog if there is one
