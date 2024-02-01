@@ -2154,6 +2154,9 @@ impl Replay {
             if p1 {
                 self.process_action_p1(frame as f32 / self.fps, push, frame as u32);
                 self.extended_p1(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
+            } else {
+                self.process_action_p2(frame as f32 / self.fps, push, frame as u32);
+                self.extended_p2(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
             }
         }
         Ok(())
