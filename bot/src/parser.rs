@@ -2134,7 +2134,7 @@ impl Replay {
 
         for line in reader.lines() {
             let line = line?;
-            if line.len() == 0 {
+            if line.is_empty() {
                 continue;
             }
             let mut split = line.split('|');
