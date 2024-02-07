@@ -386,6 +386,7 @@ fn read_clicks_in_directory(dir: &Path, pitch: Pitch, sample_rate: u32) -> Vec<A
                 log::error!("failed to open file '{path:?}'");
                 continue;
             };
+            log::info!("decoding file {path:?}");
             let Ok(mut segment) = AudioSegment::from_media_source(Box::new(f)) else {
                 log::error!("failed to decode file '{path:?}'");
                 continue;
@@ -432,14 +433,15 @@ pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
         return None;
     };
     for entry in dir {
-        let path = entry.unwrap().path();
-        let filename = path.file_name().unwrap().to_str().unwrap();
+        let path = entry.ok()?.path();
+        let filename = path.file_name()?.to_str()?;
         // if it's a noise*, etc file we should try to load it
+        let lower_filename = filename.to_lowercase();
         if path.is_file()
-            && (filename.starts_with("noise")
-                || filename.starts_with("whitenoise")
-                || filename.starts_with("pcnoise")
-                || filename.starts_with("background"))
+            && (lower_filename.starts_with("noise")
+                || lower_filename.starts_with("whitenoise")
+                || lower_filename.starts_with("pcnoise")
+                || lower_filename.starts_with("background"))
         {
             return Some(path);
         }
