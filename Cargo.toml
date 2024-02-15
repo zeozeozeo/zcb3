@@ -18,7 +18,7 @@ members = [".", "bot", "bot/ybot_fmt"]
 [dependencies]
 clap = { version = "4.5.0", features = ["derive"] }
 eframe = "0.26.0"
-egui-modal = "0.3.3"
+egui-modal = "0.3.4"
 env_logger = "0.11.2"
 image = { version = "0.24.7", default-features = false, features = ["ico", "png"] }
 rfd = "0.13.0"
