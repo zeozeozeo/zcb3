@@ -956,6 +956,7 @@ impl App {
             ui.label("• DDHOR Replay (.ddhor, old frame format)");
             ui.label("• xBot Frame (.xbot)");
             ui.label("• xdBot (.xd, old and new formats)");
+            ui.label("• GDReplayFormat (.gdr, used in Geode GDMegaOverlay)");
         });
 
         // show dialog if there is one

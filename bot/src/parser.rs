@@ -309,6 +309,8 @@ pub enum ReplayType {
     Ybot2,
     /// xdBot .xd files
     XdBot,
+    /// GDReplayFormat .gdr files (GDMegaOverlay)
+    Gdr,
 }
 
 impl ReplayType {
@@ -347,6 +349,7 @@ impl ReplayType {
             // "gatobot" => GatoBot,
             "ybot" => Ybot2,
             "xd" => XdBot,
+            "gdr" => Gdr,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -437,6 +440,7 @@ impl Replay {
         "ybot",
         // "gatobot",
         "xd",
+        "gdr",
     ];
 
     pub fn build() -> Self {
@@ -496,6 +500,7 @@ impl Replay {
             ReplayType::Xbot => self.parse_xbot(reader)?,
             ReplayType::Ybot2 => self.parse_ybot2(reader)?,
             ReplayType::XdBot => self.parse_xdbot(reader)?,
+            ReplayType::Gdr => self.parse_gdr(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -2183,6 +2188,42 @@ impl Replay {
             } else {
                 self.process_action_p2(frame as f32 / self.fps, push, frame as u32);
                 self.extended_p2(push, frame as u32, x, y, 0.0, 0.0);
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_gdr<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        let replay = gdr::Replay::from_slice(&data)?;
+        self.fps = if let Some(override_fps) = self.override_fps {
+            override_fps
+        } else {
+            replay.framerate
+        };
+        for input in &replay.inputs {
+            let time = input.frame as f32 / self.fps;
+            if input.player2 {
+                self.process_action_p2(time, input.down, input.frame);
+                self.extended_p2(
+                    input.down,
+                    input.frame,
+                    input.correction.x_pos,
+                    input.correction.y_pos,
+                    input.correction.y_vel,
+                    input.correction.rotation,
+                );
+            } else {
+                self.process_action_p1(time, input.down, input.frame);
+                self.extended_p1(
+                    input.down,
+                    input.frame,
+                    input.correction.x_pos,
+                    input.correction.y_pos,
+                    input.correction.y_vel,
+                    input.correction.rotation,
+                );
             }
         }
         Ok(())

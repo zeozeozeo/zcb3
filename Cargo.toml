@@ -13,7 +13,7 @@ codegen-units = 1
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = [".", "bot", "bot/ybot_fmt"]
+members = [".", "bot", "bot/ybot_fmt", "bot/gdr"]
 
 [dependencies]
 clap = { version = "4.5.0", features = ["derive"] }
