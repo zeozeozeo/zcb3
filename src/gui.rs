@@ -456,6 +456,14 @@ fn get_current_tag() -> usize {
     built_info::PKG_VERSION.replace('.', "").parse().unwrap()
 }
 
+fn capitalize_first_letter(s: &str) -> String {
+    let mut c = s.chars();
+    match c.next() {
+        None => String::new(),
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+    }
+}
+
 impl App {
     fn show_update_check_modal(&mut self, modal: &Modal, dialog: &Modal, ctx: &egui::Context) {
         let Some((tag, current_tag, tag_string)) = self.update_tags.clone() else {
@@ -756,7 +764,10 @@ impl App {
                 dialog
                     .dialog()
                     .with_title("Failed to parse replay file")
-                    .with_body(format!("{e}. Is the format supported?"))
+                    .with_body(format!(
+                        "{}. Is the format supported?",
+                        capitalize_first_letter(&e.to_string()),
+                    ))
                     .with_icon(Icon::Error)
                     .open();
                 return Err(e);
@@ -944,7 +955,7 @@ impl App {
             ui.label("• ReplayEngine Replay (.re)");
             ui.label("• DDHOR Replay (.ddhor, old frame format)");
             ui.label("• xBot Frame (.xbot)");
-            ui.label("• xdBot (.xd)");
+            ui.label("• xdBot (.xd, old and new formats)");
         });
 
         // show dialog if there is one

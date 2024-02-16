@@ -2132,12 +2132,25 @@ impl Replay {
             240.0
         };
 
+        // first line: fps
+        // action: frame|holding|button|player1|pos_only|p1_xpos|p1_ypos|p1_upsideDown|p1_rotation|p1_xSpeed|p1_ySpeed|p2_xpos|p2_ypos|p2_upsideDown|p2_rotation|p2_xSpeed|p2_ySpeed
         for line in reader.lines() {
             let line = line?;
             if line.is_empty() {
                 continue;
             }
             let mut split = line.split('|');
+
+            // if the line only contains the fps, set the fps
+            if split.clone().count() == 1 {
+                self.fps = if let Some(override_fps) = self.override_fps {
+                    override_fps
+                } else {
+                    split.next().context("failed to get fps")?.parse::<f32>()?
+                };
+                continue;
+            }
+
             let frame = split
                 .next()
                 .context("failed to get frame")?
@@ -2147,19 +2160,29 @@ impl Replay {
                 .context("failed to get holding state")?
                 .parse::<u8>()?
                 == 1;
-            // TODO: skip button, as ZCB doesn't support left/right actions yet
-            split.next().context("failed to get button")?;
+            split.next(); // skip button, as ZCB doesn't support left/right actions yet
             let p1 = split
                 .next()
                 .context("failed to get player1 state")?
                 .parse::<u8>()?
                 == 1;
+            split.next(); // pos_only
+            let x = if let Some(x) = split.next() {
+                x.parse::<f32>()?
+            } else {
+                0.0
+            };
+            let y = if let Some(y) = split.next() {
+                y.parse::<f32>()?
+            } else {
+                0.0
+            };
             if p1 {
                 self.process_action_p1(frame as f32 / self.fps, push, frame as u32);
-                self.extended_p1(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
+                self.extended_p1(push, frame as u32, x, y, 0.0, 0.0);
             } else {
                 self.process_action_p2(frame as f32 / self.fps, push, frame as u32);
-                self.extended_p2(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
+                self.extended_p2(push, frame as u32, x, y, 0.0, 0.0);
             }
         }
         Ok(())
