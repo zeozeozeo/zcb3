@@ -35,11 +35,11 @@ Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
 # Clickpack format
 
-ZCB supports AAC, ADPCM, ALAC, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files.
+ZCB supports AAC, ADPCM, AIFF, ALAC, CAF, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files. (thanks to [Symphonia](https://github.com/pdeljanov/Symphonia))
 
 ### Clickpack folder
 
-A clickpack can have `player1` and `player2` folders, which can have `hardclicks`, `hardreleases`, `clicks`, `releases`, `softclicks`, `softreleases`, `microclicks` and `microreleases` folders inside of them (which may have audio files in them). All of the folders are optional, and you don't have to record clicks for both players (but clicks will sound more realistic if you do).
+A clickpack can have `player1`, `player2`, `left1`, `right1`, `left2` and `right2` folders (the last 4 corresponding to platformer left/right directions), which can have `hardclicks`, `hardreleases`, `clicks`, `releases`, `softclicks`, `softreleases`, `microclicks` and `microreleases` folders inside of them (which may have audio files in them). All of the folders are optional, and you don't have to record clicks for both players (but clicks will sound more realistic if you do).
 
 ### Noise files
 
