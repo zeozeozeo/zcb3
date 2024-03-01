@@ -186,7 +186,7 @@ impl Default for Click {
 }
 
 impl Click {
-    const fn click_type(self) -> ClickType {
+    pub const fn click_type(self) -> ClickType {
         match self {
             Click::Regular(typ) | Click::Left(typ) | Click::Right(typ) => typ,
         }

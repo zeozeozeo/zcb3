@@ -584,28 +584,6 @@ impl Bot {
                 "no clicks found in clickpack, did you select the correct folder?"
             ))
         }
-        // handle different player folder names
-        /*
-
-        // find longest click (will be used to ensure that the end doesn't get cut off)
-        self.longest_click = self
-            .player
-            .0
-            .longest_click()
-            .max(self.player.1.longest_click());
-        log::debug!("longest click: {}", self.longest_click);
-
-        // search for noise file, path to prefer root clickpack dir
-        self.load_noise(clickpack_dir);
-
-        if self.has_clicks() {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!(
-                "no clicks found in clickpack, did you select the correct folder?"
-            ))
-        }
-        */
     }
 
     fn load_noise(&mut self, dir: &Path) {
@@ -624,51 +602,35 @@ impl Bot {
     }
 
     fn get_random_click(&mut self, player: Player, click: Click) -> &AudioSegment {
-        // try to get a random click/release from the player clicks
-        // if it doesn't exist for the wanted player, use the other one (guaranteed to have atleast
-        // one click)
-        let p1 = &self.clickpack.player1;
-        let p2 = &self.clickpack.player2;
-        let l1 = &self.clickpack.left1;
-        let r1 = &self.clickpack.right1;
-        let l2 = &self.clickpack.left2;
-        let r2 = &self.clickpack.right2;
+        // create a lookup table for player-specific click sources
+        let sources = match player {
+            Player::One => [
+                &self.clickpack.player1,
+                &self.clickpack.left1,
+                &self.clickpack.right1,
+                &self.clickpack.player2,
+                &self.clickpack.left2,
+                &self.clickpack.right2,
+            ],
+            Player::Two => [
+                &self.clickpack.player2,
+                &self.clickpack.left2,
+                &self.clickpack.right2,
+                &self.clickpack.player1,
+                &self.clickpack.left1,
+                &self.clickpack.right1,
+            ],
+        };
 
-        // :tired_face:
-        macro_rules! random_click_ord {
-            ($typ:ident, $one:ident, $two:ident, $three:ident, $four:ident) => {
-                $one.random_click($typ).unwrap_or_else(|| {
-                    $two.random_click($typ).unwrap_or_else(|| {
-                        $three
-                            .random_click($typ)
-                            .unwrap_or_else(|| $four.random_click($typ).unwrap())
-                    })
-                })
-            };
-        }
-        match click {
-            Click::Regular(typ) => {
-                if player == Player::One {
-                    random_click_ord!(typ, p1, p2, l1, l2)
-                } else {
-                    random_click_ord!(typ, p2, p1, l2, l1)
-                }
-            }
-            Click::Left(typ) => {
-                if player == Player::One {
-                    random_click_ord!(typ, l1, l2, p1, p2)
-                } else {
-                    random_click_ord!(typ, l2, l1, p2, p1)
-                }
-            }
-            Click::Right(typ) => {
-                if player == Player::One {
-                    random_click_ord!(typ, r1, r2, p1, p2)
-                } else {
-                    random_click_ord!(typ, r2, r1, p2, p1)
-                }
+        // use a loop with early return for less nesting
+        for source in sources.iter() {
+            if let Some(click) = source.random_click(click.click_type()) {
+                return click;
             }
         }
+
+        // we always have at least one click, so unwrap safely
+        sources[0].random_click(click.click_type()).unwrap()
     }
 
     pub fn compile_expression(&mut self, expr: &str) -> Result<()> {
