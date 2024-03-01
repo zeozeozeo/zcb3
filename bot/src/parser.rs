@@ -1,8 +1,8 @@
 use crate::{f32_range, Timings, VolumeSettings};
 use anyhow::{Context, Result};
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt};
 use ijson::IValue;
-use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
+use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
@@ -528,19 +528,6 @@ impl Replay {
         self
     }
 
-    pub fn write<W: Write>(&self, typ: ReplayType, writer: W) -> Result<&Self> {
-        match typ {
-            ReplayType::Mhr => self.write_mhr(writer)?,
-            ReplayType::TasBot => self.write_tasbot(writer)?,
-            ReplayType::Zbot => self.write_zbf(writer)?,
-            ReplayType::Obot => self.write_obot2(writer)?,
-            ReplayType::Ybotf => self.write_ybotf(writer)?,
-            ReplayType::Echo => self.write_echo(writer)?,
-            _ => anyhow::bail!("unsupported format"),
-        }
-        Ok(self)
-    }
-
     fn process_action_p1(&mut self, time: f32, down: bool, frame: u32) {
         if !down && self.actions.is_empty() {
             return;
@@ -695,19 +682,6 @@ impl Replay {
         Ok(())
     }
 
-    fn write_ybotf<W: Write>(&self, mut writer: W) -> Result<()> {
-        writer.write_f32::<LittleEndian>(self.fps)?; // fps
-        writer.write_i32::<LittleEndian>(self.extended.len() as i32)?; // num actions
-
-        for action in &self.extended {
-            writer.write_u32::<LittleEndian>(action.frame)?;
-            let state = action.player2 as u32 + action.down as u32 * 2;
-            writer.write_u32::<LittleEndian>(state)?;
-        }
-
-        Ok(())
-    }
-
     /// Will also handle obot3 and replaybot replays.
     fn parse_obot2<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         let mut data = Vec::new();
@@ -768,44 +742,6 @@ impl Replay {
         Ok(())
     }
 
-    fn write_obot2<W: Write>(&self, writer: W) -> Result<()> {
-        let mut clicks = vec![];
-        let mut prev_click_type = None;
-        for action in &self.extended {
-            let click_type = if action.player2 {
-                if action.down {
-                    Obot2ClickType::Player2Down
-                } else {
-                    Obot2ClickType::Player2Up
-                }
-            } else if action.down {
-                Obot2ClickType::Player1Down
-            } else {
-                Obot2ClickType::Player1Up
-            };
-            if let Some(prev_click_type) = prev_click_type {
-                if prev_click_type == click_type {
-                    continue;
-                }
-            }
-            prev_click_type = Some(click_type);
-            clicks.push(Obot2Click {
-                location: Obot2Location::Frame(action.frame),
-                click_type,
-            })
-        }
-        let replay = Obot2Replay {
-            initial_fps: self.fps,
-            current_fps: self.fps,
-            replay_type: Obot2ReplayType::Frame,
-            current_click: 0,
-            clicks,
-        };
-        // obot2 uses bincode for serialization
-        bincode::serialize_into(writer, &replay)?;
-        Ok(())
-    }
-
     fn parse_zbf<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         let len = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(0))?;
@@ -831,19 +767,6 @@ impl Replay {
                 self.process_action_p2(time, down, frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             }
-        }
-
-        Ok(())
-    }
-
-    fn write_zbf<W: Write>(&self, mut writer: W) -> Result<()> {
-        writer.write_f32::<LittleEndian>(1.0 / self.fps)?; // delta
-        writer.write_f32::<LittleEndian>(1.0)?; // speedhack
-                                                // 1.0 / delta / speedhack = fps
-        for action in &self.extended {
-            writer.write_i32::<LittleEndian>(action.frame as i32)?;
-            writer.write_u8(if action.down { 0x31 } else { 0x30 })?;
-            writer.write_u8(if action.player2 { 0x30 } else { 0x31 })?; // p1
         }
 
         Ok(())
@@ -934,65 +857,6 @@ impl Replay {
         Ok(())
     }
 
-    fn write_tasbot<W: Write>(&self, writer: W) -> Result<()> {
-        #[derive(Default, Serialize)]
-        struct TasbotPlayerAction {
-            click: i32,
-            x_position: f32,
-        }
-        #[derive(Default, Serialize)]
-        struct TasbotAction {
-            frame: u32,
-            player_1: TasbotPlayerAction,
-            player_2: TasbotPlayerAction,
-        }
-        #[derive(Serialize)]
-        struct TasbotReplay {
-            fps: f32,
-            #[serde(rename = "macro")]
-            r#macro: Vec<TasbotAction>,
-        }
-
-        // create a replay array, try to predict capacity
-        let mut replay: Vec<TasbotAction> = Vec::with_capacity(self.actions.len() / 2);
-        let mut skip_action = false;
-
-        for (i, action) in self.extended.iter().enumerate() {
-            if skip_action {
-                skip_action = false;
-                continue;
-            }
-
-            let player_2 = if let Some(next) = self.extended.get(i + 1) {
-                if next.player2 && next.frame == action.frame {
-                    skip_action = true;
-                    TasbotPlayerAction {
-                        click: next.down as i32,
-                        x_position: next.x,
-                    }
-                } else {
-                    TasbotPlayerAction::default()
-                }
-            } else {
-                TasbotPlayerAction::default()
-            };
-
-            replay.push(TasbotAction {
-                frame: action.frame,
-                player_1: TasbotPlayerAction {
-                    click: action.down as i32,
-                    x_position: action.x,
-                },
-                player_2,
-            });
-        }
-        let replay = TasbotReplay {
-            fps: self.fps,
-            r#macro: replay,
-        };
-        serde_json::to_writer_pretty(writer, &replay)?;
-        Ok(())
-    }
     fn parse_mhr_from_ivalue(&mut self, v: IValue) -> Result<()> {
         self.fps = self.get_fps(
             v.get("meta")
@@ -1062,57 +926,6 @@ impl Replay {
     fn parse_mhr<R: Read + Seek>(&mut self, reader: R) -> Result<()> {
         let v: serde_json::Result<IValue> = serde_json::from_reader(reader);
         self.parse_mhr_from_ivalue(v?)
-    }
-
-    fn write_mhr<W: Write>(&self, writer: W) -> Result<()> {
-        #[derive(Serialize)]
-        struct MhrMeta {
-            fps: i32,
-        }
-        fn is_false(b: &bool) -> bool {
-            !b
-        }
-        #[derive(Serialize)]
-        struct MhrEvent {
-            a: f32,
-            down: bool,
-            frame: u32,
-            #[serde(skip_serializing_if = "is_false")]
-            p2: bool,
-            r: f32,
-            x: f32,
-            y: f32,
-        }
-        #[derive(Serialize)]
-        struct MhrReplay {
-            #[serde(rename = "_")]
-            version: String,
-            events: Vec<MhrEvent>,
-            meta: MhrMeta,
-        }
-
-        let events: Vec<MhrEvent> = self
-            .extended
-            .iter()
-            .map(|action| MhrEvent {
-                a: action.y_accel,
-                down: action.down,
-                frame: action.frame,
-                p2: action.player2,
-                r: action.rot,
-                x: action.x,
-                y: action.y,
-            })
-            .collect();
-        let replay = MhrReplay {
-            version: String::from("Mega Hack v7.1.1.3 Replay"),
-            events,
-            meta: MhrMeta {
-                fps: self.fps as i32, // TODO: do we need this to be an int?
-            },
-        };
-        serde_json::to_writer_pretty(writer, &replay)?;
-        Ok(())
     }
 
     fn parse_mhrbin<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
@@ -1362,62 +1175,6 @@ impl Replay {
             }
         }
 
-        Ok(())
-    }
-
-    fn write_echo<W: Write>(&self, writer: W) -> Result<()> {
-        #[derive(Serialize)]
-        struct EchoAction {
-            #[serde(rename = "Hold")]
-            hold: bool,
-            #[serde(rename = "Player 2")]
-            player2: bool,
-            #[serde(rename = "Frame")]
-            frame: u32,
-            #[serde(rename = "X Position")]
-            x_position: f32,
-            #[serde(rename = "Y Position")]
-            y_position: f32,
-            #[serde(rename = "Y Acceleration")]
-            y_accel: f32,
-            #[serde(rename = "Rotation")]
-            rotation: f32,
-            #[serde(rename = "Action")]
-            action: bool,
-        }
-        #[derive(Serialize)]
-        struct EchoReplay {
-            #[serde(rename = "FPS")]
-            fps: f32,
-            #[serde(rename = "Starting Frame")]
-            starting_frame: u8,
-            #[serde(rename = "Type")]
-            typ: String,
-            #[serde(rename = "Echo Replay")]
-            echo_replay: Vec<EchoAction>,
-        }
-
-        let echo_replay: Vec<EchoAction> = self
-            .extended
-            .iter()
-            .map(|action| EchoAction {
-                hold: action.down,
-                frame: action.frame,
-                player2: action.player2,
-                x_position: action.x,
-                y_position: action.y,
-                y_accel: action.y_accel,
-                rotation: action.rot,
-                action: true,
-            })
-            .collect();
-        let replay = EchoReplay {
-            fps: self.fps,
-            starting_frame: 0,
-            typ: String::from("Frames"),
-            echo_replay,
-        };
-        serde_json::to_writer_pretty(writer, &replay)?;
         Ok(())
     }
 
