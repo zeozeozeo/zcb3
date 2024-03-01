@@ -1,8 +1,7 @@
-use crate::{Timings, VolumeSettings};
+use crate::{f32_range, Timings, VolumeSettings};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use ijson::IValue;
-use rand::Rng;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -31,7 +30,7 @@ impl ClickType {
         is_click: bool,
         vol: VolumeSettings,
     ) -> (Self, f32) {
-        let rand_var = rand::thread_rng().gen_range(-vol.volume_var..=vol.volume_var);
+        let rand_var = f32_range(-vol.volume_var..=vol.volume_var);
         let vol_offset =
             if vol.enabled && time < vol.spam_time && !(!vol.change_releases_volume && !is_click) {
                 let offset = (vol.spam_time - time) * vol.spam_vol_offset_factor;

@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use std::io::{BufWriter, Cursor};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
@@ -442,7 +441,7 @@ impl AudioSegment {
         if self.pitch_table.is_empty() {
             return self;
         }
-        self.pitch_table.choose(&mut rand::thread_rng()).unwrap()
+        &self.pitch_table[fastrand::usize(..self.pitch_table.len())]
     }
 
     pub fn get_sample_index_which_was_a_duration_ago(&self, ago: Duration) -> usize {

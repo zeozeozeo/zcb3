@@ -1,7 +1,6 @@
-use crate::{AudioSegment, ClickType, ExtendedAction, Player, Replay};
+use crate::{f32_range, AudioSegment, ClickType, ExtendedAction, Player, Replay};
 use anyhow::Result;
 use fasteval2::Compiler;
-use rand::{seq::SliceRandom, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -127,20 +126,26 @@ impl PlayerClicks {
 
     /// Choose a random click based on a click type.
     pub fn random_click(&self, click_type: ClickType) -> Option<&AudioSegment> {
+        macro_rules! rand_click {
+            ($arr:expr) => {
+                $arr.get(fastrand::usize(..$arr.len()))
+            };
+        }
+
         let preferred = click_type.preferred();
         for typ in preferred {
             use ClickType::*;
 
             let click = match typ {
-                HardClick => self.hardclicks.choose(&mut rand::thread_rng()),
-                HardRelease => self.hardreleases.choose(&mut rand::thread_rng()),
-                Click => self.clicks.choose(&mut rand::thread_rng()),
-                Release => self.releases.choose(&mut rand::thread_rng()),
-                SoftClick => self.softclicks.choose(&mut rand::thread_rng()),
-                SoftRelease => self.softreleases.choose(&mut rand::thread_rng()),
-                MicroClick => self.microclicks.choose(&mut rand::thread_rng()),
-                MicroRelease => self.microreleases.choose(&mut rand::thread_rng()),
-                _ => continue,
+                HardClick => rand_click!(self.hardclicks),
+                HardRelease => rand_click!(self.hardreleases),
+                Click => rand_click!(self.clicks),
+                Release => rand_click!(self.releases),
+                SoftClick => rand_click!(self.softclicks),
+                SoftRelease => rand_click!(self.softreleases),
+                MicroClick => rand_click!(self.microclicks),
+                MicroRelease => rand_click!(self.microreleases),
+                None => continue,
             };
             if let Some(click) = click {
                 return Some(click);
@@ -607,8 +612,7 @@ impl Bot {
         self.ns.insert("frames".to_string(), total_frames as _);
         self.ns
             .insert("level_time".to_string(), total_frames as f64 / fps);
-        self.ns
-            .insert("rand".to_string(), rand::thread_rng().gen_range(0.0..=1.0));
+        self.ns.insert("rand".to_string(), fastrand::f64());
         self.ns
             .insert("delta".to_string(), (a.frame - prev_frame) as f64);
     }
@@ -689,30 +693,23 @@ impl Bot {
                 );
                 prev_frame = extended.frame;
 
-                let value = self.eval_expr().unwrap_or(0.) as f32;
+                let value = self.eval_expr().unwrap_or(0.0) as f32;
                 match expr_var {
-                    ExprVariable::Value => (value, 0.),
+                    ExprVariable::Value => (value, 0.0),
                     ExprVariable::Variation { negative } => {
-                        if value == 0. {
-                            (0., 0.)
+                        if value == 0.0 {
+                            (0.0, 0.0)
                         } else if negative {
-                            (
-                                rand::thread_rng()
-                                    .gen_range((-value).min(value)..=value.max(-value)),
-                                0.,
-                            )
+                            (f32_range((-value).min(value)..=value.max(-value)), 0.0)
                         } else {
-                            (
-                                rand::thread_rng().gen_range(value.min(0.0)..=value.max(0.0)),
-                                0.,
-                            )
+                            (f32_range(value.min(0.0)..=value.max(0.0)), 0.0)
                         }
                     }
-                    ExprVariable::TimeOffset => (0., value),
+                    ExprVariable::TimeOffset => (0.0, value),
                     _ => unreachable!(),
                 }
             } else {
-                (0., 0.)
+                (0.0, 0.0)
             };
 
             let mut click = self.get_random_click(action.player, action.click);

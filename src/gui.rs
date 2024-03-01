@@ -422,11 +422,8 @@ fn update_to_latest(tag: &str) -> Result<()> {
         let mut reader = ureq_agent().get(url).call()?.into_reader();
 
         // generate random string
-        use rand::Rng;
-        let random_str: String = rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
-            .take(7)
-            .map(char::from)
+        let random_str: String = std::iter::repeat_with(fastrand::alphanumeric)
+            .take(8)
             .collect();
 
         let new_binary = format!(
