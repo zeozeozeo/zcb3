@@ -40,10 +40,13 @@ pub struct Correction {
     pub node_x_pos: f32,
     #[serde(rename = "nodeYPos")]
     pub node_y_pos: f32,
+    #[serde(default = "bool::default")]
     pub player2: bool,
+    #[serde(default = "f32::default")]
     pub rotation: f32,
     #[serde(rename = "rotationRate")]
     pub rotation_rate: f32,
+    #[serde(default = "f32::default")]
     pub time: f32,
     #[serde(rename = "xPos")]
     pub x_pos: f32,
@@ -58,20 +61,19 @@ pub struct Correction {
 // "2p": false,
 // "btn": 1,
 // "correction": {
-//     "nodeXPos": 0,
-//     "nodeYPos": 1095,
+//     "nodeXPos": 1403.365478515625,
+//     "nodeYPos": 567.1383666992188,
 //     "player2": false,
-//     "rotation": 0,
-//     "rotationRate": 0,
-//     "time": 0.0041666766666666665,
-//     "xPos": 0,
+//     "rotation": 443.49798583984375,
+//     "rotationRate": -415.3846130371094,
+//     "time": 5.591680086666608,
+//     "xPos": 1403.365478515625,
 //     "xVel": 0,
-//     "yPos": 1095,
-//     "yVel": 0
+//     "yPos": 567.1383666992188,
+//     "yVel": 6.552
 // },
-// "down": false,
-// "frame": 1,
-// "time": 0.0041666766666666665
+// "down": true,
+// "frame": 1342
 #[derive(Serialize, Deserialize)]
 pub struct Input {
     #[serde(rename = "2p")]
@@ -82,7 +84,6 @@ pub struct Input {
     pub correction: Correction,
     pub down: bool,
     pub frame: u32,
-    pub time: f32,
 }
 
 impl Input {
@@ -93,7 +94,6 @@ impl Input {
             button,
             player2,
             down,
-            time: 0.0,
             correction: Correction::default(),
         }
     }
@@ -147,7 +147,11 @@ impl Default for Replay {
 
 impl Replay {
     pub fn from_slice(data: &[u8]) -> Result<Self, serde_json::Error> {
-        rmp_serde::from_slice(data).or_else(|_| serde_json::from_slice(data))
+        rmp_serde::from_slice(data)
+            .map_err(|e| {
+                log::error!("failed to parse messagepack GDR file: {e}, trying to parse JSON")
+            })
+            .or_else(|_| serde_json::from_slice(data))
     }
 
     #[inline]

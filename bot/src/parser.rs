@@ -2203,7 +2203,11 @@ impl Replay {
             replay.framerate
         };
         for input in &replay.inputs {
-            let time = input.frame as f32 / self.fps;
+            let time = if input.correction.time != 0.0 {
+                input.correction.time
+            } else {
+                input.frame as f32 / self.fps
+            };
             if input.player2 {
                 self.process_action_p2(time, input.down, input.frame);
                 self.extended_p2(
