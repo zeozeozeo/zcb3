@@ -65,26 +65,6 @@ impl ClickType {
         (typ, vol_offset)
     }
 
-    /// Returns the opposite click type. For example, every click will be translated to a release,
-    /// and every release will be translated into a click.
-    ///
-    /// None will always be translated to None.
-    #[inline]
-    pub fn opposite(self) -> Self {
-        use ClickType::*;
-        match self {
-            HardClick => HardRelease,
-            Click => Release,
-            SoftClick => SoftRelease,
-            MicroClick => MicroRelease,
-            HardRelease => HardClick,
-            Release => Click,
-            SoftRelease => SoftClick,
-            MicroRelease => MicroClick,
-            None => None,
-        }
-    }
-
     /// Order of which clicks should be selected depending on the actual click type
     pub fn preferred(self) -> [Self; 8] {
         use ClickType::*;
@@ -189,6 +169,94 @@ impl ClickType {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum Click {
+    /// Regular player click.
+    Regular(ClickType),
+    /// Platformer left click.
+    Left(ClickType),
+    /// Platformer right click.
+    Right(ClickType),
+}
+
+impl Default for Click {
+    fn default() -> Self {
+        Self::Regular(ClickType::None)
+    }
+}
+
+impl Click {
+    const fn click_type(self) -> ClickType {
+        match self {
+            Click::Regular(typ) | Click::Left(typ) | Click::Right(typ) => typ,
+        }
+    }
+
+    pub const fn is_click(self) -> bool {
+        self.click_type().is_click()
+    }
+
+    pub const fn is_release(self) -> bool {
+        self.click_type().is_release()
+    }
+
+    const fn from_button_and_typ(button: Button, typ: ClickType) -> Self {
+        match button {
+            Button::Push | Button::Release => Self::Regular(typ),
+            Button::LeftPush | Button::LeftRelease => Self::Left(typ),
+            Button::RightPush | Button::RightRelease => Self::Right(typ),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum Button {
+    Push,
+    Release,
+    LeftPush,
+    LeftRelease,
+    RightPush,
+    RightRelease,
+}
+
+impl Button {
+    const fn from_down(down: bool) -> Self {
+        if down {
+            Self::Push
+        } else {
+            Self::Release
+        }
+    }
+
+    const fn from_left_down(down: bool) -> Self {
+        if down {
+            Self::LeftPush
+        } else {
+            Self::LeftRelease
+        }
+    }
+
+    const fn from_right_down(down: bool) -> Self {
+        if down {
+            Self::RightPush
+        } else {
+            Self::RightRelease
+        }
+    }
+
+    const fn is_down(self) -> bool {
+        matches!(self, Self::Push | Self::LeftPush | Self::RightPush)
+    }
+
+    // const fn is_left(self) -> bool {
+    //     matches!(self, Self::LeftPush | Self::LeftRelease)
+    // }
+    //
+    // const fn is_right(self) -> bool {
+    //     matches!(self, Self::RightPush | Self::RightRelease)
+    // }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Action {
     /// Time since the replay was started (in seconds).
@@ -196,7 +264,7 @@ pub struct Action {
     /// What player this action is for.
     pub player: Player,
     /// Click type for this player.
-    pub click: ClickType,
+    pub click: Click,
     /// Volume offset of the action.
     pub vol_offset: f32,
     /// Frame.
@@ -204,13 +272,7 @@ pub struct Action {
 }
 
 impl Action {
-    pub const fn new(
-        time: f32,
-        player: Player,
-        click: ClickType,
-        vol_offset: f32,
-        frame: u32,
-    ) -> Self {
+    pub const fn new(time: f32, player: Player, click: Click, vol_offset: f32, frame: u32) -> Self {
         Self {
             time,
             player,
@@ -528,7 +590,8 @@ impl Replay {
         self
     }
 
-    fn process_action_p1(&mut self, time: f32, down: bool, frame: u32) {
+    fn process_action_p1(&mut self, time: f32, button: Button, frame: u32) {
+        let down = button.is_down();
         if !down && self.actions.is_empty() {
             return;
         }
@@ -544,12 +607,18 @@ impl Replay {
 
         self.prev_time.0 = time;
         self.prev_action.0 = Some(typ);
-        self.actions
-            .push(Action::new(time, Player::One, typ, vol_offset, frame))
+        self.actions.push(Action::new(
+            time,
+            Player::One,
+            Click::from_button_and_typ(button, typ),
+            vol_offset,
+            frame,
+        ))
     }
 
     // .0 is changed to .1 here, because it's the second player
-    fn process_action_p2(&mut self, time: f32, down: bool, frame: u32) {
+    fn process_action_p2(&mut self, time: f32, button: Button, frame: u32) {
+        let down = button.is_down();
         if !down && self.actions.is_empty() {
             return;
         }
@@ -564,8 +633,13 @@ impl Replay {
 
         self.prev_time.1 = time;
         self.prev_action.1 = Some(typ);
-        self.actions
-            .push(Action::new(time, Player::Two, typ, vol_offset, frame))
+        self.actions.push(Action::new(
+            time,
+            Player::Two,
+            Click::from_button_and_typ(button, typ),
+            vol_offset,
+            frame,
+        ))
     }
 
     fn extended_p1(&mut self, down: bool, frame: u32, x: f32, y: f32, y_accel: f32, rot: f32) {
@@ -671,10 +745,10 @@ impl Replay {
             let time = frame as f32 / self.fps;
 
             if p2 {
-                self.process_action_p2(time, down, frame);
+                self.process_action_p2(time, Button::from_down(down), frame);
                 self.extended_p2(down, frame, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down, frame);
+                self.process_action_p1(time, Button::from_down(down), frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.);
             }
         }
@@ -716,19 +790,19 @@ impl Replay {
             let time = frame as f32 / current_fps;
             match action.click_type {
                 Obot2ClickType::Player1Down => {
-                    self.process_action_p1(time, true, frame);
+                    self.process_action_p1(time, Button::from_down(true), frame);
                     self.extended_p1(true, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::Player1Up => {
-                    self.process_action_p1(time, false, frame);
+                    self.process_action_p1(time, Button::from_down(false), frame);
                     self.extended_p1(false, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::Player2Down => {
-                    self.process_action_p2(time, true, frame);
+                    self.process_action_p2(time, Button::from_down(true), frame);
                     self.extended_p2(true, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::Player2Up => {
-                    self.process_action_p2(time, false, frame);
+                    self.process_action_p2(time, Button::from_down(false), frame);
                     self.extended_p2(false, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::FpsChange(fps) => {
@@ -761,10 +835,10 @@ impl Replay {
             let time = frame as f32 / self.fps;
 
             if p1 {
-                self.process_action_p1(time, down, frame as _);
+                self.process_action_p1(time, Button::from_down(down), frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p2(time, down, frame as _);
+                self.process_action_p2(time, Button::from_down(down), frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -821,8 +895,8 @@ impl Replay {
                 .to_i64()
                 .context("p2 'click' field is not a number")?;
 
-            self.process_action_p1(time, p1 == 1, frame as _);
-            self.process_action_p2(time, p2 == 1, frame as _);
+            self.process_action_p1(time, Button::from_down(p1 == 1), frame as _);
+            self.process_action_p2(time, Button::from_down(p2 == 1), frame as _);
 
             self.extended_p1(
                 p1 == 1,
@@ -912,10 +986,10 @@ impl Replay {
                 .unwrap_or(0.0);
 
             if p2 {
-                self.process_action_p2(time, down, frame as _);
+                self.process_action_p2(time, Button::from_down(down), frame as _);
                 self.extended_p2(down, frame as u32, x, y, y_accel, rot)
             } else {
-                self.process_action_p1(time, down, frame as _);
+                self.process_action_p1(time, Button::from_down(down), frame as _);
                 self.extended_p1(down, frame as u32, x, y, y_accel, rot)
             }
         }
@@ -964,10 +1038,10 @@ impl Replay {
             reader.seek(SeekFrom::Current(24))?;
 
             if p1 {
-                self.process_action_p1(time, down, frame);
+                self.process_action_p1(time, Button::from_down(down), frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.); // TODO: parse all vars
             } else {
-                self.process_action_p2(time, down, frame);
+                self.process_action_p2(time, Button::from_down(down), frame);
                 self.extended_p2(down, frame, 0., 0., 0., 0.); // TODO: parse all vars
             }
         }
@@ -1029,10 +1103,10 @@ impl Replay {
             };
 
             if p1 {
-                self.process_action_p1(time, down, frame);
+                self.process_action_p1(time, Button::from_down(down), frame);
                 self.extended_p1(down, frame, x, y, y_accel as _, rot);
             } else {
-                self.process_action_p2(time, down, frame);
+                self.process_action_p2(time, Button::from_down(down), frame);
                 self.extended_p2(down, frame, x, y, y_accel as _, rot);
             }
         }
@@ -1095,10 +1169,10 @@ impl Replay {
                 .unwrap_or(0.0);
 
             if p2 {
-                self.process_action_p2(time, down, frame as _);
+                self.process_action_p2(time, Button::from_down(down), frame as _);
                 self.extended_p2(down, frame as u32, x, y, y_accel, rot);
             } else {
-                self.process_action_p1(time, down, frame as _);
+                self.process_action_p1(time, Button::from_down(down), frame as _);
                 self.extended_p1(down, frame as u32, x, y, y_accel, rot);
             }
         }
@@ -1167,10 +1241,10 @@ impl Replay {
                 .unwrap_or(0.0);
 
             if p2 {
-                self.process_action_p2(time, down, frame as _);
+                self.process_action_p2(time, Button::from_down(down), frame as _);
                 self.extended_p2(down, frame as _, x as _, 0., y_accel as _, rot as _);
             } else {
-                self.process_action_p1(time, down, frame as _);
+                self.process_action_p1(time, Button::from_down(down), frame as _);
                 self.extended_p1(down, frame as _, x as _, 0., y_accel as _, rot as _);
             }
         }
@@ -1217,10 +1291,18 @@ impl Replay {
 
         for action in actions {
             if action.0 == Player::One {
-                self.process_action_p1(action.2, action.1, (action.2 * self.fps) as _);
+                self.process_action_p1(
+                    action.2,
+                    Button::from_down(action.1),
+                    (action.2 * self.fps) as _,
+                );
                 self.extended_p1(action.1, (action.2 * self.fps) as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p2(action.2, action.1, (action.2 * self.fps) as _);
+                self.process_action_p2(
+                    action.2,
+                    Button::from_down(action.1),
+                    (action.2 * self.fps) as _,
+                );
                 self.extended_p2(action.1, (action.2 * self.fps) as u32, 0., 0., 0., 0.);
             }
         }
@@ -1314,8 +1396,8 @@ impl Replay {
             // bit 2 = M2 in standard, left kat in taiko, k2 in mania
             let p1_down = keys & (1 << 0) != 0;
             let p2_down = keys & (1 << 1) != 0;
-            self.process_action_p1(time, p1_down, (time * self.fps) as _);
-            self.process_action_p2(time, p2_down, (time * self.fps) as _);
+            self.process_action_p1(time, Button::from_down(p1_down), (time * self.fps) as _);
+            self.process_action_p2(time, Button::from_down(p2_down), (time * self.fps) as _);
             self.extended_p1(p1_down, (time * self.fps) as u32, 0., 0., 0., 0.);
             self.extended_p2(p2_down, (time * self.fps) as u32, 0., 0., 0., 0.);
         }
@@ -1365,9 +1447,9 @@ impl Replay {
             let action: GdmoAction = unsafe { std::mem::transmute(buf) };
             let frame = (action.time * self.fps as f64) as u32;
             if action.player1 {
-                self.process_action_p1(action.time as f32, action.press, frame);
+                self.process_action_p1(action.time as f32, Button::from_down(action.press), frame);
             } else {
-                self.process_action_p2(action.time as f32, action.press, frame);
+                self.process_action_p2(action.time as f32, Button::from_down(action.press), frame);
             }
         }
 
@@ -1476,7 +1558,7 @@ impl Replay {
 
             let time = action.frame as f32 / self.fps;
             if action.player2 {
-                self.process_action_p2(time, action.press, action.frame);
+                self.process_action_p2(time, Button::from_down(action.press), action.frame);
                 self.extended_p2(
                     action.press,
                     action.frame,
@@ -1486,7 +1568,7 @@ impl Replay {
                     0.,
                 );
             } else {
-                self.process_action_p1(time, action.press, action.frame);
+                self.process_action_p1(time, Button::from_down(action.press), action.frame);
                 self.extended_p1(
                     action.press,
                     action.frame,
@@ -1531,10 +1613,10 @@ impl Replay {
             let player2 = state >> 1 != 0;
 
             if player2 {
-                self.process_action_p2(time, down, frame);
+                self.process_action_p2(time, Button::from_down(down), frame);
                 self.extended_p2(down, frame, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down, frame);
+                self.process_action_p1(time, Button::from_down(down), frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.);
             }
         }
@@ -1556,10 +1638,10 @@ impl Replay {
             let p2 = (state >> 1) != 0;
 
             if p2 {
-                self.process_action_p2(time, down, frame as _);
+                self.process_action_p2(time, Button::from_down(down), frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down, frame as _);
+                self.process_action_p1(time, Button::from_down(down), frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -1580,10 +1662,10 @@ impl Replay {
             let p2 = reader.read_u8()? == 1;
 
             if p2 {
-                self.process_action_p2(time, down, frame as _);
+                self.process_action_p2(time, Button::from_down(down), frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down, frame as _);
+                self.process_action_p1(time, Button::from_down(down), frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -1602,7 +1684,7 @@ impl Replay {
         for (i, line) in reader.lines().enumerate() {
             let line = line?;
             let mut split = line.trim().split(' ');
-            if split.clone().count() < 3 {
+            if split.clone().count() < 4 {
                 log::warn!("plaintext: line {i} length < 3, skipping");
                 continue;
             }
@@ -1610,20 +1692,20 @@ impl Replay {
             let time = frame / self.fps;
             let down = split.next().unwrap().parse::<u8>()? == 1;
             let pbutton: u8 = split.next().unwrap().parse()?; // TODO: support button == 3 (2.2 platformer thing)
-
-            let p2 = if let Some(player1) = split.next() {
-                // if fourth number is 1 then its p1, if 0 it is p2
-                player1.parse::<u8>()? == 0
+            let p2 = split.next().unwrap().parse::<u8>()? == 0;
+            let b = if pbutton == 3 {
+                Button::from_right_down(down)
+            } else if pbutton == 2 {
+                Button::from_left_down(down)
             } else {
-                // no fourth number, player is 2 if pbutton is 1
-                pbutton == 1
+                Button::from_down(down)
             };
 
             if p2 {
-                self.process_action_p2(time, down, frame as _);
+                self.process_action_p2(time, b, frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down, frame as _);
+                self.process_action_p1(time, b, frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -1644,19 +1726,19 @@ impl Replay {
             let time = action.frame as f32 / current_fps;
             match action.click_type {
                 Obot3ClickType::Player1Down => {
-                    self.process_action_p1(time, true, action.frame);
+                    self.process_action_p1(time, Button::from_down(true), action.frame);
                     self.extended_p1(true, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::Player1Up => {
-                    self.process_action_p1(time, false, action.frame);
+                    self.process_action_p1(time, Button::from_down(false), action.frame);
                     self.extended_p1(false, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::Player2Down => {
-                    self.process_action_p2(time, true, action.frame);
+                    self.process_action_p2(time, Button::from_down(true), action.frame);
                     self.extended_p2(true, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::Player2Up => {
-                    self.process_action_p2(time, false, action.frame);
+                    self.process_action_p2(time, Button::from_down(false), action.frame);
                     self.extended_p2(false, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::FpsChange(fps) => {
@@ -1723,7 +1805,7 @@ impl Replay {
             let time = data.frame as f32 / self.fps;
 
             if data.player2 {
-                self.process_action_p2(time, action.hold, data.frame);
+                self.process_action_p2(time, Button::from_down(action.hold), data.frame);
                 self.extended_p2(
                     action.hold,
                     data.frame,
@@ -1733,7 +1815,7 @@ impl Replay {
                     data.rot,
                 );
             } else {
-                self.process_action_p1(time, action.hold, data.frame);
+                self.process_action_p1(time, Button::from_down(action.hold), data.frame);
                 self.extended_p1(
                     action.hold,
                     data.frame,
@@ -1772,10 +1854,10 @@ impl Replay {
             let p2 = i - 14 >= num_p1 as u64 * 5;
 
             if p2 {
-                self.process_action_p2(time, down, frame as _);
+                self.process_action_p2(time, Button::from_down(down), frame as _);
                 self.extended_p2(down, frame as u32, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down, frame as _);
+                self.process_action_p1(time, Button::from_down(down), frame as _);
                 self.extended_p1(down, frame as u32, 0., 0., 0., 0.);
             }
         }
@@ -1825,10 +1907,10 @@ impl Replay {
             let time = frame as f32 / self.fps;
 
             if player2 {
-                self.process_action_p2(time, down, frame);
+                self.process_action_p2(time, Button::from_down(down), frame);
                 self.extended_p2(down, frame, 0., 0., 0., 0.);
             } else {
-                self.process_action_p1(time, down, frame);
+                self.process_action_p1(time, Button::from_down(down), frame);
                 self.extended_p1(down, frame, 0., 0., 0., 0.);
             }
         }
@@ -1866,11 +1948,16 @@ impl Replay {
             match timed_action.action {
                 Action::Button(p1, push, button) => {
                     let time = frame as f32 / current_fps;
-                    if p1 || button == PlayerButton::Left || button == PlayerButton::Jump {
-                        self.process_action_p1(time, push, frame as u32);
+                    let b = match button {
+                        PlayerButton::Jump => Button::from_down(push),
+                        PlayerButton::Left => Button::from_left_down(push),
+                        PlayerButton::Right => Button::from_right_down(push),
+                    };
+                    if p1 {
+                        self.process_action_p1(time, b, frame as u32);
                         self.extended_p1(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
                     } else {
-                        self.process_action_p2(time, push, frame as u32);
+                        self.process_action_p2(time, b, frame as u32);
                         self.extended_p2(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
                     }
                 }
@@ -1921,7 +2008,10 @@ impl Replay {
                 .context("failed to get holding state")?
                 .parse::<u8>()?
                 == 1;
-            split.next(); // skip button, as ZCB doesn't support left/right actions yet
+            let button = split
+                .next()
+                .context("failed to get button state")?
+                .parse::<u8>()?;
             let p1 = split
                 .next()
                 .context("failed to get player1 state")?
@@ -1938,11 +2028,18 @@ impl Replay {
             } else {
                 0.0
             };
+            let b = if button == 3 {
+                Button::from_right_down(push)
+            } else if button == 2 {
+                Button::from_left_down(push)
+            } else {
+                Button::from_down(push)
+            };
             if p1 {
-                self.process_action_p1(frame as f32 / self.fps, push, frame as u32);
+                self.process_action_p1(frame as f32 / self.fps, b, frame as u32);
                 self.extended_p1(push, frame as u32, x, y, 0.0, 0.0);
             } else {
-                self.process_action_p2(frame as f32 / self.fps, push, frame as u32);
+                self.process_action_p2(frame as f32 / self.fps, b, frame as u32);
                 self.extended_p2(push, frame as u32, x, y, 0.0, 0.0);
             }
         }
@@ -1965,7 +2062,7 @@ impl Replay {
                 input.frame as f32 / self.fps
             };
             if input.player2 {
-                self.process_action_p2(time, input.down, input.frame);
+                self.process_action_p2(time, Button::from_down(input.down), input.frame);
                 self.extended_p2(
                     input.down,
                     input.frame,
@@ -1975,7 +2072,7 @@ impl Replay {
                     input.correction.rotation,
                 );
             } else {
-                self.process_action_p1(time, input.down, input.frame);
+                self.process_action_p1(time, Button::from_down(input.down), input.frame);
                 self.extended_p1(
                     input.down,
                     input.frame,

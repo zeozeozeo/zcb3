@@ -1079,97 +1079,64 @@ impl App {
                         },
                     );
                 }
-
                 ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut conv_settings.player1_dirname);
-                    help_text(ui, "Name of the folder with player 1 sounds", |ui| {
-                        ui.label("Player 1 folder")
-                    });
-                });
-                ui.horizontal(|ui| {
-                    ui.text_edit_singleline(&mut conv_settings.player2_dirname);
-                    help_text(ui, "Name of the folder with player 2 sounds", |ui| {
-                        ui.label("Player 2 folder")
-                    });
-                });
+                    if ui
+                        .button("Convert")
+                        .on_hover_text(
+                            "Convert the clickpack.\n\
+                                Note that all files will be exported as .wav",
+                        )
+                        .clicked()
+                    {
+                        if let Some(dir) = FileDialog::new().pick_folder() {
+                            let start = Instant::now();
 
-                let err = if conv_settings.player1_dirname.is_empty() {
-                    Some("Player 1 folder name can't be empty")
-                } else if conv_settings.player2_dirname.is_empty() {
-                    Some("Player 2 folder name can't be empty")
-                } else if conv_settings.player1_dirname == conv_settings.player2_dirname {
-                    Some("Player 1 and 2 folder names can't be the same")
-                } else if self.clickpack_path.is_none() {
-                    Some("Please select a clickpack")
-                } else {
-                    None
-                };
-
-                ui.horizontal(|ui| {
-                    ui.add_enabled_ui(err.is_none(), |ui| {
-                        if ui
-                            .button("Convert")
-                            .on_disabled_hover_text(err.unwrap_or(""))
-                            .on_hover_text(
-                                "Convert the clickpack.\n\
-                                Note that all files will be converted to .wav",
-                            )
-                            .clicked()
-                        {
-                            if let Some(dir) = FileDialog::new().pick_folder() {
-                                let start = Instant::now();
-
-                                // check if the clickpack is loaded, load it if not
-                                if !self.bot.borrow().has_clicks() {
-                                    if let Err(e) = self.bot.borrow_mut().load_clickpack(
-                                        &self.clickpack_path.clone().unwrap(),
-                                        Pitch::NO_PITCH, // don't generate pitch table
-                                    ) {
-                                        dialog
-                                            .dialog()
-                                            .with_title("Failed to load clickpack")
-                                            .with_body(e)
-                                            .with_icon(Icon::Error)
-                                            .open();
-                                    }
-                                }
-
-                                // convert
-                                if let Err(e) =
-                                    self.bot.borrow().convert_clickpack(&dir, conv_settings)
-                                {
+                            // check if the clickpack is loaded, load it if not
+                            if !self.bot.borrow().has_clicks() {
+                                if let Err(e) = self.bot.borrow_mut().load_clickpack(
+                                    &self.clickpack_path.clone().unwrap(),
+                                    Pitch::NO_PITCH, // don't generate pitch table
+                                ) {
                                     dialog
                                         .dialog()
-                                        .with_title("Failed to convert clickpack")
+                                        .with_title("Failed to load clickpack")
                                         .with_body(e)
                                         .with_icon(Icon::Error)
                                         .open();
-                                } else {
-                                    dialog
-                                        .dialog()
-                                        .with_title("Success!")
-                                        .with_body(format!(
-                                            "Successfully converted clickpack in {:?}.",
-                                            start.elapsed()
-                                        ))
-                                        .with_icon(Icon::Success)
-                                        .open();
                                 }
+                            }
 
-                                // finished, unload clickpack
-                                *self.bot.borrow_mut() = Bot::new(self.conf.sample_rate);
+                            // convert
+                            if let Err(e) = self.bot.borrow().convert_clickpack(&dir, conv_settings)
+                            {
+                                dialog
+                                    .dialog()
+                                    .with_title("Failed to convert clickpack")
+                                    .with_body(e)
+                                    .with_icon(Icon::Error)
+                                    .open();
                             } else {
                                 dialog
                                     .dialog()
-                                    .with_title("No directory was selected")
-                                    .with_body("Please select a directory")
-                                    .with_icon(Icon::Error)
+                                    .with_title("Success!")
+                                    .with_body(format!(
+                                        "Successfully converted clickpack in {:?}.",
+                                        start.elapsed()
+                                    ))
+                                    .with_icon(Icon::Success)
                                     .open();
                             }
+
+                            // finished, unload clickpack
+                            *self.bot.borrow_mut() = Bot::new(self.conf.sample_rate);
+                        } else {
+                            dialog
+                                .dialog()
+                                .with_title("No directory was selected")
+                                .with_body("Please select a directory")
+                                .with_icon(Icon::Error)
+                                .open();
                         }
-                    });
-                    if let Some(err) = err {
-                        ui.label(RichText::new(err).color(Color32::LIGHT_RED));
                     }
                 });
             })
@@ -1264,8 +1231,7 @@ impl App {
             return;
         }
 
-        self.clickpack_num_sounds =
-            Some(self.bot.borrow().player.0.num_sounds() + self.bot.borrow().player.1.num_sounds());
+        self.clickpack_num_sounds = Some(self.bot.borrow().clickpack.num_sounds());
 
         let start = Instant::now();
         let segment = self.bot.borrow_mut().render_replay(

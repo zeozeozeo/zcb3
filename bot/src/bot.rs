@@ -1,10 +1,10 @@
-use crate::{f32_range, AudioSegment, ClickType, ExtendedAction, Player, Replay};
+use crate::{f32_range, AudioSegment, Click, ClickType, ExtendedAction, Player, Replay};
 use anyhow::Result;
 use fasteval2::Compiler;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut, Index, IndexMut},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -35,7 +35,7 @@ impl DerefMut for AudioFile {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct PlayerClicks {
     pub hardclicks: Vec<AudioFile>,
     pub hardreleases: Vec<AudioFile>,
@@ -127,9 +127,13 @@ impl PlayerClicks {
     /// Choose a random click based on a click type.
     pub fn random_click(&self, click_type: ClickType) -> Option<&AudioSegment> {
         macro_rules! rand_click {
-            ($arr:expr) => {
-                $arr.get(fastrand::usize(..$arr.len()))
-            };
+            ($arr:expr) => {{
+                let len = $arr.len();
+                if len == 0 {
+                    continue;
+                }
+                $arr.get(fastrand::usize(..len))
+            }};
         }
 
         let preferred = click_type.preferred();
@@ -218,9 +222,9 @@ pub struct Pitch {
 
 impl Pitch {
     pub const NO_PITCH: Pitch = Pitch {
-        from: 1.,
-        to: 1.,
-        step: 0.,
+        from: 1.0,
+        to: 1.0,
+        step: 0.0,
     };
 }
 
@@ -252,7 +256,9 @@ impl Default for Timings {
     }
 }
 
-fn true_value() -> bool {
+// used for serde's dumb `default` field
+#[inline]
+const fn true_value() -> bool {
     true
 }
 
@@ -325,8 +331,6 @@ pub struct ClickpackConversionSettings {
     pub reverse: bool,
     pub remove_silence: RemoveSilenceFrom,
     pub silence_threshold: f32,
-    pub player1_dirname: String,
-    pub player2_dirname: String,
     /// Whether to rename files to '1.wav', '2.wav', etc.
     #[serde(default = "bool::default")]
     pub rename_files: bool,
@@ -340,8 +344,6 @@ impl Default for ClickpackConversionSettings {
             reverse: false,
             remove_silence: RemoveSilenceFrom::None,
             silence_threshold: 0.05,
-            player1_dirname: "player1".to_string(),
-            player2_dirname: "player2".to_string(),
             rename_files: false,
         }
     }
@@ -407,10 +409,87 @@ fn read_clicks_in_directory(dir: &Path, pitch: Pitch, sample_rate: u32) -> Vec<A
     segments
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
+pub struct Clickpack {
+    player1: PlayerClicks,
+    player2: PlayerClicks,
+    left1: PlayerClicks,
+    right1: PlayerClicks,
+    left2: PlayerClicks,
+    right2: PlayerClicks,
+}
+
+impl Index<usize> for Clickpack {
+    type Output = PlayerClicks;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match index {
+            0 => &self.player1,
+            1 => &self.player2,
+            2 => &self.left1,
+            3 => &self.right1,
+            4 => &self.left2,
+            5 => &self.right2,
+            _ => panic!("invalid index"),
+        }
+    }
+}
+
+impl IndexMut<usize> for Clickpack {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        match index {
+            0 => &mut self.player1,
+            1 => &mut self.player2,
+            2 => &mut self.left1,
+            3 => &mut self.right1,
+            4 => &mut self.left2,
+            5 => &mut self.right2,
+            _ => panic!("invalid index"),
+        }
+    }
+}
+
+impl Clickpack {
+    fn has_clicks(&self) -> bool {
+        self.player1.num_sounds() != 0
+            || self.player2.num_sounds() != 0
+            || self.left1.num_sounds() != 0
+            || self.right1.num_sounds() != 0
+            || self.left2.num_sounds() != 0
+            || self.right2.num_sounds() != 0
+    }
+
+    fn longest_click(&self) -> f32 {
+        let mut longest = 0.0f32;
+        for click in [
+            &self.player1,
+            &self.player2,
+            &self.left1,
+            &self.right1,
+            &self.left2,
+            &self.right2,
+        ] {
+            longest = longest.max(click.longest_click());
+        }
+        longest
+    }
+
+    pub fn num_sounds(&self) -> usize {
+        self.player1.num_sounds()
+            + self.player2.num_sounds()
+            + self.left1.num_sounds()
+            + self.right1.num_sounds()
+            + self.left2.num_sounds()
+            + self.right2.num_sounds()
+    }
+}
+
+const CLICKPACK_DIRNAMES: [&str; 6] = ["player1", "player2", "left1", "left2", "right1", "right2"];
+
+#[derive(Default)]
 pub struct Bot {
     /// Clicks/releases for player 1 and player 2.
-    pub player: (PlayerClicks, PlayerClicks),
+    pub clickpack: Clickpack,
     /// The longest sound (in seconds, not counting the noise sound).
     pub longest_click: f32,
     /// Noise audio file. Will be resampled to `sample_rate`.
@@ -422,16 +501,6 @@ pub struct Bot {
     slab: fasteval2::Slab,
     pub compiled_expr: fasteval2::Instruction,
 }
-
-const PLAYER_DIRNAMES: [(&str, &str); 7] = [
-    ("player1", "player2"),
-    ("player 1", "player 2"),
-    ("sounds1", "sounds2"),
-    ("sounds 1", "sounds 2"),
-    ("p1", "p2"),
-    ("1", "2"),
-    ("", ""),
-];
 
 pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
     let Ok(dir) = dir.read_dir() else {
@@ -455,16 +524,11 @@ pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
 }
 
 pub fn dir_has_noise(dir: &Path) -> bool {
-    for player_dirnames in PLAYER_DIRNAMES {
-        let mut player1_path = dir.to_path_buf();
-        player1_path.push(player_dirnames.0);
-        let mut player2_path = dir.to_path_buf();
-        player2_path.push(player_dirnames.1);
+    for dirname in CLICKPACK_DIRNAMES {
+        let mut path = dir.to_path_buf();
+        path.push(dirname);
 
-        if find_noise_file(&player1_path).is_some()
-            || find_noise_file(&player2_path).is_some()
-            || find_noise_file(dir).is_some()
-        {
+        if find_noise_file(&path).is_some() {
             return true;
         }
     }
@@ -488,35 +552,40 @@ impl Bot {
     pub fn load_clickpack(&mut self, clickpack_dir: &Path, pitch: Pitch) -> Result<()> {
         assert!(self.sample_rate > 0);
 
-        // handle different player folder names
-        for player_dirnames in PLAYER_DIRNAMES {
-            let mut player1_path = clickpack_dir.to_path_buf();
-            player1_path.push(player_dirnames.0);
-            let mut player2_path = clickpack_dir.to_path_buf();
-            player2_path.push(player_dirnames.1);
+        for (i, dir) in CLICKPACK_DIRNAMES.iter().enumerate() {
+            let mut path = clickpack_dir.to_path_buf();
+            path.push(dir);
+            self.clickpack[i] = PlayerClicks::from_path(&path, pitch, self.sample_rate);
 
-            // load clicks from player1 and player2 folders
-            self.player.0.extend_with(&PlayerClicks::from_path(
-                &player1_path,
-                pitch,
-                self.sample_rate,
-            ));
-
-            // only load player2 clicks if directories are not "" (last case)
-            if !player_dirnames.1.is_empty() {
-                self.player.1.extend_with(&PlayerClicks::from_path(
-                    &player2_path,
-                    pitch,
-                    self.sample_rate,
-                ));
-            }
-
-            // try to load noise file in the player directories
-            self.load_noise(&player1_path);
-            if !player_dirnames.1.is_empty() {
-                self.load_noise(&player2_path);
+            // try to load noise from the sound directories
+            if !self.has_noise() {
+                self.load_noise(&path);
             }
         }
+
+        if !self.has_clicks() {
+            log::warn!("folders {CLICKPACK_DIRNAMES:?} were not found in the clickpack, assuming there is only one player");
+            self.clickpack[0] = PlayerClicks::from_path(clickpack_dir, pitch, self.sample_rate);
+        }
+
+        // find longest click (will be used to ensure that the end doesn't get cut off)
+        self.longest_click = self.clickpack.longest_click();
+        log::debug!("longest click: {}", self.longest_click);
+
+        // try to load noise from the root clickpack dir
+        if !self.has_noise() {
+            self.load_noise(clickpack_dir);
+        }
+
+        if self.has_clicks() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!(
+                "no clicks found in clickpack, did you select the correct folder?"
+            ))
+        }
+        // handle different player folder names
+        /*
 
         // find longest click (will be used to ensure that the end doesn't get cut off)
         self.longest_click = self
@@ -536,6 +605,7 @@ impl Bot {
                 "no clicks found in clickpack, did you select the correct folder?"
             ))
         }
+        */
     }
 
     fn load_noise(&mut self, dir: &Path) {
@@ -553,25 +623,49 @@ impl Bot {
         };
     }
 
-    fn get_random_click(&mut self, player: Player, click: ClickType) -> &AudioSegment {
+    fn get_random_click(&mut self, player: Player, click: Click) -> &AudioSegment {
         // try to get a random click/release from the player clicks
         // if it doesn't exist for the wanted player, use the other one (guaranteed to have atleast
         // one click)
-        let p1 = &self.player.0;
-        let p2 = &self.player.1;
-        match player {
-            Player::One => {
-                if let Some(click) = p1.random_click(click) {
-                    click
+        let p1 = &self.clickpack.player1;
+        let p2 = &self.clickpack.player2;
+        let l1 = &self.clickpack.left1;
+        let r1 = &self.clickpack.right1;
+        let l2 = &self.clickpack.left2;
+        let r2 = &self.clickpack.right2;
+
+        // :tired_face:
+        macro_rules! random_click_ord {
+            ($typ:ident, $one:ident, $two:ident, $three:ident, $four:ident) => {
+                $one.random_click($typ).unwrap_or_else(|| {
+                    $two.random_click($typ).unwrap_or_else(|| {
+                        $three
+                            .random_click($typ)
+                            .unwrap_or_else(|| $four.random_click($typ).unwrap())
+                    })
+                })
+            };
+        }
+        match click {
+            Click::Regular(typ) => {
+                if player == Player::One {
+                    random_click_ord!(typ, p1, p2, l1, l2)
                 } else {
-                    return p2.random_click(click).unwrap(); // use p2 clicks
+                    random_click_ord!(typ, p2, p1, l2, l1)
                 }
             }
-            Player::Two => {
-                if let Some(click) = p2.random_click(click) {
-                    click
+            Click::Left(typ) => {
+                if player == Player::One {
+                    random_click_ord!(typ, l1, l2, p1, p2)
                 } else {
-                    return p1.random_click(click).unwrap(); // use p1 clicks
+                    random_click_ord!(typ, l2, l1, p2, p1)
+                }
+            }
+            Click::Right(typ) => {
+                if player == Player::One {
+                    random_click_ord!(typ, r1, r2, p1, p2)
+                } else {
+                    random_click_ord!(typ, r2, r1, p2, p1)
                 }
             }
         }
@@ -763,7 +857,7 @@ impl Bot {
 
     #[inline]
     pub fn has_clicks(&self) -> bool {
-        self.player.0.has_clicks() || self.player.1.has_clicks()
+        self.clickpack.has_clicks()
     }
 
     pub fn convert_clickpack(
@@ -860,17 +954,16 @@ impl Bot {
             Ok(())
         };
 
-        // convert each player
-        if self.player.0.has_clicks() {
-            path.push(&settings.player1_dirname);
+        // convert each sound folder
+        for (i, dirname) in CLICKPACK_DIRNAMES.iter().enumerate() {
+            let sounds = &self.clickpack[i];
+            if !sounds.has_clicks() {
+                continue;
+            }
+            path.push(dirname);
             std::fs::create_dir_all(&path)?;
-            convert_player(&self.player.0, &path)?;
-        }
-        path.pop(); // remove `player1` from path
-        if self.player.1.has_clicks() {
-            path.push(&settings.player2_dirname);
-            std::fs::create_dir_all(&path)?;
-            convert_player(&self.player.1, &path)?;
+            convert_player(sounds, &path)?;
+            path.pop();
         }
 
         Ok(())
@@ -878,10 +971,10 @@ impl Bot {
 
     /// Return whether the clickpack is Viper 8k.
     pub fn is_viper8k(&self) -> bool {
-        let p1 = &self.player.0;
+        let p1 = &self.clickpack.player1;
 
         // educated guess
-        !self.player.1.has_clicks()
+        !self.clickpack.player2.has_clicks()
             && p1.clicks.len() == 11
             && p1.releases.len() == 6
             && p1.softclicks.len() == 5
