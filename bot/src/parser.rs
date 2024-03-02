@@ -2,6 +2,7 @@ use crate::{f32_range, Timings, VolumeSettings};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use ijson::IValue;
+use serde::Deserialize;
 use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -372,6 +373,8 @@ pub enum ReplayType {
     XdBot,
     /// GDReplayFormat .gdr files (GDMegaOverlay)
     Gdr,
+    /// qBot .qb files
+    Qbot,
 }
 
 impl ReplayType {
@@ -411,71 +414,10 @@ impl ReplayType {
             "ybot" => Ybot2,
             "xd" => XdBot,
             "gdr" => Gdr,
+            "qb" => Qbot,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
-}
-
-use serde::{Deserialize, Serialize};
-
-// structs that are serialized by obot2 using [`bincode`]
-
-#[derive(Serialize, Deserialize)]
-pub enum Obot2Location {
-    XPos(u32),
-    Frame(u32),
-}
-#[derive(Serialize, Deserialize, PartialEq)]
-enum Obot2ReplayType {
-    XPos,
-    Frame,
-}
-#[derive(Serialize, Deserialize, PartialEq, Clone, Copy)]
-enum Obot2ClickType {
-    None,
-    FpsChange(f32),
-    Player1Down,
-    Player1Up,
-    Player2Down,
-    Player2Up,
-}
-#[derive(Serialize, Deserialize)]
-struct Obot2Click {
-    location: Obot2Location,
-    click_type: Obot2ClickType,
-}
-#[derive(Serialize, Deserialize)]
-struct Obot2Replay {
-    initial_fps: f32,
-    current_fps: f32,
-    replay_type: Obot2ReplayType,
-    current_click: usize,
-    clicks: Vec<Obot2Click>,
-}
-
-// structs that are serialized by obot3 using [`dlhn`]
-
-#[derive(Serialize, Deserialize)]
-enum Obot3ClickType {
-    None,
-    Player1Down,
-    Player1Up,
-    Player2Down,
-    Player2Up,
-    FpsChange(f32),
-}
-
-#[derive(Serialize, Deserialize)]
-struct Obot3Click {
-    frame: u32,
-    click_type: Obot3ClickType,
-}
-
-#[derive(Serialize, Deserialize)]
-struct Obot3Replay {
-    initial_fps: f32,
-    current_fps: f32,
-    clicks: Vec<Obot3Click>,
 }
 
 impl Replay {
@@ -502,6 +444,7 @@ impl Replay {
         // "gatobot",
         "xd",
         "gdr",
+        "qb",
     ];
 
     pub fn build() -> Self {
@@ -562,6 +505,7 @@ impl Replay {
             ReplayType::Ybot2 => self.parse_ybot2(reader)?,
             ReplayType::XdBot => self.parse_xdbot(reader)?,
             ReplayType::Gdr => self.parse_gdr(reader)?,
+            ReplayType::Qbot => self.parse_qbot(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -758,6 +702,38 @@ impl Replay {
 
     /// Will also handle obot3 and replaybot replays.
     fn parse_obot2<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        #[derive(Deserialize)]
+        pub enum Obot2Location {
+            XPos(u32),
+            Frame(u32),
+        }
+        #[derive(Deserialize, PartialEq)]
+        enum Obot2ReplayType {
+            XPos,
+            Frame,
+        }
+        #[derive(Deserialize, PartialEq, Clone, Copy)]
+        enum Obot2ClickType {
+            None,
+            FpsChange(f32),
+            Player1Down,
+            Player1Up,
+            Player2Down,
+            Player2Up,
+        }
+        #[derive(Deserialize)]
+        struct Obot2Click {
+            location: Obot2Location,
+            click_type: Obot2ClickType,
+        }
+        #[derive(Deserialize)]
+        struct Obot2Replay {
+            initial_fps: f32,
+            _current_fps: f32,
+            replay_type: Obot2ReplayType,
+            _current_click: usize,
+            clicks: Vec<Obot2Click>,
+        }
         let mut data = Vec::new();
         reader.read_to_end(&mut data)?;
         reader.seek(SeekFrom::Start(0))?;
@@ -1713,6 +1689,28 @@ impl Replay {
     }
 
     fn parse_obot3<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        #[derive(Deserialize)]
+        enum Obot3ClickType {
+            None,
+            Player1Down,
+            Player1Up,
+            Player2Down,
+            Player2Up,
+            FpsChange(f32),
+        }
+
+        #[derive(Deserialize)]
+        struct Obot3Click {
+            frame: u32,
+            click_type: Obot3ClickType,
+        }
+
+        #[derive(Deserialize)]
+        struct Obot3Replay {
+            initial_fps: f32,
+            _current_fps: f32,
+            clicks: Vec<Obot3Click>,
+        }
         let mut deserializer = dlhn::Deserializer::new(&mut reader);
         let Ok(replay) = Obot3Replay::deserialize(&mut deserializer) else {
             reader.seek(SeekFrom::Start(0))?;
@@ -2081,6 +2079,89 @@ impl Replay {
                     input.correction.y_vel,
                     input.correction.rotation,
                 );
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_qbot<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        #[derive(Deserialize)]
+        enum PlayerButton {
+            Jump = 1,
+            Left = 2,
+            Right = 3,
+        }
+        #[derive(Deserialize)]
+        enum Action {
+            Button {
+                is_p2: bool,
+                push: bool,
+                button: PlayerButton,
+            },
+            FPS(f32),
+        }
+        #[derive(Deserialize, Default)]
+        struct Position {
+            x: f32,
+            y: f32,
+            rotate: f32,
+        }
+        #[derive(Deserialize)]
+        struct Click {
+            frame: u32,
+            time: f64,
+            action: Action,
+            _x_vel: f64,
+            y_vel: f64,
+            position: Option<Position>,
+        }
+        #[derive(Deserialize)]
+        struct Replay {
+            initial_fps: f32,
+            _fps: f32,
+            _index: usize,
+            clicks: Vec<Click>,
+        }
+        let mut deserializer = dlhn::Deserializer::new(&mut reader);
+        let replay = Replay::deserialize(&mut deserializer)?;
+        self.fps = if let Some(override_fps) = self.override_fps {
+            override_fps
+        } else {
+            replay.initial_fps
+        };
+        let mut fps = replay.initial_fps;
+        for click in replay.clicks {
+            match click.action {
+                Action::Button {
+                    is_p2,
+                    push,
+                    button,
+                } => {
+                    let p = click.position.unwrap_or_default();
+                    let b = match button {
+                        PlayerButton::Jump => Button::from_down(push),
+                        PlayerButton::Left => Button::from_left_down(push),
+                        PlayerButton::Right => Button::from_right_down(push),
+                    };
+                    let time = if click.time != 0.0 {
+                        click.time as f32
+                    } else {
+                        click.frame as f32 / fps
+                    };
+                    if is_p2 {
+                        self.process_action_p2(time, b, click.frame);
+                        self.extended_p2(push, click.frame, p.x, p.y, click.y_vel as f32, p.rotate);
+                    } else {
+                        self.process_action_p1(time, b, click.frame);
+                        self.extended_p1(push, click.frame, p.x, p.y, click.y_vel as f32, p.rotate);
+                    }
+                }
+                Action::FPS(new_fps) => {
+                    if self.override_fps.is_none() {
+                        self.fps_change(new_fps);
+                        fps = new_fps;
+                    }
+                }
             }
         }
         Ok(())

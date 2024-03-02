@@ -954,6 +954,7 @@ impl App {
             ui.label("• xBot Frame (.xbot)");
             ui.label("• xdBot (.xd, old and new formats)");
             ui.label("• GDReplayFormat (.gdr, used in Geode GDMegaOverlay)");
+            ui.label("• qBot (.qb)");
         });
 
         // show dialog if there is one

@@ -30,6 +30,7 @@ Free and easy to use Geometry Dash clickbot.
 * xBot Frame (.xbot)
 * [xdBot (.xd)](https://geode-sdk.org/mods/zilko.xdbot/), old and new formats
 * GDReplayFormat (.gdr, used in Geode GDMegaOverlay)
+* qBot (.qb)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
