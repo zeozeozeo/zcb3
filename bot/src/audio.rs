@@ -3,7 +3,7 @@ use rayon::prelude::*;
 use std::io::{BufWriter, Cursor};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use std::time::{Duration, Instant};
-use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Channels, Signal};
+use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::conv::{FromSample, IntoSample};
 use symphonia::core::errors::Error;
