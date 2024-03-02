@@ -224,17 +224,18 @@ impl AudioSegment {
         let track_id = track.id;
 
         // get sample rate
-        let mut sample_rate = track
+        let sample_rate = track
             .codec_params
             .sample_rate
             .context("failed to get sample rate")?;
 
         // if the file is mono, multiply the sample rate by 4
         // (i have not figured out why this works yet)
-        if track.codec_params.channels == Some(Channels::FRONT_LEFT) {
-            log::debug!("detected mono file, multiplying sample rate by 4");
-            sample_rate *= 4;
-        }
+        // SPOILER: IT REALLY DOESNT
+        // if track.codec_params.channels == Some(Channels::FRONT_LEFT) {
+        //     log::debug!("detected mono file, multiplying sample rate by 4");
+        //     sample_rate *= 4;
+        // }
 
         log::info!(
             "sample rate: {sample_rate}, chns: {}",
