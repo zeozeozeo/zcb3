@@ -708,6 +708,7 @@ dependencies = [
  "dlhn",
  "fasteval2",
  "fastrand 2.0.1",
+ "flate2",
  "gdr",
  "hound",
  "ijson",
@@ -4737,7 +4738,7 @@ dependencies = [
 
 [[package]]
 name = "zcb3"
-version = "3.4.3"
+version = "3.4.4"
 dependencies = [
  "anyhow",
  "bot",

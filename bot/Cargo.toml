@@ -25,3 +25,4 @@ symphonia = { version = "0.5.4", features = ["all"] }
 ybot_fmt = { path = "ybot_fmt" }
 gdr = { path = "gdr" }
 fastrand = "2.0.1"
+flate2 = "1.0.28"

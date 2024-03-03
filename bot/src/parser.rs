@@ -2177,7 +2177,62 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_rbot<R: Read>(&mut self, mut reader: R) -> Result<()> {
+    fn parse_rbot_gz<R: Read>(&mut self, reader: R) -> Result<()> {
+        use flate2::read::GzDecoder;
+        let mut d = GzDecoder::new(reader);
+        let fps = d.read_u32::<LittleEndian>()?;
+        self.fps = if let Some(override_fps) = self.override_fps {
+            override_fps
+        } else {
+            fps as f32
+        };
+
+        let num_actions = d.read_u32::<LittleEndian>()?;
+        for _ in 0..num_actions {
+            let frame = d.read_u32::<LittleEndian>()?;
+            let hold = d.read_u8()? != 0;
+            let p2 = d.read_u8()? != 0;
+            if p2 {
+                self.process_action_p2(frame as f32 / self.fps, Button::from_down(hold), frame);
+                // self.extended_p2(hold, frame, 0.0, 0.0, 0.0, 0.0);
+            } else {
+                self.process_action_p1(frame as f32 / self.fps, Button::from_down(hold), frame);
+                // self.extended_p1(hold, frame, 0.0, 0.0, 0.0, 0.0);
+            }
+        }
+
+        let num_positions = d.read_u32::<LittleEndian>()?;
+        for _ in 0..num_positions {
+            let frame = d.read_u32::<LittleEndian>()?;
+            let p2 = d.read_u8()? != 0;
+            let x = d.read_f32::<LittleEndian>()?;
+            let y = d.read_f32::<LittleEndian>()?;
+            let rot = d.read_f32::<LittleEndian>()?;
+
+            // find action to get hold state (FIXME: very inefficent)
+            let hold = if let Ok(idx) = self.actions.binary_search_by(|a| a.frame.cmp(&frame)) {
+                self.actions[idx].click.is_click()
+            } else {
+                false
+            };
+
+            if p2 {
+                self.extended_p2(hold, frame, x, y, 0.0, rot);
+            } else {
+                self.extended_p1(hold, frame, x, y, 0.0, rot);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_rbot<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let magic = reader.read_u16::<LittleEndian>()?;
+        reader.seek(SeekFrom::Start(0))?;
+        if magic == 0x8b1f {
+            return self.parse_rbot_gz(reader);
+        }
+
         let fps = reader.read_u32::<LittleEndian>()?;
         self.fps = if let Some(override_fps) = self.override_fps {
             override_fps
