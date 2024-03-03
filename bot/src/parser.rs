@@ -375,6 +375,8 @@ pub enum ReplayType {
     Gdr,
     /// qBot .qb files
     Qbot,
+    /// RBot .rbot files
+    Rbot,
 }
 
 impl ReplayType {
@@ -415,6 +417,7 @@ impl ReplayType {
             "xd" => XdBot,
             "gdr" => Gdr,
             "qb" => Qbot,
+            "rbot" => Rbot,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -445,6 +448,7 @@ impl Replay {
         "xd",
         "gdr",
         "qb",
+        "rbot",
     ];
 
     pub fn build() -> Self {
@@ -506,6 +510,7 @@ impl Replay {
             ReplayType::XdBot => self.parse_xdbot(reader)?,
             ReplayType::Gdr => self.parse_gdr(reader)?,
             ReplayType::Qbot => self.parse_qbot(reader)?,
+            ReplayType::Rbot => self.parse_rbot(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -2146,7 +2151,12 @@ impl Replay {
                     let time = if click.time != 0.0 {
                         click.time as f32
                     } else {
-                        click.frame as f32 / fps
+                        let actual_fps = if let Some(override_fps) = self.override_fps {
+                            override_fps
+                        } else {
+                            fps
+                        };
+                        click.frame as f32 / actual_fps
                     };
                     if is_p2 {
                         self.process_action_p2(time, b, click.frame);
@@ -2162,6 +2172,29 @@ impl Replay {
                         fps = new_fps;
                     }
                 }
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_rbot<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        let fps = reader.read_u32::<LittleEndian>()?;
+        self.fps = if let Some(override_fps) = self.override_fps {
+            override_fps
+        } else {
+            fps as f32
+        };
+        let num_actions = reader.read_u32::<LittleEndian>()?;
+        for _ in 0..num_actions {
+            let frame = reader.read_u32::<LittleEndian>()?;
+            let push = reader.read_u8()? != 0;
+            let p1 = reader.read_u8()? != 0;
+            if p1 {
+                self.process_action_p1(frame as f32 / self.fps, Button::from_down(push), frame);
+                self.extended_p1(push, frame, 0.0, 0.0, 0.0, 0.0);
+            } else {
+                self.process_action_p2(frame as f32 / self.fps, Button::from_down(push), frame);
+                self.extended_p2(push, frame, 0.0, 0.0, 0.0, 0.0);
             }
         }
         Ok(())
