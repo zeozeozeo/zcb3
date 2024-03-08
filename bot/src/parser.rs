@@ -553,6 +553,7 @@ impl Replay {
 
         let delta = time - self.prev_time.0;
         let (typ, vol_offset) = ClickType::from_time(delta, self.timings, down, self.vol_settings);
+        // println!("ctyp: {typ:?}");
 
         self.prev_time.0 = time;
         self.prev_action.0 = Some(typ);

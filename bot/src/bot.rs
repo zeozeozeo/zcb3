@@ -231,9 +231,9 @@ impl Pitch {
 impl Default for Pitch {
     fn default() -> Self {
         Self {
-            from: 0.95,
-            to: 1.05,
-            step: 0.001,
+            from: 0.98,
+            to: 1.02,
+            step: 0.0005,
         }
     }
 }

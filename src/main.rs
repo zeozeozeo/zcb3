@@ -55,11 +55,12 @@ struct Args {
         default_value_t = true
     )]
     pitch_enabled: bool,
-    #[arg(long, help = "Minimum pitch value", default_value_t = 0.95)]
+    
+    #[arg(long, help = "Minimum pitch value", default_value_t = 0.98)]
     pitch_from: f32,
-    #[arg(long, help = "Maximum pitch value", default_value_t = 1.05)]
+    #[arg(long, help = "Maximum pitch value", default_value_t = 1.02)]
     pitch_to: f32,
-    #[arg(long, help = "Pitch table step", default_value_t = 0.001)]
+    #[arg(long, help = "Pitch table step", default_value_t = 0.0005)]
     pitch_step: f32,
 
     #[arg(long, help = "Hard click timing", default_value_t = 2.0)]
