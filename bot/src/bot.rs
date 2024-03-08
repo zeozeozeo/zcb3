@@ -950,16 +950,4 @@ impl Bot {
 
         Ok(())
     }
-
-    /// Return whether the clickpack is Viper 8k.
-    pub fn is_viper8k(&self) -> bool {
-        let p1 = &self.clickpack.player1;
-
-        // educated guess
-        !self.clickpack.player2.has_clicks()
-            && p1.clicks.len() == 11
-            && p1.releases.len() == 6
-            && p1.softclicks.len() == 5
-            && p1.softreleases.len() == 6
-    }
 }
