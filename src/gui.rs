@@ -960,6 +960,20 @@ impl App {
         dialog.show_dialog();
     }
 
+    fn load_clickpack_no_pitch(&self, dialog: &Modal, bot: &mut Bot) {
+        if let Err(e) = bot.load_clickpack(
+            &self.clickpack_path.clone().unwrap(),
+            Pitch::NO_PITCH, // don't generate pitch table
+        ) {
+            dialog
+                .dialog()
+                .with_title("Failed to load clickpack")
+                .with_body(e)
+                .with_icon(Icon::Error)
+                .open();
+        }
+    }
+
     fn show_select_clickpack_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.heading("Select clickpack");
 
@@ -1167,8 +1181,8 @@ impl App {
                         .open();
                 }
             }
-            if let Some(selected_clickpack_path) = &self.clickpack_path {
-                let filename = selected_clickpack_path.file_name().unwrap();
+            if let Some(clickpack_path) = &self.clickpack_path {
+                let filename = clickpack_path.file_name().unwrap();
 
                 // clickpack_num_sounds only gets set after rendering where the
                 // clickpack gets loaded
@@ -1181,6 +1195,50 @@ impl App {
                 }
             }
         });
+
+        if let Some(clickpack_path) = &self.clickpack_path {
+            ui.collapsing("Overview", |ui| {
+                let bot = &mut self.bot.borrow_mut();
+                let has_clicks = bot.has_clicks();
+                ui.label("General overview of how your clickpack is stored internally");
+                ui.horizontal(|ui| {
+                    ui.label("Path:");
+                    let path_str = clickpack_path.to_str().unwrap_or("invalid Path");
+                    ui.label(RichText::new(format!(" {} ", path_str.replace("\\", "/"))).code());
+                });
+                ui.collapsing("Structure", |ui| {
+                    if has_clicks {                        
+                        egui::Grid::new("clickpack_structure_grid")
+                            .num_columns(2)
+                            .spacing([40.0, 4.0])
+                            .striped(true)
+                            .show(ui, |ui| {
+                                for clicks in [
+                                    (&bot.clickpack.player1, "player1"),
+                                    (&bot.clickpack.player2, "player2"),
+                                    (&bot.clickpack.left1, "left1"),
+                                    (&bot.clickpack.right1, "right1"),
+                                    (&bot.clickpack.left2, "left2"),
+                                    (&bot.clickpack.right2, "right2"),
+                                ] {
+                                    ui.label(clicks.1);
+                                    ui.label(format!("{} sounds", clicks.0.num_sounds()));
+                                    ui.end_row();
+                                }
+                            });
+                    } else {
+                        ui.label("Structure cannot be displayed since the clickpack is not loaded");
+                        ui.horizontal(|ui| {
+                            ui.label("Load the clickpack to see it:");
+                            if ui.button("Load").clicked() {
+                                self.load_clickpack_no_pitch(&dialog, bot)
+                            }
+                        });
+                    }
+                });
+            });
+            ui.separator();
+        }
 
         ui.collapsing("Info", |ui| {
             ui.label("The clickpack should either have player1, player2, left1, right1, left2 and right2 \

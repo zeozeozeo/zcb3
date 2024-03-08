@@ -47,6 +47,23 @@ pub struct PlayerClicks {
     pub microreleases: Vec<AudioFile>,
 }
 
+impl Index<usize> for PlayerClicks {
+    type Output = Vec<AudioFile>;
+    fn index(&self, index: usize) -> &Self::Output {
+        match index {
+            0 => &self.hardclicks,
+            1 => &self.hardreleases,
+            2 => &self.clicks,
+            3 => &self.releases,
+            4 => &self.softclicks,
+            5 => &self.softreleases,
+            6 => &self.microclicks,
+            7 => &self.microreleases,
+            _ => panic!("invalid index"),
+        }
+    }
+}
+
 impl PlayerClicks {
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn recognize_dir_and_load_files(&mut self, path: &Path, pitch: Pitch, sample_rate: u32) {
@@ -411,12 +428,12 @@ fn read_clicks_in_directory(dir: &Path, pitch: Pitch, sample_rate: u32) -> Vec<A
 
 #[derive(Default)]
 pub struct Clickpack {
-    player1: PlayerClicks,
-    player2: PlayerClicks,
-    left1: PlayerClicks,
-    right1: PlayerClicks,
-    left2: PlayerClicks,
-    right2: PlayerClicks,
+    pub player1: PlayerClicks,
+    pub player2: PlayerClicks,
+    pub left1: PlayerClicks,
+    pub right1: PlayerClicks,
+    pub left2: PlayerClicks,
+    pub right2: PlayerClicks,
 }
 
 impl Index<usize> for Clickpack {
@@ -570,7 +587,7 @@ impl Bot {
 
         // find longest click (will be used to ensure that the end doesn't get cut off)
         self.longest_click = self.clickpack.longest_click();
-        log::debug!("longest click: {}", self.longest_click);
+        log::debug!("longest click: {}s", self.longest_click);
 
         // try to load noise from the root clickpack dir
         if !self.has_noise() {
