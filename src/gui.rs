@@ -1204,7 +1204,7 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.label("Path:");
                     let path_str = clickpack_path.to_str().unwrap_or("invalid Path");
-                    ui.label(RichText::new(format!(" {} ", path_str.replace("\\", "/"))).code());
+                    ui.label(RichText::new(format!(" {} ", path_str.replace('\\', "/"))).code());
                 });
                 ui.collapsing("Structure", |ui| {
                     if has_clicks {                        
