@@ -393,6 +393,8 @@ impl ReplayType {
                     Mhr
                 } else if filename.ends_with(".echo.json") {
                     Echo
+                } else if filename.ends_with(".gdr.json") {
+                    Gdr
                 } else {
                     TasBot
                 }

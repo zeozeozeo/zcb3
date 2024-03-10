@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct BotInfo {
+    #[serde(default = "String::new")]
     pub name: String,
+    #[serde(default = "String::new")]
     pub version: String,
 }
 
@@ -36,25 +38,25 @@ impl LevelInfo {
 
 #[derive(Serialize, Deserialize, Default)]
 pub struct Correction {
-    #[serde(rename = "nodeXPos")]
+    #[serde(rename = "nodeXPos", default = "f32::default")]
     pub node_x_pos: f32,
-    #[serde(rename = "nodeYPos")]
+    #[serde(rename = "nodeYPos", default = "f32::default")]
     pub node_y_pos: f32,
     #[serde(default = "bool::default")]
     pub player2: bool,
     #[serde(default = "f32::default")]
     pub rotation: f32,
-    #[serde(rename = "rotationRate")]
+    #[serde(rename = "rotationRate", default = "f32::default")]
     pub rotation_rate: f32,
     #[serde(default = "f32::default")]
     pub time: f32,
-    #[serde(rename = "xPos")]
+    #[serde(rename = "xPos", default = "f32::default")]
     pub x_pos: f32,
-    #[serde(rename = "xVel")]
+    #[serde(rename = "xVel", default = "f32::default")]
     pub x_vel: f32,
-    #[serde(rename = "yPos")]
+    #[serde(rename = "yPos", default = "f32::default")]
     pub y_pos: f32,
-    #[serde(rename = "yVel")]
+    #[serde(rename = "yVel", default = "f32::default")]
     pub y_vel: f32,
 }
 
@@ -109,20 +111,35 @@ impl Input {
     }
 }
 
+const fn default_framerate() -> f32 {
+    240.0
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct Replay {
+    #[serde(default = "String::new")]
     pub author: String,
+    #[serde(default = "String::new")]
     pub description: String,
+    #[serde(default = "f32::default")]
     pub duration: f32,
     #[serde(rename = "gameVersion")]
     pub game_version: f32,
+    #[serde(default = "f32::default")]
     pub version: f32,
+    #[serde(default = "default_framerate")]
     pub framerate: f32,
+    #[serde(default = "i32::default")]
     pub seed: i32,
+    #[serde(default = "i32::default")]
     pub coins: i32,
+    #[serde(default = "bool::default")]
     pub ldm: bool,
+    #[serde(default = "BotInfo::default")]
     pub bot: BotInfo,
+    #[serde(default = "LevelInfo::default")]
     pub level: LevelInfo,
+    #[serde(default = "Vec::new")]
     pub inputs: Vec<Input>,
 }
 
