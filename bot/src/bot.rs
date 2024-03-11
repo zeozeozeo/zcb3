@@ -67,7 +67,7 @@ impl Index<usize> for PlayerClicks {
 impl PlayerClicks {
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn recognize_dir_and_load_files(&mut self, path: &Path, pitch: Pitch, sample_rate: u32) {
-        let path_str = path.to_str().unwrap();
+        let filename = path.file_name().unwrap().to_string_lossy();
         let patterns = [
             ("hard", "click", &mut self.hardclicks),
             ("hard", "release", &mut self.hardreleases),
@@ -81,9 +81,9 @@ impl PlayerClicks {
         let mut matched_any = false;
         for (pat1, pat2, clicks) in patterns {
             let is_pat = if !pat1.is_empty() {
-                path_str.contains(pat1) && path_str.contains(pat2)
+                filename.contains(pat1) && filename.contains(pat2)
             } else {
-                path_str.contains(pat2)
+                filename.contains(pat2)
             };
             if is_pat {
                 log::debug!("directory {path:?} matched pattern (\"{pat1}\", \"{pat2}\")");
