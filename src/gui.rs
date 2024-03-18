@@ -753,14 +753,14 @@ impl App {
 
         ui.horizontal(|ui| {
             ui.add(egui::Image::new(egui::include_image!("assets/kofi_logo.png")).max_width(32.0));
-            ui.hyperlink_to("Donate to me on Ko-fi", "https://ko-fi.com/zeozeozeo");
+            ui.hyperlink_to("Donate on Ko-fi", "https://ko-fi.com/zeozeozeo");
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             ui.add(
                 egui::Image::new(egui::include_image!("assets/liberapay_logo.png")).max_width(32.0),
             );
-            ui.hyperlink_to("Donate to me on Liberapay", "https://liberapay.com/zeo");
+            ui.hyperlink_to("Donate on Liberapay", "https://liberapay.com/zeo");
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -769,7 +769,7 @@ impl App {
                     .max_width(32.0),
             );
             ui.hyperlink_to(
-                "Donate to me on DonationAlerts",
+                "Donate on DonationAlerts",
                 "https://donationalerts.com/r/zeozeozeo",
             );
         });
@@ -779,7 +779,7 @@ impl App {
                 egui::Image::new(egui::include_image!("assets/boosty_logo.png")).max_width(32.0),
             );
             ui.hyperlink_to(
-                "Donate to me on Boosty",
+                "Donate on Boosty",
                 "https://boosty.to/zeozeozeo/donate",
             );
         });
