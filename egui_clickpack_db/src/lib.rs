@@ -1,5 +1,6 @@
 use egui_extras::{Column, TableBuilder};
 use fuzzy_matcher::FuzzyMatcher;
+use humansize::{format_size, DECIMAL};
 use indexmap::IndexMap;
 use std::{
     io::Cursor,
@@ -33,8 +34,8 @@ pub struct Database {
 
 #[derive(serde::Deserialize, Clone)]
 pub struct Entry {
-    // size: usize,
-    // uncompressed_size: usize,
+    size: usize,
+    uncompressed_size: usize,
     has_noise: bool,
     url: String,
     #[serde(skip_deserializing)]
@@ -315,7 +316,7 @@ impl ClickpackDb {
                         let _ = std::fs::create_dir_all(&path)
                             .map_err(|e| log::error!("create_dir_all failed: {e}"));
 
-                        self.download_entry(entry, name, req_fn, path, true);
+                        self.download_entry(entry.clone(), name, req_fn, path, true);
                     }
                 }
                 DownloadStatus::Downloading => {
@@ -349,6 +350,12 @@ impl ClickpackDb {
                     ui.colored_label(egui::Color32::RED, format!("Error: {e}"));
                 }
             }
+
+            ui.label(format_size(entry.size, DECIMAL))
+                .on_hover_text(format!(
+                    "Uncompressed size: {}",
+                    format_size(entry.uncompressed_size, DECIMAL),
+                ));
         });
     }
 }

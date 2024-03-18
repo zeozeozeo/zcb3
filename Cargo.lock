@@ -1312,6 +1312,8 @@ dependencies = [
  "egui",
  "egui_extras",
  "fuzzy-matcher",
+ "human-size",
+ "humansize",
  "indexmap",
  "log",
  "open",
@@ -2007,6 +2009,21 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
+name = "human-size"
+version = "0.4.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9994b79e8c1a39b3166c63ae7823bb2b00831e2a96a31399c50fe69df408eaeb"
+
+[[package]]
+name = "humansize"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6cb51c9a029ddc91b07a787f1d86b53ccfa49b0e86688c946ebe8d3555685dd7"
+dependencies = [
+ "libm",
+]
+
+[[package]]
 name = "humantime"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2252,6 +2269,12 @@ dependencies = [
  "cfg-if",
  "windows-targets 0.52.4",
 ]
+
+[[package]]
+name = "libm"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ec2a862134d2a7d32d7983ddcdd1c4923530833c9f2ea1a44fc5fa473989058"
 
 [[package]]
 name = "libredox"
