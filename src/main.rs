@@ -55,7 +55,7 @@ struct Args {
         default_value_t = true
     )]
     pitch_enabled: bool,
-    
+
     #[arg(long, help = "Minimum pitch value", default_value_t = 0.98)]
     pitch_from: f32,
     #[arg(long, help = "Maximum pitch value", default_value_t = 1.02)]
@@ -160,6 +160,7 @@ fn main() {
         }
 
         gui::run_gui().unwrap();
+        egui_clickpack_db::cleanup();
     }
 }
 

@@ -9,6 +9,7 @@ use eframe::{
     emath,
     epaint::Color32,
 };
+use egui_clickpack_db::ClickpackDb;
 use egui_modal::{Icon, Modal};
 use egui_plot::PlotPoint;
 use image::io::Reader as ImageReader;
@@ -170,6 +171,8 @@ struct App {
     expr_variable_variation_negative: bool,
     override_fps_enabled: bool,
     override_fps: f32,
+    clickpack_db: ClickpackDb,
+    show_clickpack_db: bool,
 }
 
 impl Default for App {
@@ -195,6 +198,8 @@ impl Default for App {
             expr_variable_variation_negative: true,
             override_fps_enabled: false,
             override_fps: 0.0,
+            clickpack_db: ClickpackDb::default(),
+            show_clickpack_db: false,
         }
     }
 }
@@ -360,6 +365,30 @@ impl eframe::App for App {
                 };
             });
         });
+
+        if self.show_clickpack_db {
+            ctx.show_viewport_immediate(
+                egui::ViewportId::from_hash_of("immediate_clickpack_db_viewport"),
+                egui::ViewportBuilder::default()
+                    .with_title("ClickpackDB")
+                    .with_inner_size([900.0, 550.0]),
+                |ctx, class| {
+                    assert!(
+                        class == egui::ViewportClass::Immediate,
+                        "This egui backend doesn't support multiple viewports",
+                    );
+
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        self.show_clickpack_db(ctx, ui);
+                    });
+
+                    if ctx.input(|i| i.viewport().close_requested()) {
+                        // tell parent viewport that we should not show next frame:
+                        self.show_clickpack_db = false;
+                    }
+                },
+            )
+        }
     }
 }
 
@@ -371,6 +400,18 @@ fn ureq_agent() -> ureq::Agent {
         .timeout_write(Duration::from_secs(15))
         .user_agent(USER_AGENT)
         .build()
+}
+
+fn ureq_get(url: &str) -> Result<Vec<u8>, String> {
+    let mut buf = Vec::new();
+    ureq_agent()
+        .get(url)
+        .call()
+        .map_err(|e| e.to_string())?
+        .into_reader()
+        .read_to_end(&mut buf)
+        .map_err(|_| "failed to read body".to_string())?;
+    Ok(buf)
 }
 
 fn get_latest_tag() -> Result<(usize, String)> {
@@ -554,8 +595,8 @@ impl App {
             let ticks = delay / 0.1;
             // repeaters can have 4 ticks max, so we need to duplicate
             // some repeaters if the action delay is more than 0.4s
-            let repeaters = ((ticks / 4.).round() as usize).max(1);
-            let last_ticks = ((ticks % 4.).round() as usize).clamp(0, 3) as u8 + 1;
+            let repeaters = ((ticks / 4.0).round() as usize).max(1);
+            let last_ticks = ((ticks % 4.0).round() as usize).clamp(0, 3) as u8 + 1;
 
             for i in 0..repeaters {
                 let block = BlockState::Repeater {
@@ -974,6 +1015,13 @@ impl App {
         }
     }
 
+    fn select_clickpack(&mut self, path: &Path) {
+        log::info!("selected clickpack path: {path:?}");
+        self.clickpack_has_noise = bot::dir_has_noise(&path);
+        self.clickpack_path = Some(path.to_path_buf());
+        self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
+    }
+
     fn show_select_clickpack_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.heading("Select clickpack");
 
@@ -1159,12 +1207,10 @@ impl App {
         ui.separator();
 
         ui.horizontal(|ui| {
+            ui.style_mut().spacing.item_spacing.x = 5.0;
             if ui.button("Select clickpack").clicked() {
                 if let Some(dir) = FileDialog::new().pick_folder() {
-                    log::info!("selected clickpack folder: {dir:?}");
-                    self.clickpack_has_noise = bot::dir_has_noise(&dir);
-                    self.clickpack_path = Some(dir);
-                    self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
+                    self.select_clickpack(&dir);
                     if !is_convert_tab_open {
                         self.stage = if self.replay.has_actions() {
                             Stage::Render
@@ -1181,20 +1227,27 @@ impl App {
                         .open();
                 }
             }
-            if let Some(clickpack_path) = &self.clickpack_path {
-                let filename = clickpack_path.file_name().unwrap();
-
-                // clickpack_num_sounds only gets set after rendering where the
-                // clickpack gets loaded
-                if let Some(num_sounds) = self.clickpack_num_sounds {
-                    ui.label(format!(
-                        "Selected clickpack: {filename:?}, {num_sounds} sounds"
-                    ));
-                } else {
-                    ui.label(format!("Selected clickpack: {filename:?}"));
-                }
+            if ui
+                .button("Download clickpacks…")
+                .on_hover_text("Open ClickpackDB")
+                .clicked()
+            {
+                self.show_clickpack_db = true;
             }
         });
+        if let Some(clickpack_path) = &self.clickpack_path {
+            let filename = clickpack_path.file_name().unwrap();
+
+            // clickpack_num_sounds only gets set after rendering where the
+            // clickpack gets loaded
+            if let Some(num_sounds) = self.clickpack_num_sounds {
+                ui.label(format!(
+                    "Selected clickpack: {filename:?}, {num_sounds} sounds"
+                ));
+            } else {
+                ui.label(format!("Selected clickpack: {filename:?}"));
+            }
+        }
 
         if let Some(clickpack_path) = &self.clickpack_path {
             ui.collapsing("Overview", |ui| {
@@ -1207,7 +1260,7 @@ impl App {
                     ui.label(RichText::new(format!(" {} ", path_str.replace('\\', "/"))).code());
                 });
                 ui.collapsing("Structure", |ui| {
-                    if has_clicks {                        
+                    if has_clicks {
                         egui::Grid::new("clickpack_structure_grid")
                             .num_columns(2)
                             .spacing([40.0, 4.0])
@@ -1420,7 +1473,7 @@ impl App {
 
         // display error message if any
         if !self.expr_error.is_empty() {
-            ui.add_space(4.);
+            ui.add_space(4.0);
             ui.label(
                 egui::RichText::new(format!("ERROR: {}", self.expr_error))
                     .strong()
@@ -1526,7 +1579,7 @@ impl App {
         };
 
         let line = Line::new(plot_points).name(self.conf.expr_variable.to_string());
-        ui.add_space(4.);
+        ui.add_space(4.0);
 
         ui.add_enabled_ui(self.expr_error.is_empty() && num_actions > 0, |ui| {
             let plot = Plot::new("volume_multiplier_plot")
@@ -1664,5 +1717,16 @@ impl App {
         });
 
         dialog.show_dialog();
+    }
+
+    fn show_clickpack_db(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
+        self.clickpack_db
+            .show(ui, &ureq_get, &|| FileDialog::new().pick_folder());
+
+        if let Some(select_path) = std::mem::replace(&mut self.clickpack_db.select_clickpack, None)
+        {
+            self.select_clickpack(&select_path);
+            self.show_clickpack_db = false; // close this viewport
+        }
     }
 }

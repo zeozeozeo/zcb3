@@ -541,6 +541,9 @@ pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
 }
 
 pub fn dir_has_noise(dir: &Path) -> bool {
+    if find_noise_file(dir).is_some() {
+        return true;
+    }
     for dirname in CLICKPACK_DIRNAMES {
         let mut path = dir.to_path_buf();
         path.push(dirname);
