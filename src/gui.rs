@@ -173,6 +173,7 @@ struct App {
     override_fps: f32,
     clickpack_db: ClickpackDb,
     show_clickpack_db: bool,
+    clickpack_db_updated_ago: String,
 }
 
 impl Default for App {
@@ -200,6 +201,7 @@ impl Default for App {
             override_fps: 0.0,
             clickpack_db: ClickpackDb::default(),
             show_clickpack_db: false,
+            clickpack_db_updated_ago: String::new(),
         }
     }
 }
@@ -367,11 +369,31 @@ impl eframe::App for App {
         });
 
         if self.show_clickpack_db {
+            if self.clickpack_db_updated_ago.is_empty() {
+                let updated_at = self.clickpack_db.db.read().unwrap().updated_at_unix;
+                if updated_at != 0 {
+                    use chrono::{TimeZone, Utc};
+                    use timeago::Formatter;
+                    let formatter = Formatter::new();
+                    let datetime = Utc.timestamp_opt(updated_at, 0).unwrap();
+                    let now = Utc::now();
+                    self.clickpack_db_updated_ago = format!(
+                        "{}, {} clickpacks",
+                        formatter.convert_chrono(datetime, now),
+                        self.clickpack_db.db.read().unwrap().entries.len()
+                    );
+                }
+            }
+            let builder = egui::ViewportBuilder::default()
+                .with_title(if self.clickpack_db_updated_ago.is_empty() {
+                    "ClickpackDB".to_owned()
+                } else {
+                    format!("ClickpackDB - updated {}", self.clickpack_db_updated_ago)
+                })
+                .with_inner_size([900.0, 550.0]);
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("immediate_clickpack_db_viewport"),
-                egui::ViewportBuilder::default()
-                    .with_title("ClickpackDB")
-                    .with_inner_size([900.0, 550.0]),
+                builder,
                 |ctx, class| {
                     assert!(
                         class == egui::ViewportClass::Immediate,
@@ -387,7 +409,7 @@ impl eframe::App for App {
                         self.show_clickpack_db = false;
                     }
                 },
-            )
+            );
         }
     }
 }

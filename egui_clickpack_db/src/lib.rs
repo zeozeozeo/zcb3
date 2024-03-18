@@ -24,8 +24,15 @@ enum DownloadStatus {
     Error(String),
 }
 
+#[derive(serde::Deserialize, Default)]
+pub struct Database {
+    pub updated_at_unix: i64,
+    #[serde(rename = "clickpacks")]
+    pub entries: IndexMap<String, Entry>,
+}
+
 #[derive(serde::Deserialize, Clone)]
-struct Entry {
+pub struct Entry {
     // size: usize,
     // uncompressed_size: usize,
     has_noise: bool,
@@ -48,7 +55,7 @@ enum Status {
 #[derive(Default)]
 pub struct ClickpackDb {
     status: Arc<RwLock<Status>>,
-    entries: Arc<RwLock<IndexMap<String, Entry>>>,
+    pub db: Arc<RwLock<Database>>,
     filtered_entries: IndexMap<String, Entry>,
     search_query: String,
     pending_update: Arc<RwLock<IndexMap<String, Entry>>>,
@@ -71,13 +78,13 @@ pub fn cleanup() {
 impl ClickpackDb {
     fn load_database(
         status: Arc<RwLock<Status>>,
-        entries: Arc<RwLock<IndexMap<String, Entry>>>,
+        db: Arc<RwLock<Database>>,
         req_fn: &'static RequestFn,
     ) {
         log::info!("loading database from {DATABASE_URL}");
         std::thread::spawn(move || match req_fn(DATABASE_URL) {
             Ok(body) => {
-                *entries.write().unwrap() = match serde_json::from_slice(&body) {
+                *db.write().unwrap() = match serde_json::from_slice(&body) {
                     Ok(entries) => entries,
                     Err(e) => {
                         log::error!("failed to parse database: {e}");
@@ -85,7 +92,7 @@ impl ClickpackDb {
                         return;
                     }
                 };
-                log::info!("loaded {} entries", entries.read().unwrap().len());
+                log::info!("loaded {} entries", db.read().unwrap().entries.len());
                 *status.write().unwrap() = Status::Loaded { did_filter: false };
             }
             Err(e) => {
@@ -96,7 +103,7 @@ impl ClickpackDb {
     }
 
     fn update_filtered_entries(&mut self) {
-        self.filtered_entries = self.entries.read().unwrap().clone();
+        self.filtered_entries = self.db.read().unwrap().entries.clone();
         if !self.search_query.is_empty() {
             let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
 
@@ -110,7 +117,11 @@ impl ClickpackDb {
         let mut is_empty = true;
         for (k, v) in self.pending_update.read().unwrap().iter() {
             is_empty = false;
-            self.entries.write().unwrap().insert(k.clone(), v.clone());
+            self.db
+                .write()
+                .unwrap()
+                .entries
+                .insert(k.clone(), v.clone());
             if self.filtered_entries.contains_key(k) {
                 self.filtered_entries.insert(k.clone(), v.clone());
             }
@@ -130,7 +141,7 @@ impl ClickpackDb {
         match status {
             Status::NotLoaded => {
                 (*self.status.write().unwrap(), status) = (Status::Loading, Status::Loading);
-                Self::load_database(self.status.clone(), self.entries.clone(), req_fn);
+                Self::load_database(self.status.clone(), self.db.clone(), req_fn);
             }
             Status::Loading => {
                 ui.horizontal(|ui| {
@@ -207,7 +218,7 @@ impl ClickpackDb {
                 header.col(|ui| {
                     // ui.heading("Name");
                     ui.add_space(1.0);
-                    let nr_clickpacks = self.entries.read().unwrap().len();
+                    let nr_clickpacks = self.db.read().unwrap().entries.len();
                     let textedit = egui::TextEdit::singleline(&mut self.search_query)
                         .hint_text(format!("🔎 Search in {nr_clickpacks} clickpacks"));
                     if ui.add(textedit).changed() {
