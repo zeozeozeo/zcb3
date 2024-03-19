@@ -14,7 +14,7 @@ const DATABASE_URL: &str = "https://raw.githubusercontent.com/zeozeozeo/clickpac
 type RequestFn = dyn Fn(&str) -> Result<Vec<u8>, String> + Sync;
 type PickFolderFn = dyn Fn() -> Option<PathBuf> + Sync;
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 enum DownloadStatus {
     #[default]
     NotDownloaded,
@@ -366,9 +366,10 @@ impl ClickpackDb {
         row_index: usize,
         pick_folder: &'static PickFolderFn,
     ) {
-        let set_status = |entries: &mut IndexMap<String, Entry>, status: DownloadStatus| {
-            entries.get_index_mut(row_index).unwrap().1.dwn_status = status;
-        };
+        let set_status =
+            |entries: &mut IndexMap<String, Entry>, name: &str, status: DownloadStatus| {
+                entries.get_mut(name).unwrap().dwn_status = status;
+            };
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(14.0);
@@ -383,6 +384,7 @@ impl ClickpackDb {
                         if let Some(path) = pick_folder() {
                             set_status(
                                 &mut self.db.write().unwrap().entries,
+                                &name,
                                 DownloadStatus::Downloading,
                             );
                             self.update_filtered_entries();
@@ -396,6 +398,7 @@ impl ClickpackDb {
                     {
                         set_status(
                             &mut self.db.write().unwrap().entries,
+                            &name,
                             DownloadStatus::Downloading,
                         );
                         self.update_filtered_entries();
@@ -435,13 +438,19 @@ impl ClickpackDb {
                         if do_select {
                             set_status(
                                 &mut self.db.write().unwrap().entries,
+                                &name,
                                 DownloadStatus::Downloaded {
                                     path: path.clone(),
                                     do_select: false,
                                 },
                             );
                             self.update_filtered_entries();
+                            log::info!(
+                                "dwn status: {:?}",
+                                self.filtered_entries[row_index].dwn_status
+                            );
                         }
+                        log::info!("selecting clickpack {path:?}");
                         self.select_clickpack = Some(path.clone());
                     }
                 }
