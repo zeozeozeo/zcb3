@@ -390,7 +390,8 @@ impl eframe::App for App {
                 } else {
                     &self.clickpack_db_title
                 })
-                .with_inner_size([900.0, 550.0]);
+                .with_inner_size([410.0, 510.0])
+                .with_resizable(false);
             ctx.show_viewport_immediate(
                 egui::ViewportId::from_hash_of("immediate_clickpack_db_viewport"),
                 builder,
@@ -778,10 +779,7 @@ impl App {
             ui.add(
                 egui::Image::new(egui::include_image!("assets/boosty_logo.png")).max_width(32.0),
             );
-            ui.hyperlink_to(
-                "Donate on Boosty",
-                "https://boosty.to/zeozeozeo/donate",
-            );
+            ui.hyperlink_to("Donate on Boosty", "https://boosty.to/zeozeozeo/donate");
         });
         ui.add_space(4.0);
         ui.horizontal(|ui| {
@@ -1250,8 +1248,8 @@ impl App {
                 }
             }
             if ui
-                .button("Download clickpacks…")
-                .on_hover_text("Open ClickpackDB")
+                .button("Open ClickpackDB…")
+                .on_hover_text("Easily download clickpacks from within ZCB")
                 .clicked()
             {
                 self.show_clickpack_db = true;
@@ -1748,7 +1746,7 @@ impl App {
         if let Some(select_path) = std::mem::replace(&mut self.clickpack_db.select_clickpack, None)
         {
             self.select_clickpack(&select_path);
-            self.show_clickpack_db = false; // close this viewport
+            // self.show_clickpack_db = false; // close this viewport
         }
     }
 }

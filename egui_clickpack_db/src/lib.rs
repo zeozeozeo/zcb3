@@ -1,3 +1,4 @@
+use egui::Color32;
 use egui_extras::{Column, TableBuilder};
 use fuzzy_matcher::FuzzyMatcher;
 use humansize::{format_size, DECIMAL};
@@ -54,6 +55,19 @@ enum Status {
 }
 
 #[derive(Default)]
+struct Tags {
+    noise: bool,
+    downloaded: bool,
+}
+
+impl Tags {
+    #[inline]
+    const fn has_any(&self) -> bool {
+        self.noise || self.downloaded
+    }
+}
+
+#[derive(Default)]
 pub struct ClickpackDb {
     status: Arc<RwLock<Status>>,
     pub db: Arc<RwLock<Database>>,
@@ -62,6 +76,7 @@ pub struct ClickpackDb {
     pending_update: Arc<RwLock<IndexMap<String, Entry>>>,
     /// If [`Some`], this clickpack should be selected and the viewport should be closed.
     pub select_clickpack: Option<PathBuf>,
+    tags: Tags,
 }
 
 pub fn cleanup() {
@@ -74,6 +89,33 @@ pub fn cleanup() {
                 .map_err(|e| log::error!("remove_dir_all failed: {e}"));
         }
     };
+}
+
+fn tag_text(ui: &mut egui::Ui, color: Color32, emote: &str, text: &str) -> egui::WidgetText {
+    use egui::text::{LayoutJob, TextFormat};
+    let mut job = LayoutJob::default();
+    let default_color = if ui.visuals().dark_mode {
+        Color32::LIGHT_GRAY
+    } else {
+        Color32::DARK_GRAY
+    };
+    job.append(
+        emote,
+        0.0,
+        TextFormat {
+            color,
+            ..Default::default()
+        },
+    );
+    job.append(
+        text,
+        0.0,
+        TextFormat {
+            color: default_color,
+            ..Default::default()
+        },
+    );
+    job.into()
 }
 
 impl ClickpackDb {
@@ -105,6 +147,23 @@ impl ClickpackDb {
 
     fn update_filtered_entries(&mut self) {
         self.filtered_entries = self.db.read().unwrap().entries.clone();
+
+        // handle tags
+        if self.tags.has_any() {
+            self.filtered_entries.retain(|_, v| {
+                if self.tags.noise && !v.has_noise {
+                    return false;
+                }
+                if self.tags.downloaded
+                    && !matches!(v.dwn_status, DownloadStatus::Downloaded { .. })
+                {
+                    return false;
+                }
+                true
+            });
+        }
+
+        // fuzzy sort with search query
         if !self.search_query.is_empty() {
             let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
 
@@ -200,6 +259,16 @@ impl ClickpackDb {
         });
     }
 
+    fn refresh_button(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .button("🔄 Refresh")
+            .on_hover_text("Fetch the database again")
+            .clicked()
+        {
+            *self.status.write().unwrap() = Status::NotLoaded;
+        }
+    }
+
     fn show_table(
         &mut self,
         ui: &mut egui::Ui,
@@ -213,26 +282,37 @@ impl ClickpackDb {
 
         TableBuilder::new(ui)
             .column(Column::exact(200.0))
-            .column(Column::remainder())
+            .column(Column::auto())
             .striped(true)
             .header(30.0, |mut header| {
                 header.col(|ui| {
                     // ui.heading("Name");
-                    ui.add_space(1.0);
                     let nr_clickpacks = self.db.read().unwrap().entries.len();
-                    let textedit = egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text(format!("🔎 Search in {nr_clickpacks} clickpacks"));
-                    if ui.add(textedit).changed() {
-                        self.update_filtered_entries();
-                    }
+                    ui.horizontal_centered(|ui| {
+                        let textedit = egui::TextEdit::singleline(&mut self.search_query)
+                            .hint_text(format!("🔎 Search in {nr_clickpacks} clickpacks"));
+                        if ui.add(textedit).changed() {
+                            self.update_filtered_entries();
+                        }
+                    });
                 });
                 header.col(|ui| {
-                    ui.with_layout(
-                        egui::Layout::centered_and_justified(egui::Direction::TopDown),
-                        |ui| {
-                            ui.heading("Manage");
-                        },
-                    );
+                    ui.horizontal_centered(|ui| {
+                        ui.style_mut().spacing.item_spacing.x = 5.0;
+                        self.refresh_button(ui);
+                        egui::ComboBox::new("manage_tags_combobox", "")
+                            .selected_text("Tags…")
+                            .show_ui(ui, |ui| {
+                                let job = tag_text(ui, Color32::KHAKI, "🎧", " Has noise");
+                                if ui.checkbox(&mut self.tags.noise, job).changed() {
+                                    self.update_filtered_entries();
+                                }
+                                let job = tag_text(ui, Color32::LIGHT_GREEN, "✅", " Downloaded");
+                                if ui.checkbox(&mut self.tags.downloaded, job).changed() {
+                                    self.update_filtered_entries();
+                                }
+                            })
+                    });
                 });
             })
             .body(|body| {
@@ -247,12 +327,12 @@ impl ClickpackDb {
                             ui.add(egui::Label::new(name.replace('_', " ")).wrap(true));
                             ui.style_mut().spacing.item_spacing.x = 5.0;
                             if entry.has_noise {
-                                ui.colored_label(egui::Color32::KHAKI, "🎧")
+                                ui.colored_label(Color32::KHAKI, "🎧")
                                     .on_hover_text("This clickpack has a noise file")
                                     .on_hover_cursor(egui::CursorIcon::Default);
                             }
                             if matches!(entry.dwn_status, DownloadStatus::Downloaded { .. }) {
-                                ui.colored_label(egui::Color32::LIGHT_GREEN, "✅")
+                                ui.colored_label(Color32::LIGHT_GREEN, "✅")
                                     .on_hover_text("Downloaded")
                                     .on_hover_cursor(egui::CursorIcon::Default);
                             }
@@ -261,6 +341,20 @@ impl ClickpackDb {
                     row.col(|ui| self.manage_row(ui, entry, name, req_fn, row_index, pick_folder));
                 });
             });
+
+        if self.filtered_entries.is_empty() {
+            ui.horizontal(|ui| {
+                ui.label("Nothing here yet…");
+                ui.style_mut().spacing.item_spacing.x = 5.0;
+                if ui.button("Clear tags").clicked() {
+                    self.tags = Tags::default();
+                    self.update_filtered_entries();
+                }
+                self.refresh_button(ui);
+            });
+        } else if self.filtered_entries.len() <= 15 {
+            ui.label(format!("Showing {} entries", self.filtered_entries.len()));
+        }
     }
 
     fn manage_row(
@@ -272,16 +366,12 @@ impl ClickpackDb {
         row_index: usize,
         pick_folder: &'static PickFolderFn,
     ) {
-        let set_status = |filtered_entries: &mut IndexMap<String, Entry>,
-                          status: DownloadStatus| {
-            filtered_entries
-                .get_index_mut(row_index)
-                .unwrap()
-                .1
-                .dwn_status = status;
+        let set_status = |entries: &mut IndexMap<String, Entry>, status: DownloadStatus| {
+            entries.get_index_mut(row_index).unwrap().1.dwn_status = status;
         };
 
-        ui.horizontal_centered(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(14.0);
             match entry.dwn_status {
                 DownloadStatus::NotDownloaded => {
                     ui.style_mut().spacing.item_spacing.x = 5.0;
@@ -291,7 +381,11 @@ impl ClickpackDb {
                         .clicked()
                     {
                         if let Some(path) = pick_folder() {
-                            set_status(&mut self.filtered_entries, DownloadStatus::Downloading);
+                            set_status(
+                                &mut self.db.write().unwrap().entries,
+                                DownloadStatus::Downloading,
+                            );
+                            self.update_filtered_entries();
                             self.download_entry(entry.clone(), name.clone(), req_fn, path, false);
                         }
                     }
@@ -300,7 +394,11 @@ impl ClickpackDb {
                         .on_hover_text("Download and use this clickpack")
                         .clicked()
                     {
-                        set_status(&mut self.filtered_entries, DownloadStatus::Downloading);
+                        set_status(
+                            &mut self.db.write().unwrap().entries,
+                            DownloadStatus::Downloading,
+                        );
+                        self.update_filtered_entries();
 
                         // create temp dir
                         let mut path = std::env::temp_dir();
@@ -336,12 +434,13 @@ impl ClickpackDb {
                     if ui.button("Select").clicked() || do_select {
                         if do_select {
                             set_status(
-                                &mut self.filtered_entries,
+                                &mut self.db.write().unwrap().entries,
                                 DownloadStatus::Downloaded {
                                     path: path.clone(),
                                     do_select: false,
                                 },
                             );
+                            self.update_filtered_entries();
                         }
                         self.select_clickpack = Some(path.clone());
                     }
