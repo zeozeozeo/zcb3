@@ -6,6 +6,8 @@ Free and easy to use Geometry Dash clickbot.
 
 ![Volume expressions](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/1.png?raw=true)
 
+![ClickpackDB](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/2.png?raw=true)
+
 # [Join the discord server (click me)](https://discord.gg/b4kBQyXYZT)
 
 # Supported replay formats
@@ -34,6 +36,20 @@ Free and easy to use Geometry Dash clickbot.
 * RBot (.rbot, old and new formats)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
+
+# ClickpackDB
+
+A collection of 300+ clickpacks sourced from the [ZCB Discord](https://discord.com/invite/b4kBQyXYZT), accessible from within ZCB.
+
+![ClickpackDB window](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/3.png?raw=true)
+
+* To access ClickpackDB, navigate to:
+  
+    <kbd>Clickpack</kbd> > <kbd>Open ClickpackDB…</kbd>
+* Download clickpacks into a specified folder by clicking <kbd>Download</kbd> next to a clickpack
+* Download and select clickpacks by clicking <kbd>Select</kbd>
+* Use the searchbar and the <kbd>Tags…</kbd> combobox to filter clickpacks
+* Hover on icons next to clickpack names to see their meaning
 
 # Clickpack format
 
