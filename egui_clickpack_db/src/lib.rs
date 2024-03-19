@@ -338,7 +338,7 @@ impl ClickpackDb {
                             }
                         });
                     });
-                    row.col(|ui| self.manage_row(ui, entry, name, req_fn, row_index, pick_folder));
+                    row.col(|ui| self.manage_row(ui, entry, name, req_fn, pick_folder));
                 });
             });
 
@@ -363,7 +363,6 @@ impl ClickpackDb {
         entry: Entry,
         name: String,
         req_fn: &'static RequestFn,
-        row_index: usize,
         pick_folder: &'static PickFolderFn,
     ) {
         let set_status =
