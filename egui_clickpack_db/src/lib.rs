@@ -11,7 +11,12 @@ use std::{
 
 const DATABASE_URL: &str = "https://raw.githubusercontent.com/zeozeozeo/clickpack-db/main/db.json";
 
+#[cfg(not(feature = "live"))]
+const TEMP_DIRNAME: &str = "zcb-clickpackdb";
+
 type RequestFn = dyn Fn(&str) -> Result<Vec<u8>, String> + Sync;
+
+#[cfg(not(feature = "live"))]
 type PickFolderFn = dyn Fn() -> Option<PathBuf> + Sync;
 
 #[derive(Clone, Default, Debug)]
@@ -79,11 +84,12 @@ pub struct ClickpackDb {
     tags: Tags,
 }
 
+#[cfg(not(feature = "live"))]
 pub fn cleanup() {
     log::info!("cleaning up temp directories...");
     let mut temp_dir = std::env::temp_dir();
     if temp_dir.try_exists().unwrap_or(false) {
-        temp_dir.push("zcb-clickpackdb");
+        temp_dir.push(TEMP_DIRNAME);
         if temp_dir.try_exists().unwrap_or(false) {
             let _ = std::fs::remove_dir_all(temp_dir)
                 .map_err(|e| log::error!("remove_dir_all failed: {e}"));
@@ -195,7 +201,7 @@ impl ClickpackDb {
         &mut self,
         ui: &mut egui::Ui,
         req_fn: &'static RequestFn,
-        pick_folder: &'static PickFolderFn,
+        #[cfg(not(feature = "live"))] pick_folder: &'static PickFolderFn,
     ) {
         let mut status = self.status.read().unwrap().clone();
         match status {
@@ -223,7 +229,10 @@ impl ClickpackDb {
         ui.add_enabled_ui(
             !matches!(status, Status::NotLoaded | Status::Loading),
             |ui| {
+                #[cfg(not(feature = "live"))]
                 self.show_table(ui, req_fn, pick_folder);
+                #[cfg(feature = "live")]
+                self.show_table(ui, req_fn);
             },
         );
     }
@@ -273,7 +282,7 @@ impl ClickpackDb {
         &mut self,
         ui: &mut egui::Ui,
         req_fn: &'static RequestFn,
-        pick_folder: &'static PickFolderFn,
+        #[cfg(not(feature = "live"))] pick_folder: &'static PickFolderFn,
     ) {
         let text_height = egui::TextStyle::Body
             .resolve(ui.style())
@@ -338,7 +347,12 @@ impl ClickpackDb {
                             }
                         });
                     });
-                    row.col(|ui| self.manage_row(ui, entry, name, req_fn, pick_folder));
+                    row.col(|ui| {
+                        #[cfg(not(feature = "live"))]
+                        self.manage_row(ui, entry, name, req_fn, pick_folder);
+                        #[cfg(feature = "live")]
+                        self.manage_row(ui, entry, name, req_fn);
+                    });
                 });
             });
 
@@ -363,7 +377,7 @@ impl ClickpackDb {
         entry: Entry,
         name: String,
         req_fn: &'static RequestFn,
-        pick_folder: &'static PickFolderFn,
+        #[cfg(not(feature = "live"))] pick_folder: &'static PickFolderFn,
     ) {
         macro_rules! set_status {
             ($status:expr) => {
@@ -374,6 +388,7 @@ impl ClickpackDb {
                     .get_mut(&name)
                     .unwrap()
                     .dwn_status = $status;
+                self.update_filtered_entries();
             };
         }
 
@@ -381,31 +396,56 @@ impl ClickpackDb {
             ui.add_space(14.0);
             match entry.dwn_status {
                 DownloadStatus::NotDownloaded => {
-                    ui.style_mut().spacing.item_spacing.x = 5.0;
-                    if ui
-                        .button("Download")
-                        .on_hover_text("Download this clickpack into a new folder")
-                        .clicked()
+                    #[cfg(not(feature = "live"))]
                     {
-                        if let Some(path) = pick_folder() {
-                            set_status!(DownloadStatus::Downloading);
-                            self.update_filtered_entries();
-                            self.download_entry(entry.clone(), name.clone(), req_fn, path, false);
+                        ui.style_mut().spacing.item_spacing.x = 5.0;
+                        if ui
+                            .button("Download")
+                            .on_hover_text("Download this clickpack into a new folder")
+                            .clicked()
+                        {
+                            if let Some(path) = pick_folder() {
+                                set_status!(DownloadStatus::Downloading);
+                                self.download_entry(
+                                    entry.clone(),
+                                    name.clone(),
+                                    req_fn,
+                                    path,
+                                    false,
+                                );
+                            }
                         }
                     }
                     if ui
-                        .button("Select")
-                        .on_hover_text("Download and use this clickpack")
+                        .button(if cfg!(feature = "live") {
+                            "Download"
+                        } else {
+                            "Select"
+                        })
+                        .on_hover_text(if cfg!(feature = "live") {
+                            "Download this clickpack into .zcb/clickpacks"
+                        } else {
+                            "Download and use this clickpack"
+                        })
                         .clicked()
                     {
                         set_status!(DownloadStatus::Downloading);
-                        self.update_filtered_entries();
 
-                        // create temp dir
-                        let mut path = std::env::temp_dir();
+                        // create dir
                         let mut new_name = name.clone();
-                        path.push("zcb-clickpackdb");
-                        path.push(&new_name);
+                        #[cfg(not(feature = "live"))]
+                        let mut path = {
+                            let mut path = std::env::temp_dir();
+                            path.push(TEMP_DIRNAME);
+                            path.push(&new_name);
+                            path
+                        };
+                        #[cfg(feature = "live")]
+                        let mut path = {
+                            let mut path = PathBuf::from(".zcb/clickpacks");
+                            path.push(&new_name);
+                            path
+                        };
                         while path.try_exists().unwrap_or(false) {
                             path.pop();
                             new_name += "_";
@@ -415,6 +455,7 @@ impl ClickpackDb {
                         let _ = std::fs::create_dir_all(&path)
                             .map_err(|e| log::error!("create_dir_all failed: {e}"));
 
+                        // download clickpack zip & extract it
                         self.download_entry(entry.clone(), name, req_fn, path, true);
                     }
                 }
@@ -438,7 +479,6 @@ impl ClickpackDb {
                                 path: path.clone(),
                                 do_select: false,
                             });
-                            self.update_filtered_entries();
                         }
                         log::info!("selecting clickpack {path:?}");
                         self.select_clickpack = Some(path.clone());
