@@ -365,10 +365,17 @@ impl ClickpackDb {
         req_fn: &'static RequestFn,
         pick_folder: &'static PickFolderFn,
     ) {
-        let set_status =
-            |entries: &mut IndexMap<String, Entry>, name: &str, status: DownloadStatus| {
-                entries.get_mut(name).unwrap().dwn_status = status;
+        macro_rules! set_status {
+            ($status:expr) => {
+                self.db
+                    .write()
+                    .unwrap()
+                    .entries
+                    .get_mut(&name)
+                    .unwrap()
+                    .dwn_status = $status;
             };
+        }
 
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(14.0);
@@ -381,11 +388,7 @@ impl ClickpackDb {
                         .clicked()
                     {
                         if let Some(path) = pick_folder() {
-                            set_status(
-                                &mut self.db.write().unwrap().entries,
-                                &name,
-                                DownloadStatus::Downloading,
-                            );
+                            set_status!(DownloadStatus::Downloading);
                             self.update_filtered_entries();
                             self.download_entry(entry.clone(), name.clone(), req_fn, path, false);
                         }
@@ -395,11 +398,7 @@ impl ClickpackDb {
                         .on_hover_text("Download and use this clickpack")
                         .clicked()
                     {
-                        set_status(
-                            &mut self.db.write().unwrap().entries,
-                            &name,
-                            DownloadStatus::Downloading,
-                        );
+                        set_status!(DownloadStatus::Downloading);
                         self.update_filtered_entries();
 
                         // create temp dir
@@ -435,14 +434,10 @@ impl ClickpackDb {
                     }
                     if ui.button("Select").clicked() || do_select {
                         if do_select {
-                            set_status(
-                                &mut self.db.write().unwrap().entries,
-                                &name,
-                                DownloadStatus::Downloaded {
-                                    path: path.clone(),
-                                    do_select: false,
-                                },
-                            );
+                            set_status!(DownloadStatus::Downloaded {
+                                path: path.clone(),
+                                do_select: false,
+                            });
                             self.update_filtered_entries();
                         }
                         log::info!("selecting clickpack {path:?}");
