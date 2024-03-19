@@ -445,10 +445,6 @@ impl ClickpackDb {
                                 },
                             );
                             self.update_filtered_entries();
-                            log::info!(
-                                "dwn status: {:?}",
-                                self.filtered_entries[row_index].dwn_status
-                            );
                         }
                         log::info!("selecting clickpack {path:?}");
                         self.select_clickpack = Some(path.clone());
