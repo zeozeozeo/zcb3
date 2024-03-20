@@ -172,10 +172,23 @@ impl ClickpackDb {
         // fuzzy sort with search query
         if !self.search_query.is_empty() {
             let matcher = fuzzy_matcher::skim::SkimMatcherV2::default();
-
             self.filtered_entries.sort_by_cached_key(|k, _| {
                 std::cmp::Reverse(matcher.fuzzy_match(k, &self.search_query).unwrap_or(0))
             });
+        }
+    }
+
+    #[cfg(feature = "live")]
+    pub fn mark_downloaded(&mut self, name: &str, path: PathBuf, downloaded: bool) {
+        if let Some(entry) = self.db.write().unwrap().entries.get_mut(name) {
+            if downloaded {
+                entry.dwn_status = DownloadStatus::Downloaded {
+                    path,
+                    do_select: false,
+                };
+            } else {
+                entry.dwn_status = DownloadStatus::NotDownloaded;
+            }
         }
     }
 
