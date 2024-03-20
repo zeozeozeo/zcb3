@@ -1308,6 +1308,7 @@ dependencies = [
 [[package]]
 name = "egui_clickpack_db"
 version = "0.1.0"
+source = "git+https://github.com/zeozeozeo/egui_clickpack_db.git#19aea3f293e11c4f18d139c115e38cbae51ce0dc"
 dependencies = [
  "egui",
  "egui_extras",
