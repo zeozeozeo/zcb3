@@ -497,7 +497,7 @@ impl ClickpackDb {
                         log::info!("selecting clickpack {path:?}");
                         self.select_clickpack = Some(path.clone());
                     }
-                    #[cfg(feature = "live")]
+                    // #[cfg(feature = "live")]
                     if ui
                         .button("Delete")
                         .on_hover_text("Delete this clickpack from .zcb/clickpacks")
@@ -506,6 +506,7 @@ impl ClickpackDb {
                         if let Err(e) = std::fs::remove_dir_all(path) {
                             log::error!("failed to delete folder {path:?}: {e}");
                         }
+                        set_status!(DownloadStatus::NotDownloaded);
                     }
                 }
                 DownloadStatus::Error(ref e) => {
