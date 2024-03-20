@@ -486,6 +486,7 @@ impl ClickpackDb {
                             log::error!("failed to open folder {path:?}: {e}");
                         }
                     }
+                    #[cfg(not(feature = "live"))]
                     if ui.button("Select").clicked() || do_select {
                         if do_select {
                             set_status!(DownloadStatus::Downloaded {
@@ -495,6 +496,16 @@ impl ClickpackDb {
                         }
                         log::info!("selecting clickpack {path:?}");
                         self.select_clickpack = Some(path.clone());
+                    }
+                    #[cfg(feature = "live")]
+                    if ui
+                        .button("Delete")
+                        .on_hover_text("Delete this clickpack from .zcb/clickpacks")
+                        .clicked()
+                    {
+                        if let Err(e) = std::fs::remove_dir_all(path) {
+                            log::error!("failed to delete folder {path:?}: {e}");
+                        }
                     }
                 }
                 DownloadStatus::Error(ref e) => {
