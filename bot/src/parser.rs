@@ -221,6 +221,7 @@ enum Button {
 }
 
 impl Button {
+    #[inline]
     const fn from_down(down: bool) -> Self {
         if down {
             Self::Push
@@ -229,6 +230,7 @@ impl Button {
         }
     }
 
+    #[inline]
     const fn from_left_down(down: bool) -> Self {
         if down {
             Self::LeftPush
@@ -237,6 +239,7 @@ impl Button {
         }
     }
 
+    #[inline]
     const fn from_right_down(down: bool) -> Self {
         if down {
             Self::RightPush
@@ -245,6 +248,16 @@ impl Button {
         }
     }
 
+    #[inline]
+    const fn from_button_idx(idx: i32, down: bool) -> Self {
+        match idx {
+            3 => Self::from_right_down(down),
+            2 => Self::from_left_down(down),
+            _ => Self::from_down(down),
+        }
+    }
+
+    #[inline]
     const fn is_down(self) -> bool {
         matches!(self, Self::Push | Self::LeftPush | Self::RightPush)
     }
@@ -1675,15 +1688,9 @@ impl Replay {
             let frame: f32 = split.next().unwrap().parse()?;
             let time = frame / self.fps;
             let down = split.next().unwrap().parse::<u8>()? == 1;
-            let pbutton: u8 = split.next().unwrap().parse()?; // TODO: support button == 3 (2.2 platformer thing)
+            let pbutton: i32 = split.next().unwrap().parse()?;
             let p2 = split.next().unwrap().parse::<u8>()? == 0;
-            let b = if pbutton == 3 {
-                Button::from_right_down(down)
-            } else if pbutton == 2 {
-                Button::from_left_down(down)
-            } else {
-                Button::from_down(down)
-            };
+            let b = Button::from_button_idx(pbutton, down);
 
             if p2 {
                 self.process_action_p2(time, b, frame as _);
@@ -1760,11 +1767,14 @@ impl Replay {
 
     fn parse_re<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         use std::mem::size_of;
+        let file_len = reader.seek(SeekFrom::End(0))?;
+        reader.seek(SeekFrom::Start(0))?;
 
         self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
+        let num_frame_actions = reader.read_i32::<LittleEndian>()?;
         let num_actions = reader.read_i32::<LittleEndian>()?;
-        let num_actions2 = reader.read_i32::<LittleEndian>()?;
 
+        #[derive(Default, Clone)]
         #[repr(C)]
         struct FrameData {
             frame: u32,
@@ -1780,56 +1790,69 @@ impl Replay {
             hold: bool,
             player2: bool,
         }
-
-        // read action data
-        let prev_pos = reader.stream_position()?;
-        reader.seek(SeekFrom::Start(
-            num_actions as u64 * size_of::<FrameData>() as u64,
-        ))?;
-        let mut actions: Vec<ActionData> =
-            Vec::with_capacity(num_actions2 as usize * size_of::<ActionData>());
-
-        for _ in 0..num_actions2 {
-            let mut buf = [0; size_of::<ActionData>()];
-            reader.read_exact(&mut buf)?;
-            actions.push(unsafe { std::mem::transmute(buf) });
+        #[repr(C)]
+        struct ActionDataNew {
+            frame: u32,
+            hold: bool,
+            button: i32,
+            player2: bool,
         }
 
         // read frame data
-        reader.seek(SeekFrom::Start(prev_pos))?;
-        for _ in 0..num_actions {
+        let mut frame_datas: Vec<FrameData> = vec![];
+        for _ in 0..num_frame_actions {
             let mut buf = [0; size_of::<FrameData>()];
             reader.read_exact(&mut buf)?;
-            let data: FrameData = unsafe { std::mem::transmute(buf) };
+            frame_datas.push(unsafe { std::mem::transmute(buf) });
+        }
 
-            // find action for this frame
-            let action = actions
-                .iter()
-                .find(|a| a.frame == data.frame)
-                .context(format!("failed to find action for frame {}", data.frame))?;
+        // detect action data type
+        let action_data_size =
+            (file_len - reader.stream_position()?) as usize / num_actions as usize;
+        log::debug!("predicted action data size: {action_data_size}");
+        if action_data_size != size_of::<ActionData>()
+            && action_data_size != size_of::<ActionDataNew>()
+        {
+            anyhow::bail!("unknown action data type (length: {action_data_size})");
+        }
+        let is_new = action_data_size == size_of::<ActionDataNew>();
 
-            let time = data.frame as f32 / self.fps;
-
-            if data.player2 {
-                self.process_action_p2(time, Button::from_down(action.hold), data.frame);
-                self.extended_p2(
-                    action.hold,
-                    data.frame,
-                    data.x,
-                    data.y,
-                    data.y_accel as f32,
-                    data.rot,
-                );
+        // read action data
+        for _ in 0..num_actions {
+            let mut buf = [0; size_of::<ActionDataNew>()];
+            reader.read_exact(&mut buf)?;
+            if is_new {
+                let action: ActionDataNew = unsafe { std::mem::transmute(buf) };
+                let button = Button::from_button_idx(action.button, action.hold);
+                let time = action.frame as f32 / self.fps;
+                let f = frame_datas
+                    .iter()
+                    .find(|e| e.frame == action.frame && e.player2 == action.player2)
+                    .cloned()
+                    .unwrap_or_default();
+                if action.player2 {
+                    self.process_action_p2(time, button, action.frame);
+                    self.extended_p2(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
+                } else {
+                    self.process_action_p1(time, button, 0);
+                    self.extended_p1(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
+                }
             } else {
-                self.process_action_p1(time, Button::from_down(action.hold), data.frame);
-                self.extended_p1(
-                    action.hold,
-                    data.frame,
-                    data.x,
-                    data.y,
-                    data.y_accel as f32,
-                    data.rot,
-                );
+                let action: ActionData = unsafe { std::ptr::read(buf.as_ptr() as *const _) };
+                let button = Button::from_down(action.hold);
+                let time = action.frame as f32 / self.fps;
+                let f = frame_datas
+                    .iter()
+                    .find(|e| e.frame == action.frame && e.player2 == action.player2)
+                    .cloned()
+                    .unwrap_or_default();
+                if action.player2 {
+                    self.process_action_p2(time, button, action.frame);
+                    self.extended_p2(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
+                } else {
+                    self.process_action_p1(time, button, 0);
+                    self.extended_p1(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
+                }
             }
         }
 
