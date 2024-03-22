@@ -446,7 +446,7 @@ fn get_latest_tag() -> Result<(usize, String)> {
     log::debug!("response text: '{body}'");
     let v: Value = serde_json::from_str(&body)?;
     let tags = v.as_array().context("not an array")?;
-    let latest_tag = tags.get(0).context("couldn't latest tags")?;
+    let latest_tag = tags.first().context("couldn't latest tags")?;
     let name = latest_tag.get("name").context("couldn't get tag name")?;
     let tagname = name.as_str().context("tag name is not a string")?;
 
@@ -1037,7 +1037,7 @@ impl App {
 
     fn select_clickpack(&mut self, path: &Path) {
         log::info!("selected clickpack path: {path:?}");
-        self.clickpack_has_noise = bot::dir_has_noise(&path);
+        self.clickpack_has_noise = bot::dir_has_noise(path);
         self.clickpack_path = Some(path.to_path_buf());
         self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
     }
@@ -1743,7 +1743,7 @@ impl App {
         self.clickpack_db
             .show(ui, &ureq_get, &|| FileDialog::new().pick_folder());
 
-        if let Some(select_path) = std::mem::replace(&mut self.clickpack_db.select_clickpack, None)
+        if let Some(select_path) = self.clickpack_db.select_clickpack.take()
         {
             self.select_clickpack(&select_path);
             // self.show_clickpack_db = false; // close this viewport
