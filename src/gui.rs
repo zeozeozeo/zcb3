@@ -996,23 +996,26 @@ impl App {
             ui.label("• Mega Hack Replay JSON (.mhr.json)");
             ui.label("• Mega Hack Replay Binary (.mhr)");
             ui.label("• TASbot Replay (.json)");
-            ui.label("• zBot Frame (.zbf)");
-            ui.label("• OmegaBot 2 & 3 Replay (.replay)");
+            ui.label("• zBot Frame Replay (.zbf)");
+            ui.label("• OmegaBot 2 Replay (.replay)");
+            ui.label("• OmegaBot 3 Replay (.replay)");
             ui.label("• yBot Frame (no extension by default, rename to .ybf)");
             ui.label("• yBot 2 (.ybot)");
             ui.label("• Echo (.echo, new binary format, new json format and old json format)");
             ui.label("• Amethyst Replay (.thyst)");
             ui.label("• osu! replay (.osr)");
-            ui.label("• GDMO Replay & 2.2 GDMO Replay (.macro)");
+            ui.label("• GDMO Replay (.macro)");
+            ui.label("• 2.2 GDMO Replay (.macro, old non-Geode version)");
             ui.label("• ReplayBot Replay (.replay)");
             ui.label("• KD-BOT Replay (.kd)");
             ui.label("• Rush Replay (.rsh)");
-            ui.label("• Plaintext & GDH Plaintext (v2) Replay (.txt)");
-            ui.label("• ReplayEngine Replay (.re)");
+            ui.label("• Plaintext (.txt)");
+            ui.label("• GDH Plaintext (.txt)");
+            ui.label("• ReplayEngine Replay (.re, old and new formats)");
             ui.label("• DDHOR Replay (.ddhor, old frame format)");
             ui.label("• xBot Frame (.xbot)");
             ui.label("• xdBot (.xd, old and new formats)");
-            ui.label("• GDReplayFormat (.gdr, used in Geode GDMegaOverlay)");
+            ui.label("• GDReplayFormat (.gdr, used in Geode GDMegaOverlay and 2.2 MH Replay)");
             ui.label("• qBot (.qb)");
             ui.label("• RBot (.rbot, old and new formats)");
         });
@@ -1743,8 +1746,7 @@ impl App {
         self.clickpack_db
             .show(ui, &ureq_get, &|| FileDialog::new().pick_folder());
 
-        if let Some(select_path) = self.clickpack_db.select_clickpack.take()
-        {
+        if let Some(select_path) = self.clickpack_db.select_clickpack.take() {
             self.select_clickpack(&select_path);
             // self.show_clickpack_db = false; // close this viewport
         }
