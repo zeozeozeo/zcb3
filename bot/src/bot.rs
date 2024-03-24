@@ -67,7 +67,7 @@ impl Index<usize> for PlayerClicks {
 impl PlayerClicks {
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn recognize_dir_and_load_files(&mut self, path: &Path, pitch: Pitch, sample_rate: u32) {
-        let filename = path.file_name().unwrap().to_string_lossy();
+        let filename = path.file_name().unwrap().to_string_lossy().to_lowercase();
         let patterns = [
             ("hard", "click", &mut self.hardclicks),
             ("hard", "release", &mut self.hardreleases),
