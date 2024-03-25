@@ -329,7 +329,7 @@ dependencies = [
  "async-lock 3.3.0",
  "async-task",
  "concurrent-queue",
- "fastrand 2.0.1",
+ "fastrand 2.0.2",
  "futures-lite 2.3.0",
  "slab",
 ]
@@ -689,7 +689,7 @@ dependencies = [
  "async-channel",
  "async-lock 3.3.0",
  "async-task",
- "fastrand 2.0.1",
+ "fastrand 2.0.2",
  "futures-io",
  "futures-lite 2.3.0",
  "piper",
@@ -706,7 +706,7 @@ dependencies = [
  "chrono",
  "dlhn",
  "fasteval2",
- "fastrand 2.0.1",
+ "fastrand 2.0.2",
  "flate2",
  "gdr",
  "hound",
@@ -1600,9 +1600,9 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "2.0.1"
+version = "2.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25cbce373ec4653f1a01a31e8a5e5ec0c622dc27ff9c4e6606eefef5cbbed4a5"
+checksum = "658bd65b1cf4c852a3cc96f18a8ce7b5640f6b703f905c7d74532294c2a63984"
 
 [[package]]
 name = "fdeflate"
@@ -1701,7 +1701,7 @@ version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52527eb5074e35e9339c6b4e8d12600c7128b68fb25dcb9fa9dec18f7c25f3a5"
 dependencies = [
- "fastrand 2.0.1",
+ "fastrand 2.0.2",
  "futures-core",
  "futures-io",
  "parking",
@@ -2772,7 +2772,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "668d31b1c4eba19242f2088b2bf3316b82ca31082a8335764db4e083db7485d4"
 dependencies = [
  "atomic-waker",
- "fastrand 2.0.1",
+ "fastrand 2.0.2",
  "futures-io",
 ]
 
@@ -3658,7 +3658,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85b77fafb263dd9d05cbeac119526425676db3784113aa9295c88498cbf8bff1"
 dependencies = [
  "cfg-if",
- "fastrand 2.0.1",
+ "fastrand 2.0.2",
  "rustix 0.38.32",
  "windows-sys 0.52.0",
 ]
@@ -4902,7 +4902,7 @@ dependencies = [
  "egui_extras",
  "egui_plot",
  "env_logger",
- "fastrand 2.0.1",
+ "fastrand 2.0.2",
  "image 0.25.0",
  "log",
  "rayon",
