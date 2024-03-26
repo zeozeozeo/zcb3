@@ -27,7 +27,7 @@ serde_json = "1.0.113"
 log = "0.4.21"
 anyhow = "1.0.81"
 rayon = "1.10.0"
-egui_extras = { version = "0.26.2", features = ["image"] }
+egui_extras = { version = "0.27.0", features = ["image"] }
 rustmatica = "0.1.1"
 egui_plot = "0.26.2"
 serde = "1.0.197"
