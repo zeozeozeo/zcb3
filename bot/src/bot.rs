@@ -67,32 +67,39 @@ impl Index<usize> for PlayerClicks {
 impl PlayerClicks {
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn recognize_dir_and_load_files(&mut self, path: &Path, pitch: Pitch, sample_rate: u32) {
-        let filename = path.file_name().unwrap().to_string_lossy().to_lowercase();
+        log::debug!("trying to match directory {:?}", path);
+        if path.is_file() {
+            log::debug!("skipping matching file {:?}", path);
+            return;
+        }
+        let filename: String = path
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .chars()
+            .filter(|c| c.is_alphabetic())
+            .flat_map(|c| c.to_lowercase())
+            .collect();
         let patterns = [
-            ("hard", "click", &mut self.hardclicks),
-            ("hard", "release", &mut self.hardreleases),
-            ("", "click", &mut self.clicks),
-            ("", "release", &mut self.releases),
-            ("soft", "click", &mut self.softclicks),
-            ("soft", "release", &mut self.softreleases),
-            ("micro", "click", &mut self.microclicks),
-            ("micro", "release", &mut self.microreleases),
+            (["hardclick", "hardclicks"], &mut self.hardclicks),
+            (["hardrelease", "hardreleases"], &mut self.hardreleases),
+            (["click", "clicks"], &mut self.clicks),
+            (["release", "releases"], &mut self.releases),
+            (["softclick", "softclicks"], &mut self.softclicks),
+            (["softrelease", "softreleases"], &mut self.softreleases),
+            (["microclick", "microclicks"], &mut self.microclicks),
+            (["microrelease", "microreleases"], &mut self.microreleases),
         ];
         let mut matched_any = false;
-        for (pat1, pat2, clicks) in patterns {
-            let is_pat = if !pat1.is_empty() {
-                filename.contains(pat1) && filename.contains(pat2)
-            } else {
-                filename.contains(pat2)
-            };
-            if is_pat {
-                log::debug!("directory {path:?} matched pattern (\"{pat1}\", \"{pat2}\")");
+        for (pats, clicks) in patterns {
+            if pats.iter().any(|pat| *pat == filename) {
+                log::debug!("directory {path:?} matched patterns {pats:?}");
                 matched_any = true;
-                clicks.extend(read_clicks_in_directory(path, pitch, sample_rate));
+                *clicks = read_clicks_in_directory(path, pitch, sample_rate);
             }
         }
         if !matched_any {
-            log::warn!("directory {path:?} did not match any pattern");
+            log::warn!("directory {:?} did not match any pattern", path);
         }
     }
 
