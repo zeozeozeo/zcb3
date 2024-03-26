@@ -67,9 +67,9 @@ impl Index<usize> for PlayerClicks {
 impl PlayerClicks {
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn recognize_dir_and_load_files(&mut self, path: &Path, pitch: Pitch, sample_rate: u32) {
-        log::debug!("trying to match directory {:?}", path);
+        log::debug!("trying to match directory {path:?}");
         if path.is_file() {
-            log::debug!("skipping matching file {:?}", path);
+            log::debug!("skipping matching file {path:?}");
             return;
         }
         let filename: String = path
