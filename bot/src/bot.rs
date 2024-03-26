@@ -95,11 +95,11 @@ impl PlayerClicks {
             if pats.iter().any(|pat| *pat == filename) {
                 log::debug!("directory {path:?} matched patterns {pats:?}");
                 matched_any = true;
-                *clicks = read_clicks_in_directory(path, pitch, sample_rate);
+                clicks.extend(read_clicks_in_directory(path, pitch, sample_rate));
             }
         }
         if !matched_any {
-            log::warn!("directory {:?} did not match any pattern", path);
+            log::warn!("directory {path:?} did not match any pattern");
         }
     }
 
