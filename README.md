@@ -37,6 +37,7 @@ Free and easy to use Geometry Dash clickbot.
 * GDReplayFormat (.gdr, used in Geode GDMegaOverlay and 2.2 MH Replay)
 * qBot (.qb)
 * RBot (.rbot, old and new formats)
+* Zephyrus (.zr, used in OpenHack)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 

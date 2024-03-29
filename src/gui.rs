@@ -1018,6 +1018,7 @@ impl App {
             ui.label("• GDReplayFormat (.gdr, used in Geode GDMegaOverlay and 2.2 MH Replay)");
             ui.label("• qBot (.qb)");
             ui.label("• RBot (.rbot, old and new formats)");
+            ui.label("• Zephyrus (.zr, used in OpenHack)");
         });
 
         // show dialog if there is one

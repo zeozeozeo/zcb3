@@ -390,6 +390,8 @@ pub enum ReplayType {
     Qbot,
     /// RBot .rbot files
     Rbot,
+    /// Zephyrus (OpenHack) .zr files
+    Zephyrus,
 }
 
 impl ReplayType {
@@ -433,10 +435,20 @@ impl ReplayType {
             "gdr" => Gdr,
             "qb" => Qbot,
             "rbot" => Rbot,
+            "zr" => Zephyrus,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
 }
+
+// /// Reads a type `T` as raw bytes from the reader.
+// macro_rules! read_t {
+//     ($t:ty, $reader:ident) => {{
+//         let mut buf = [0u8; ::std::mem::size_of::<$t>()];
+//         $reader.read_exact(&mut buf)?;
+//         unsafe { ::std::mem::transmute(buf) }
+//     }};
+// }
 
 impl Replay {
     pub const SUPPORTED_EXTENSIONS: &'static [&'static str] = &[
@@ -464,6 +476,7 @@ impl Replay {
         "gdr",
         "qb",
         "rbot",
+        "zr",
     ];
 
     pub fn build() -> Self {
@@ -526,6 +539,7 @@ impl Replay {
             ReplayType::Gdr => self.parse_gdr(reader)?,
             ReplayType::Qbot => self.parse_qbot(reader)?,
             ReplayType::Rbot => self.parse_rbot(reader)?,
+            ReplayType::Zephyrus => self.parse_zephyrus(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -2278,6 +2292,132 @@ impl Replay {
                 self.extended_p2(push, frame, 0.0, 0.0, 0.0, 0.0);
             }
         }
+        Ok(())
+    }
+
+    // note that Zephyrus does not write structs directly into replays,
+    // so just reading the structs wouldn't work!
+    fn parse_zephyrus<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        #[derive(Default, Debug)]
+        struct Header {
+            magic: u16,
+            version: u8,
+            fps: u32,
+            num_actions: u32,
+            num_frame_fixes: u32,
+        }
+
+        #[derive(Default)]
+        struct Action {
+            frame: u32,
+            flags: u8,
+        }
+
+        #[derive(Default)]
+        struct PlayerData {
+            x: f32,
+            y: f32,
+            y_speed: f64,
+            rot: f32,
+        }
+
+        #[derive(Default)]
+        struct FrameFix {
+            frame: u32,
+            player1: PlayerData,
+            player2_exists: bool,
+            player2: PlayerData,
+        }
+
+        // read hdr
+        let mut header = Header::default();
+        header.magic = reader.read_u16::<LittleEndian>()?;
+        header.version = reader.read_u8()?;
+        header.fps = reader.read_u32::<LittleEndian>()?;
+        header.num_actions = reader.read_u32::<LittleEndian>()?;
+        header.num_frame_fixes = reader.read_u32::<LittleEndian>()?;
+        log::debug!("zephyrus header: {header:?}");
+
+        if header.magic != 0x525a {
+            anyhow::bail!("invalid zephyrus replay magic {:#x}", header.magic);
+        }
+        if header.version != 2 {
+            anyhow::bail!(
+                "invalid zephyrus replay version {} (expected 2)",
+                header.version
+            );
+        }
+
+        self.fps = self.get_fps(header.fps as f32);
+
+        // read actions
+        for _ in 0..header.num_actions {
+            let mut action = Action::default();
+            action.frame = reader.read_u32::<LittleEndian>()?;
+            action.flags = reader.read_u8()?;
+
+            let player2 = (action.flags & 0b10000000) != 0;
+            let push = (action.flags & 0b01000000) != 0;
+            let button = Button::from_button_idx(((action.flags & 0b00110000) >> 4) as i32, push);
+            let time = action.frame as f32 / self.fps;
+            if player2 {
+                self.process_action_p2(time, button, action.frame);
+            } else {
+                self.process_action_p1(time, button, action.frame);
+            }
+        }
+
+        macro_rules! read_player_data {
+            () => {{
+                let mut data = PlayerData::default();
+                data.x = reader.read_f32::<LittleEndian>()?;
+                data.y = reader.read_f32::<LittleEndian>()?;
+                data.y_speed = reader.read_f64::<LittleEndian>()?;
+                data.rot = reader.read_f32::<LittleEndian>()?;
+                data
+            }};
+        }
+
+        // read frame fixes
+        for _ in 0..header.num_frame_fixes {
+            let mut fix = FrameFix::default();
+            fix.frame = reader.read_u32::<LittleEndian>()?;
+            fix.player1 = read_player_data!();
+            fix.player2_exists = reader.read_u8()? != 0;
+            if fix.player2_exists {
+                fix.player2 = read_player_data!();
+            }
+
+            // find button state
+            let push = if let Ok(idx) = self.actions.binary_search_by(|a| a.frame.cmp(&fix.frame)) {
+                self.actions
+                    .get(idx)
+                    .map(|a| a.click.is_click())
+                    .unwrap_or(false)
+            } else {
+                false
+            };
+
+            self.extended_p1(
+                push,
+                fix.frame,
+                fix.player1.x,
+                fix.player1.y,
+                fix.player1.y_speed as f32,
+                fix.player1.rot,
+            );
+            if fix.player2_exists {
+                self.extended_p2(
+                    push,
+                    fix.frame,
+                    fix.player2.x,
+                    fix.player2.y,
+                    fix.player2.y_speed as f32,
+                    fix.player2.rot,
+                );
+            }
+        }
+
         Ok(())
     }
 
