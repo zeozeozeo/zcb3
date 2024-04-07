@@ -310,6 +310,7 @@ impl eframe::App for App {
                     {
                         self.do_update_check(&modal, &update_dialog);
                     }
+
                     ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -752,42 +753,47 @@ impl App {
 
         ui.add_space(8.0);
 
-        ui.horizontal(|ui| {
-            ui.add(egui::Image::new(egui::include_image!("assets/kofi_logo.png")).max_width(32.0));
-            ui.hyperlink_to("Donate on Ko-fi", "https://ko-fi.com/zeozeozeo");
-        });
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::Image::new(egui::include_image!("assets/liberapay_logo.png")).max_width(32.0),
-            );
-            ui.hyperlink_to("Donate on Liberapay", "https://liberapay.com/zeo");
-        });
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::Image::new(egui::include_image!("assets/donationalerts_logo.png"))
-                    .max_width(32.0),
-            );
-            ui.hyperlink_to(
-                "Donate on DonationAlerts",
-                "https://donationalerts.com/r/zeozeozeo",
-            );
-        });
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::Image::new(egui::include_image!("assets/boosty_logo.png")).max_width(32.0),
-            );
-            ui.hyperlink_to("Donate on Boosty", "https://boosty.to/zeozeozeo/donate");
-        });
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::Image::new(egui::include_image!("assets/discord_logo.png")).max_width(32.0),
-            );
-            ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
-        });
+        egui::Grid::new("donate_stage_grid")
+            .num_columns(2)
+            .min_col_width(16.0)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::Image::new(egui::include_image!("assets/kofi_logo.png")).max_width(20.0),
+                );
+                ui.hyperlink_to("Donate on Ko-fi", "https://ko-fi.com/zeozeozeo");
+                ui.end_row();
+
+                ui.add(
+                    egui::Image::new(egui::include_image!("assets/liberapay_logo.png"))
+                        .max_width(32.0),
+                );
+                ui.hyperlink_to("Donate on Liberapay", "https://liberapay.com/zeo");
+                ui.end_row();
+
+                ui.add(
+                    egui::Image::new(egui::include_image!("assets/donationalerts_logo.png"))
+                        .max_width(32.0),
+                );
+                ui.hyperlink_to(
+                    "Donate on DonationAlerts",
+                    "https://donationalerts.com/r/zeozeozeo",
+                );
+                ui.end_row();
+
+                ui.add(
+                    egui::Image::new(egui::include_image!("assets/boosty_logo.png"))
+                        .max_width(32.0),
+                );
+                ui.hyperlink_to("Donate on Boosty", "https://boosty.to/zeozeozeo/donate");
+                ui.end_row();
+
+                ui.add(
+                    egui::Image::new(egui::include_image!("assets/discord_logo.png"))
+                        .max_width(16.0),
+                );
+                ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
+                ui.end_row();
+            });
     }
 
     fn load_replay(&mut self, dialog: &Modal, file: &Path) -> Result<()> {
