@@ -1264,7 +1264,7 @@ dependencies = [
 [[package]]
 name = "egui-modal"
 version = "0.3.6"
-source = "git+https://github.com/zeozeozeo/egui-modal#483985371e90c9bebfe53046eb6e64445de18de9"
+source = "git+https://github.com/zeozeozeo/egui-modal#4aa823eb217122d889b81864dbbffd0d6259bd5d"
 dependencies = [
  "egui",
 ]
