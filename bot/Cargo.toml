@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0.82"
 bincode = "1.3.3"
 byteorder = "1.5.0"
-chrono = "0.4.35"
+chrono = "0.4.38"
 dlhn = "0.1.6"
 fasteval2 = { git = "https://github.com/zeozeozeo/fasteval2.git", branch = "sqrt-builtin", default-features = false, features = ["alpha-keywords"]}
 hound = "3.5.1"
