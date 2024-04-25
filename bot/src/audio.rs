@@ -327,7 +327,7 @@ impl AudioSegment {
             .par_iter_mut() // run in parallel
             .zip(&other.frames)
             .for_each(|(s, o)| {
-                s.left += o.right;
+                s.left += o.left;
                 s.right += o.right;
             });
     }
@@ -343,7 +343,7 @@ impl AudioSegment {
             .par_iter_mut() // run in parallel
             .zip(&other.frames)
             .for_each(|(s, o)| {
-                s.left += o.right * volume;
+                s.left += o.left * volume;
                 s.right += o.right * volume;
             });
     }
