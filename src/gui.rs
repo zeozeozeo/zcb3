@@ -1535,16 +1535,12 @@ impl App {
                     "Variation",
                 )
                 .on_hover_text("Changes the bounds of the random volume offset");
-                ui.radio_value(
-                    &mut self.conf.expr_variable,
-                    ExprVariable::Value,
-                    ExprVariable::Value.to_string(),
-                )
-                .on_hover_text("Changes the volume value (addition)");
+                ui.radio_value(&mut self.conf.expr_variable, ExprVariable::Value, "Value")
+                    .on_hover_text("Changes the volume value (addition)");
                 ui.radio_value(
                     &mut self.conf.expr_variable,
                     ExprVariable::TimeOffset,
-                    ExprVariable::TimeOffset.to_string(),
+                    "Time offset",
                 )
                 .on_hover_text("Offsets the time of the action");
             });
