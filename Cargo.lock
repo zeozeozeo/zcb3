@@ -1155,9 +1155,9 @@ checksum = "bd0c93bb4b0c6d9b77f4435b0ae98c24d17f1c45b2ff844c6151a07256ca923b"
 
 [[package]]
 name = "dlhn"
-version = "0.1.6"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f51be9452a9ca93ab3f343806e0baa06406bcd7b34fad16dde5c6f39a6f72e2e"
+checksum = "56f8c0fbf92cd49450565bc2231273fabc48bbbf0d152b5b32ee4ce13eed469e"
 dependencies = [
  "bigdecimal",
  "dlhn_derive",
