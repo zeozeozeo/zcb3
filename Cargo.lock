@@ -3142,9 +3142,9 @@ dependencies = [
 
 [[package]]
 name = "rustmatica"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "824671d5e2a54174a547b88fc23dce104d03cc070f8ff1b14ec88f58f377d093"
+checksum = "1b0463529530517e064299156392f807b424b78d6559fd210a036de5fa18f61c"
 dependencies = [
  "chrono",
  "fastnbt",
