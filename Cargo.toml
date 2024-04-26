@@ -28,7 +28,7 @@ log = "0.4.21"
 anyhow = "1.0.82"
 rayon = "1.10.0"
 egui_extras = { version = "0.27.2", features = ["image"] }
-rustmatica = "0.1.1"
+rustmatica = "0.2.0"
 egui_plot = "0.27.2"
 serde = "1.0.198"
 self-replace = "1.3.7"
