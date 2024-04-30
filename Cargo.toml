@@ -30,7 +30,7 @@ rayon = "1.10.0"
 egui_extras = { version = "0.27.2", features = ["image"] }
 rustmatica = "0.2.0"
 egui_plot = "0.27.2"
-serde = "1.0.198"
+serde = "1.0.199"
 self-replace = "1.3.7"
 ureq = "2.9.7"
 fastrand = "2.1.0"
