@@ -33,7 +33,7 @@ egui_plot = "0.27.2"
 serde = "1.0.198"
 self-replace = "1.3.7"
 ureq = "2.9.7"
-fastrand = "2.0.2"
+fastrand = "2.1.0"
 egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git" }
 chrono = "0.4.38"
 timeago = "0.4.2"
