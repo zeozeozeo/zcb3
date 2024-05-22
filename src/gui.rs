@@ -655,7 +655,7 @@ impl App {
 
         let mut region = Region::new(
             "omagah".into(),
-            UVec3::new(0, 0, 0),
+            Vec3::new(0, 0, 0),
             Vec3::new(blocks.len() as i32, 2, 1),
         );
 
