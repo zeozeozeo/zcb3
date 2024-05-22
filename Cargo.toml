@@ -37,6 +37,7 @@ fastrand = "2.0.2"
 egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git" }
 chrono = "0.4.38"
 timeago = "0.4.2"
+tempfile = "3.10.1"
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]

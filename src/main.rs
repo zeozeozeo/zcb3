@@ -1,4 +1,6 @@
 mod gui;
+mod video;
+
 use bot::*;
 use clap::{Parser, ValueEnum};
 use std::{

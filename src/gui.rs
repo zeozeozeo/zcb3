@@ -1,4 +1,4 @@
-use crate::built_info;
+use crate::{built_info, video::Video};
 use anyhow::{Context, Result};
 use bot::{
     Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction, Pitch,
@@ -60,6 +60,7 @@ enum Stage {
     SelectReplay,
     SelectClickpack,
     Render,
+    Video,
     // AutoCutter,
     Donate,
     Secret,
@@ -68,8 +69,9 @@ enum Stage {
 impl Stage {
     fn previous(self) -> Self {
         match self {
-            Stage::SelectClickpack => Stage::SelectReplay,
-            Stage::Render => Stage::SelectClickpack,
+            Self::SelectClickpack => Self::SelectReplay,
+            Self::Render => Self::SelectClickpack,
+            Self::Video => Self::Render,
             _ => self,
         }
     }
@@ -174,6 +176,7 @@ struct App {
     clickpack_db: ClickpackDb,
     show_clickpack_db: bool,
     clickpack_db_title: String,
+    video: Video,
 }
 
 impl Default for App {
@@ -202,6 +205,7 @@ impl Default for App {
             clickpack_db: ClickpackDb::default(),
             show_clickpack_db: false,
             clickpack_db_title: String::new(),
+            video: Video::default(),
         }
     }
 }
@@ -277,6 +281,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.stage, Stage::SelectReplay, "Replay");
                 ui.selectable_value(&mut self.stage, Stage::SelectClickpack, "Clickpack");
                 ui.selectable_value(&mut self.stage, Stage::Render, "Render");
+                ui.selectable_value(&mut self.stage, Stage::Video, "Video");
                 // ui.selectable_value(&mut self.stage, Stage::AutoCutter, "AutoCutter");
                 ui.selectable_value(&mut self.stage, Stage::Donate, "Donate");
                 if self.stage == Stage::Secret {
@@ -362,6 +367,7 @@ impl eframe::App for App {
                     Stage::SelectReplay => self.show_replay_stage(ctx, ui),
                     Stage::SelectClickpack => self.show_select_clickpack_stage(ctx, ui),
                     Stage::Render => self.show_render_stage(ctx, ui),
+                    Stage::Video => self.video.show(ctx, ui, &self.replay),
                     // Stage::AutoCutter => self.autocutter.show_ui(ctx, ui),
                     Stage::Donate => self.show_pwease_donate_stage(ctx, ui),
                     Stage::Secret => self.show_secret_stage(ctx, ui),
