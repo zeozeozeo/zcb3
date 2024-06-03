@@ -10,6 +10,10 @@ Free and easy to use Geometry Dash clickbot.
 
 # [Join the discord server (click me)](https://discord.gg/b4kBQyXYZT)
 
+or the Guilded server: https://guilded.gg/zcb
+
+![](https://www.guilded.gg/canvas_index.html?route=%2Fcanvas%2Fembed%2Fteamcard%2Fjb721qzR&size=large)
+
 # Supported replay formats
 
 * Mega Hack Replay JSON (.mhr.json)
