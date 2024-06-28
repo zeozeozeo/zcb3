@@ -15,7 +15,7 @@ fasteval2 = { git = "https://github.com/zeozeozeo/fasteval2.git", branch = "sqrt
 hound = "3.5.1"
 ijson = "0.1.3"
 leb128 = "0.2.5"
-log = "0.4.21"
+log = "0.4.22"
 lzma-rs = "0.3.0"
 rayon = "1.10.0"
 serde = { version = "1.0.203", features = ["derive"] }
