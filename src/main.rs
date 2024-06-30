@@ -21,9 +21,9 @@ enum ArgExprVariable {
     TimeOffset,
 }
 
-impl ToString for ArgExprVariable {
-    fn to_string(&self) -> String {
-        format!("{:?}", self)
+impl std::fmt::Display for ArgExprVariable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 

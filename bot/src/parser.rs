@@ -739,7 +739,7 @@ impl Replay {
     fn parse_obot2<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         #[derive(Deserialize)]
         pub enum Obot2Location {
-            XPos(u32),
+            XPos,
             Frame(u32),
         }
         #[derive(Deserialize, PartialEq)]

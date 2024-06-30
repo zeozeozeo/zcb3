@@ -1,7 +1,8 @@
 use crate::{built_info, video::Video};
 use anyhow::{Context, Result};
 use bot::{
-    Action, Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction, Pitch, RemoveSilenceFrom, Replay, ReplayType, Timings, VolumeSettings
+    Action, Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction, Pitch,
+    RemoveSilenceFrom, Replay, ReplayType, Timings, VolumeSettings,
 };
 use eframe::{
     egui::{self, DragValue, IconData, Key, RichText},
@@ -16,7 +17,12 @@ use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
-    cell::RefCell, fs::File, io::{BufWriter, Cursor, Write}, ops::RangeInclusive, path::Path, time::{Duration, Instant}
+    cell::RefCell,
+    fs::File,
+    io::{BufWriter, Cursor, Write},
+    ops::RangeInclusive,
+    path::Path,
+    time::{Duration, Instant},
 };
 use std::{io::BufReader, path::PathBuf};
 
@@ -679,7 +685,7 @@ impl App {
             log::error!("MIDI format only supports up to 32767 PPQN");
             return;
         }
-        
+
         // Separate the click types into their own vectors
         let mut separated_actions: [Vec<Action>; 8] = Default::default();
         for action in &self.replay.actions {
@@ -692,30 +698,32 @@ impl App {
                 bot::ClickType::SoftRelease => separated_actions[5].push(*action),
                 bot::ClickType::MicroClick => separated_actions[6].push(*action),
                 bot::ClickType::MicroRelease => separated_actions[7].push(*action),
-                _ => ()
+                _ => (),
             }
         }
 
         // Create bufwriter for midi data
         // NOTE: all values are big endian!!!
         let mut midi_data = BufWriter::new(File::create("out.mid").unwrap());
-        midi_data.write(b"MThd").unwrap();                                      // MThd header
-        midi_data.write(&u32::to_be_bytes(6)).unwrap();                         // MThd length
-        midi_data.write(&u16::to_be_bytes(1)).unwrap();                         // SMF format
-        midi_data.write(&u16::to_be_bytes(9)).unwrap();                         // Num tracks
-        midi_data.write(&u16::to_be_bytes(self.replay.fps as u16)).unwrap();    // PPQN
+        midi_data.write_all(b"MThd").unwrap(); // MThd header
+        midi_data.write_all(&u32::to_be_bytes(6)).unwrap(); // MThd length
+        midi_data.write_all(&u16::to_be_bytes(1)).unwrap(); // SMF format
+        midi_data.write_all(&u16::to_be_bytes(9)).unwrap(); // Num tracks
+        midi_data
+            .write_all(&u16::to_be_bytes(self.replay.fps as u16))
+            .unwrap(); // PPQN
         midi_data.flush().unwrap();
 
         // Create tempo/meta track
-        midi_data.write(b"MTrk").unwrap();                  // MTrk header
-        midi_data.write(&u32::to_be_bytes(11)).unwrap();    // MTrk length
-        midi_data.write(&[0x00]).unwrap();                  // 0 delta time
-        midi_data.write(&[0xFF, 0x51, 0x03]).unwrap();      // Tempo event
-        midi_data.write(&[0x0F, 0x42, 0x40]).unwrap();      // 60 bpm
-        midi_data.write(&[0x00]).unwrap();                  // 0 delta time
-        midi_data.write(&[0xFF, 0x2F, 0x00]).unwrap();      // EOT event
+        midi_data.write_all(b"MTrk").unwrap(); // MTrk header
+        midi_data.write_all(&u32::to_be_bytes(11)).unwrap(); // MTrk length
+        midi_data.write_all(&[0x00]).unwrap(); // 0 delta time
+        midi_data.write_all(&[0xFF, 0x51, 0x03]).unwrap(); // Tempo event
+        midi_data.write_all(&[0x0F, 0x42, 0x40]).unwrap(); // 60 bpm
+        midi_data.write_all(&[0x00]).unwrap(); // 0 delta time
+        midi_data.write_all(&[0xFF, 0x2F, 0x00]).unwrap(); // EOT event
         midi_data.flush().unwrap();
-        
+
         for (c, click_vec) in separated_actions.iter().enumerate() {
             // Create a track for each click type;
             // We use a vector instead of writing directly to the file because we don't know
@@ -723,71 +731,80 @@ impl App {
             let mut track_buf: Vec<u8> = Vec::new();
 
             // Add track name event
-            track_buf.push(0x00);               // Delta time
-            track_buf.extend(&[0xFF, 0x03]);    // Track name event
+            track_buf.push(0x00); // Delta time
+            track_buf.extend(&[0xFF, 0x03]); // Track name event
             match c {
                 0 => {
-                    track_buf.push(10); track_buf.extend(b"Hardclicks");
-                },
+                    track_buf.push(10);
+                    track_buf.extend(b"Hardclicks");
+                }
                 1 => {
-                    track_buf.push(12); track_buf.extend(b"Hardreleases");
-                },
+                    track_buf.push(12);
+                    track_buf.extend(b"Hardreleases");
+                }
                 2 => {
-                    track_buf.push(6); track_buf.extend(b"Clicks");
-                },
+                    track_buf.push(6);
+                    track_buf.extend(b"Clicks");
+                }
                 3 => {
-                    track_buf.push(8); track_buf.extend(b"Releases");
-                },
+                    track_buf.push(8);
+                    track_buf.extend(b"Releases");
+                }
                 4 => {
-                    track_buf.push(10); track_buf.extend(b"Softclicks");
-                },
+                    track_buf.push(10);
+                    track_buf.extend(b"Softclicks");
+                }
                 5 => {
-                    track_buf.push(12); track_buf.extend(b"Softreleases");
-                },
+                    track_buf.push(12);
+                    track_buf.extend(b"Softreleases");
+                }
                 6 => {
-                    track_buf.push(11); track_buf.extend(b"Microclicks");
-                },
+                    track_buf.push(11);
+                    track_buf.extend(b"Microclicks");
+                }
                 7 => {
-                    track_buf.push(13); track_buf.extend(b"Microreleases");
-                },
-                _ => ()
+                    track_buf.push(13);
+                    track_buf.extend(b"Microreleases");
+                }
+                _ => (),
             }
 
             // Add program change
-            track_buf.push(0x00);                                   // Delta time
-            track_buf.extend(&[0b11000000 | (c as u8), c as u8]);   // PC event
+            track_buf.push(0x00); // Delta time
+            track_buf.extend(&[0b11000000 | (c as u8), c as u8]); // PC event
 
             let mut i = 0;
             while i < click_vec.len() {
-                let delta_time;
-                if i == 0 {
-                    delta_time = click_vec[i].frame;
+                let delta_time = if i == 0 {
+                    click_vec[i].frame
                 } else {
-                    delta_time = click_vec[i].frame - click_vec[i - 1].frame - 1;
-                }
-                
+                    click_vec[i].frame - click_vec[i - 1].frame - 1
+                };
+
                 // Add note-on event
-                self.write_vlq(&mut track_buf, delta_time);     // Delta time
-                track_buf.push(0b10010000 | (c as u8));         // Note-on event
-                track_buf.push(0x00);                           // Key 0
-                track_buf.push(0x7F);                           // Velocity 127 (max)
-                // Add note-off event 1 tick later
-                track_buf.push(0x01);                           // Delta time
-                track_buf.push(0b10000000 | (c as u8));         // Note-off event
-                track_buf.push(0x00);                           // Key 0
-                track_buf.push(0x7F);                           // Velocity 127 (max)
- 
+                self.write_vlq(&mut track_buf, delta_time); // Delta time
+                track_buf.push(0b10010000 | (c as u8)); // Note-on event
+                track_buf.push(0x00); // Key 0
+                track_buf.push(0x7F); // Velocity 127 (max)
+                                      // Add note-off event 1 tick later
+                track_buf.push(0x01); // Delta time
+                track_buf.push(0b10000000 | (c as u8)); // Note-off event
+                track_buf.push(0x00); // Key 0
+                track_buf.push(0x7F); // Velocity 127 (max)
+
                 i += 1;
             }
 
             // Add EOT event
-            track_buf.push(0x00);                   // Delta time
-            track_buf.extend(&[0xFF, 0x2F, 0x00]);  // EOT event
+            track_buf.push(0x00); // Delta time
+            track_buf.extend(&[0xFF, 0x2F, 0x00]); // EOT event
 
             // Write the buf to the file
-            midi_data.write(b"MTrk").unwrap();                                      // MTrk header
-            midi_data.write(&u32::to_be_bytes(track_buf.len() as u32)).unwrap();    // MTrk size
-            midi_data.write(&track_buf).unwrap();                                   // MTrk data
+            midi_data.write_all(b"MTrk").unwrap(); // MTrk header
+            midi_data
+                .write_all(&u32::to_be_bytes(track_buf.len() as u32))
+                .unwrap(); // MTrk size
+            midi_data.write_all(&track_buf).unwrap(); // MTrk data
 
             midi_data.flush().unwrap();
         }
@@ -799,19 +816,16 @@ impl App {
                 (value >> 21 & 0x7F) as u8 | 0x80,
                 (value >> 14 & 0x7F) as u8 | 0x80,
                 (value >> 7 & 0x7F) as u8 | 0x80,
-                (value & 0x7F) as u8
+                (value & 0x7F) as u8,
             ]);
         } else if value >= (1 << 14) {
             vector.extend(&[
                 (value >> 14 & 0x7F) as u8 | 0x80,
                 (value >> 7 & 0x7F) as u8 | 0x80,
-                (value & 0x7F) as u8
+                (value & 0x7F) as u8,
             ]);
         } else if value >= (1 << 7) {
-            vector.extend(&[
-                (value >> 7 & 0x7F) as u8 | 0x80,
-                (value & 0x7F) as u8
-            ]);
+            vector.extend(&[(value >> 7 & 0x7F) as u8 | 0x80, (value & 0x7F) as u8]);
         } else {
             vector.push((value & 0x7F) as u8);
         }

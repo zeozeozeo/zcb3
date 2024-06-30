@@ -299,13 +299,13 @@ pub enum ExprVariable {
     TimeOffset,
 }
 
-impl ToString for ExprVariable {
-    fn to_string(&self) -> String {
+impl std::fmt::Display for ExprVariable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::None => "None".to_string(),
-            Self::Variation { .. } => "Volume variation".to_string(),
-            Self::Value => "Volume value".to_string(),
-            Self::TimeOffset => "Time offset".to_string(),
+            Self::None => write!(f, "None"),
+            Self::Variation { .. } => write!(f, "Volume variation"),
+            Self::Value => write!(f, "Volume value"),
+            Self::TimeOffset => write!(f, "Time offset"),
         }
     }
 }
@@ -324,9 +324,9 @@ pub enum RemoveSilenceFrom {
     End,
 }
 
-impl ToString for RemoveSilenceFrom {
-    fn to_string(&self) -> String {
-        format!("{self:?}")
+impl std::fmt::Display for RemoveSilenceFrom {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
@@ -338,9 +338,9 @@ pub enum ChangeVolumeFor {
     Releases,
 }
 
-impl ToString for ChangeVolumeFor {
-    fn to_string(&self) -> String {
-        format!("{self:?}")
+impl std::fmt::Display for ChangeVolumeFor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
     }
 }
 
