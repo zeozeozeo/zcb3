@@ -673,12 +673,22 @@ impl App {
 
     // Function written by forteus19
     // I am not a rust dev so my code is probably trash LOL
-    fn export_midi(&self) {
+    fn export_midi(&self) -> Result<()> {
         // Check if fps is at most 32767
         if self.replay.fps as u32 > 32767 {
-            log::error!("MIDI format only supports up to 32767 PPQN");
-            return;
+            log::error!("MIDI format only supports up to 32767 PPQN (framerate)");
+            return Err(anyhow::anyhow!(
+                "MIDI format only supports up to 32767 PPQN (framerate)"
+            ));
         }
+
+        let Some(path) = FileDialog::new()
+            .add_filter("Replay file", Replay::SUPPORTED_EXTENSIONS)
+            .save_file()
+        else {
+            log::error!("no file was selected");
+            return Err(anyhow::anyhow!("no file was selected"));
+        };
 
         // Separate the click types into their own vectors
         let mut separated_actions: [Vec<Action>; 8] = Default::default();
@@ -698,25 +708,23 @@ impl App {
 
         // Create bufwriter for midi data
         // NOTE: all values are big endian!!!
-        let mut midi_data = BufWriter::new(File::create("out.mid").unwrap());
-        midi_data.write_all(b"MThd").unwrap(); // MThd header
-        midi_data.write_all(&u32::to_be_bytes(6)).unwrap(); // MThd length
-        midi_data.write_all(&u16::to_be_bytes(1)).unwrap(); // SMF format
-        midi_data.write_all(&u16::to_be_bytes(9)).unwrap(); // Num tracks
-        midi_data
-            .write_all(&u16::to_be_bytes(self.replay.fps as u16))
-            .unwrap(); // PPQN
-        midi_data.flush().unwrap();
+        let mut midi_data = BufWriter::new(File::create(path)?);
+        midi_data.write_all(b"MThd")?; // MThd header
+        midi_data.write_all(&u32::to_be_bytes(6))?; // MThd length
+        midi_data.write_all(&u16::to_be_bytes(1))?; // SMF format
+        midi_data.write_all(&u16::to_be_bytes(9))?; // Num tracks
+        midi_data.write_all(&u16::to_be_bytes(self.replay.fps as u16))?; // PPQN
+        midi_data.flush()?;
 
         // Create tempo/meta track
-        midi_data.write_all(b"MTrk").unwrap(); // MTrk header
-        midi_data.write_all(&u32::to_be_bytes(11)).unwrap(); // MTrk length
-        midi_data.write_all(&[0x00]).unwrap(); // 0 delta time
-        midi_data.write_all(&[0xFF, 0x51, 0x03]).unwrap(); // Tempo event
-        midi_data.write_all(&[0x0F, 0x42, 0x40]).unwrap(); // 60 bpm
-        midi_data.write_all(&[0x00]).unwrap(); // 0 delta time
-        midi_data.write_all(&[0xFF, 0x2F, 0x00]).unwrap(); // EOT event
-        midi_data.flush().unwrap();
+        midi_data.write_all(b"MTrk")?; // MTrk header
+        midi_data.write_all(&u32::to_be_bytes(11))?; // MTrk length
+        midi_data.write_all(&[0x00])?; // 0 delta time
+        midi_data.write_all(&[0xFF, 0x51, 0x03])?; // Tempo event
+        midi_data.write_all(&[0x0F, 0x42, 0x40])?; // 60 bpm
+        midi_data.write_all(&[0x00])?; // 0 delta time
+        midi_data.write_all(&[0xFF, 0x2F, 0x00])?; // EOT event
+        midi_data.flush()?;
 
         for (c, click_vec) in separated_actions.iter().enumerate() {
             // Create a track for each click type;
@@ -794,14 +802,13 @@ impl App {
             track_buf.extend(&[0xFF, 0x2F, 0x00]); // EOT event
 
             // Write the buf to the file
-            midi_data.write_all(b"MTrk").unwrap(); // MTrk header
-            midi_data
-                .write_all(&u32::to_be_bytes(track_buf.len() as u32))
-                .unwrap(); // MTrk size
-            midi_data.write_all(&track_buf).unwrap(); // MTrk data
-
-            midi_data.flush().unwrap();
+            midi_data.write_all(b"MTrk")?; // MTrk header
+            midi_data.write_all(&u32::to_be_bytes(track_buf.len() as u32))?; // MTrk size
+            midi_data.write_all(&track_buf)?; // MTrk data
         }
+
+        midi_data.flush()?;
+        Ok(())
     }
 
     fn write_vlq(&self, vector: &mut Vec<u8>, value: u32) {
@@ -873,7 +880,9 @@ impl App {
         }
     }
 
-    fn show_secret_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
+    fn show_secret_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
+        let mut secret_modal = Modal::new(ctx, "secret_stage_dialog");
+
         // this is so epic
         ui.add_enabled_ui(self.replay.has_actions(), |ui| {
             ui.horizontal(|ui| {
@@ -893,7 +902,15 @@ impl App {
                     .on_disabled_hover_text("You have to load a replay first")
                     .clicked()
                 {
-                    self.export_midi();
+                    if let Err(e) = self.export_midi() {
+                        log::error!("failed to export MIDI: {e}");
+                        secret_modal
+                            .dialog()
+                            .with_title("Failed to export MIDI")
+                            .with_body(capitalize_first_letter(&e.to_string()))
+                            .with_icon(Icon::Error)
+                            .open();
+                    }
                 }
             });
         });
@@ -910,6 +927,8 @@ impl App {
             }
             ui.label("(applied after restart)");
         });
+
+        secret_modal.show_dialog();
     }
 
     fn show_pwease_donate_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
