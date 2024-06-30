@@ -991,6 +991,13 @@ impl App {
                 );
                 ui.hyperlink_to("Join the Discord server", "https://discord.gg/b4kBQyXYZT");
                 ui.end_row();
+
+                ui.add(
+                    egui::Image::new(egui::include_image!("assets/guilded_logo.png"))
+                        .max_width(16.0),
+                );
+                ui.hyperlink_to("Join the Guilded server", "https://guilded.gg/clickbot");
+                ui.end_row();
             });
     }
 
