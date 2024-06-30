@@ -297,13 +297,15 @@ impl Video {
         filter_tmpfile: &mut NamedTempFile,
         input_tmpfile: &mut NamedTempFile,
     ) -> Result<Vec<String>> {
-        let mut cmd = Vec::new();
+        let mut cmd = vec![
+            "-f".to_owned(),
+            "concat".to_owned(),
+            "-safe".to_owned(),
+            "0".to_owned(),
+        ];
         let Some(pack) = &self.pack else {
             anyhow::bail!("no videopack loaded");
         };
-
-        // we'll also build the concat filter argument
-        let mut filter_complex = Vec::new();
 
         for (i, action) in replay.actions.iter().enumerate() {
             if let Some(file) = pack.file_for_click(action.click) {
@@ -316,32 +318,14 @@ impl Video {
                 // if this is not the last clip, cut it to the start
                 // of the next clip
                 if let Some(dur) = dur {
-                    writeln!(input_tmpfile, "outpoint {dur}")?;
+                    writeln!(input_tmpfile, "duration {dur}")?;
                 }
-
-                filter_complex.push(format!("[{i}:v] [{i}:a]"));
             }
         }
-
-        // finish building the concat filter
-        filter_complex.push(format!("concat=n={}:v=1:a=1 [v] [a]", filter_complex.len()));
-        log::debug!("filter_complex: {filter_complex:?}");
 
         // add the input files (temp file with the input commands in this case)
         cmd.push("-i".to_owned());
         cmd.push(input_tmpfile.path().to_string_lossy().into_owned());
-
-        // since the maximum command length is 8191 characters, we'll have
-        // to resort to temp files for the filter
-        filter_tmpfile.write_all(filter_complex.join(" ").as_bytes())?;
-
-        // add the filter to the command & map arguments
-        cmd.push("-filter_complex_script".to_string()); // "_script" to specify a file
-        cmd.push(filter_tmpfile.path().to_string_lossy().into_owned());
-        cmd.push("-map".to_string());
-        cmd.push("[v]".to_string());
-        cmd.push("-map".to_string());
-        cmd.push("[a]".to_string());
 
         // add the output file
         cmd.push(output.to_string_lossy().into_owned());
