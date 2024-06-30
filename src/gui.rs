@@ -95,6 +95,7 @@ struct Config {
     timings: Timings,
     vol_settings: VolumeSettings,
     litematic_export_releases: bool,
+    midi_key: u8,
     sample_rate: u32,
     expr_text: String,
     expr_variable: ExprVariable,
@@ -139,6 +140,7 @@ impl Default for Config {
             timings: Timings::default(),
             vol_settings: VolumeSettings::default(),
             litematic_export_releases: false,
+            midi_key: 60, // C4
             sample_rate: 44100,
             expr_text: String::new(),
             expr_variable: ExprVariable::Variation { negative: true },
@@ -683,7 +685,7 @@ impl App {
         }
 
         let Some(path) = FileDialog::new()
-            .add_filter("Replay file", Replay::SUPPORTED_EXTENSIONS)
+            .add_filter("MIDI file", &["mid"])
             .save_file()
         else {
             log::error!("no file was selected");
@@ -725,6 +727,8 @@ impl App {
         midi_data.write_all(&[0x00])?; // 0 delta time
         midi_data.write_all(&[0xFF, 0x2F, 0x00])?; // EOT event
         midi_data.flush()?;
+
+        let key = self.conf.midi_key.min(127);
 
         for (c, click_vec) in separated_actions.iter().enumerate() {
             // Create a track for each click type;
@@ -786,12 +790,12 @@ impl App {
                 // Add note-on event
                 self.write_vlq(&mut track_buf, delta_time); // Delta time
                 track_buf.push(0b10010000 | (c as u8)); // Note-on event
-                track_buf.push(0x00); // Key 0
+                track_buf.push(key);
                 track_buf.push(0x7F); // Velocity 127 (max)
                                       // Add note-off event 1 tick later
                 track_buf.push(0x01); // Delta time
                 track_buf.push(0b10000000 | (c as u8)); // Note-off event
-                track_buf.push(0x00); // Key 0
+                track_buf.push(key);
                 track_buf.push(0x7F); // Velocity 127 (max)
 
                 i += 1;
@@ -912,6 +916,16 @@ impl App {
                             .open();
                     }
                 }
+
+                ui.add(egui::Slider::new(&mut self.conf.midi_key, 0..=127));
+
+                const NOTES: [&str; 12] = [
+                    "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B",
+                ];
+                let octave = (self.conf.midi_key / 12) as i32 - 1;
+                let note = NOTES[(self.conf.midi_key % 12) as usize];
+
+                ui.label(format!("MIDI key ({note}{octave})"));
             });
         });
 
