@@ -51,7 +51,8 @@ pub fn run_gui() -> Result<(), eframe::Error> {
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            Box::<App>::default()
+            cc.egui_ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+            Ok(Box::<App>::default())
         }),
     )
 }
@@ -240,11 +241,7 @@ fn drag_value<Num: emath::Numeric>(
 ) {
     help_text(ui, help, |ui| {
         let dragged = ui
-            .add(
-                DragValue::new(value)
-                    .clamp_range(clamp_range.clone())
-                    .speed(0.01),
-            )
+            .add(DragValue::new(value).range(clamp_range.clone()).speed(0.01))
             .dragged();
         ui.label(
             if dragged && (clamp_range.start() == value || clamp_range.end() == value) {
@@ -1844,7 +1841,7 @@ impl App {
             let plot = Plot::new("volume_multiplier_plot")
                 .legend(Legend::default())
                 .data_aspect(self.conf.plot_data_aspect)
-                .y_axis_width(4);
+                .y_axis_min_width(4.0);
             plot.show(ui, |plot_ui| {
                 plot_ui.line(line);
             })
