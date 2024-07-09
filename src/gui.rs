@@ -1098,7 +1098,10 @@ impl App {
         });
 
         ui.collapsing("Volume settings", |ui| {
-            ui.label("General volume settings.");
+            ui.label(
+                "General volume settings. The volume variation variable \
+                defines the range of the random volume offset.",
+            );
 
             let vol = &mut self.conf.vol_settings;
             drag_value(
@@ -1119,10 +1122,12 @@ impl App {
 
         ui.collapsing("Spam volume changes", |ui| {
             ui.label(
-                "This can be used to change the volume of the clicks in spams. \
-                    The spam time is the maximum time between actions when they can be \
-                    considered 'spam actions'. The spam volume offset factor depends on the delta. \
-                    The maximum spam offset factor is the maximum value this factor can be.",
+                "Adjusts the volume of 'spam clicks', which are defined as actions within \
+                a maximum time limit, known as the 'spam time'. The volume offset \
+                is based on the delta time between actions, multiplied by the spam \
+                volume offset factor, and clamped \
+                by the maximum spam volume offset. \
+                In short, this can be used to lower the volume of clicks in spams.",
             );
 
             let vol = &mut self.conf.vol_settings;
@@ -1315,7 +1320,7 @@ impl App {
                     &mut p.step,
                     "Pitch step",
                     0.0001..=f32::INFINITY,
-                    "Step between pitch values. The more = the better & the slower",
+                    "Step between pitch values. The less = the better & the slower",
                 );
             });
         });
@@ -1566,8 +1571,8 @@ impl App {
         });
         ui.collapsing("Supported audio formats", |ui| {
             ui.label(
-                "AAC, ADPCM, AIFF, ALAC, CAF, FLAC, MKV, MP1, \
-                MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files.",
+                "AAC, ADPCM, AIFF, ALAC, CAF, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, \
+                and WebM audio files.",
             );
         });
 
