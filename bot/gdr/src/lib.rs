@@ -165,9 +165,7 @@ impl Default for Replay {
 impl Replay {
     pub fn from_slice(data: &[u8]) -> Result<Self, serde_json::Error> {
         rmp_serde::from_slice(data)
-            .map_err(|e| {
-                log::warn!("failed to parse messagepack GDR file: {e}")
-            })
+            .map_err(|e| log::warn!("failed to parse messagepack GDR file: {e}"))
             .or_else(|_| serde_json::from_slice(data))
     }
 

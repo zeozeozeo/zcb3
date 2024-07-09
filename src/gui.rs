@@ -22,6 +22,7 @@ use std::{
     io::{BufWriter, Cursor, Write},
     ops::RangeInclusive,
     path::Path,
+    rc::Rc,
     time::{Duration, Instant},
 };
 use std::{io::BufReader, path::PathBuf};
@@ -164,7 +165,7 @@ struct App {
     char_idx: u8,
     expr_error: String,
     plot_points: Vec<PlotPoint>,
-    update_tags: Option<(usize, usize, String)>,
+    update_to_tag: Option<Rc<String>>,
     update_expr: bool,
     clickpack_path: Option<PathBuf>,
     conf_after_replay_selected: Option<Config>,
@@ -192,7 +193,7 @@ impl Default for App {
             char_idx: 0,
             expr_error: String::new(),
             plot_points: vec![],
-            update_tags: None,
+            update_to_tag: None,
             update_expr: false,
             clickpack_path: None,
             conf_after_replay_selected: None,
@@ -441,7 +442,7 @@ fn ureq_get(url: &str) -> Result<Vec<u8>, String> {
     Ok(buf)
 }
 
-fn get_latest_tag() -> Result<(usize, String)> {
+fn get_latest_tag() -> Result<String> {
     let body = ureq_agent()
         .get("https://api.github.com/repos/zeozeozeo/zcb3/tags")
         .call()?
@@ -454,7 +455,15 @@ fn get_latest_tag() -> Result<(usize, String)> {
     let name = latest_tag.get("name").context("couldn't get tag name")?;
     let tagname = name.as_str().context("tag name is not a string")?;
 
-    Ok((tagname.replace('.', "").parse()?, tagname.to_string()))
+    Ok(tagname.to_string())
+}
+
+fn is_older_version(current: &str, latest: &str) -> bool {
+    current
+        .split('.')
+        .map(|s| s.parse::<u32>().unwrap_or(0))
+        .zip(latest.split('.').map(|s| s.parse::<u32>().unwrap_or(0)))
+        .any(|(c, l)| c < l)
 }
 
 fn update_to_latest(tag: &str) -> Result<()> {
@@ -503,7 +512,7 @@ fn update_to_latest(tag: &str) -> Result<()> {
 
         // replace executable
         self_replace::self_replace(&new_binary)
-            .map_err(|e| anyhow::anyhow!("{e}. Try using this executable: {new_binary}"))?;
+            .map_err(|e| anyhow::anyhow!("{e}. Use the created executable: {new_binary}"))?;
 
         if std::path::Path::new(&new_binary).try_exists()? {
             std::fs::remove_file(new_binary)?;
@@ -513,10 +522,6 @@ fn update_to_latest(tag: &str) -> Result<()> {
     }
 
     Ok(())
-}
-
-fn get_current_tag() -> usize {
-    built_info::PKG_VERSION.replace('.', "").parse().unwrap()
 }
 
 fn capitalize_first_letter(s: &str) -> String {
@@ -529,38 +534,49 @@ fn capitalize_first_letter(s: &str) -> String {
 
 impl App {
     fn show_update_check_modal(&mut self, modal: &Modal, dialog: &Modal, ctx: &egui::Context) {
-        let Some((tag, current_tag, tag_string)) = self.update_tags.clone() else {
+        let Some(update_to_tag) = self.update_to_tag.clone() else {
             return;
         };
         modal.show(|ui| {
             modal.title(ui, "New version available");
             modal.frame(ui, |ui| {
-                modal.body_and_icon(ui,
-                    format!("A new version of ZCB is available (latest: {tag}, this: {current_tag}).\n\
-                    Download the new version on the GitHub page, Discord server or use the auto-updater."),
-                    Icon::Info);
+                modal.body_and_icon(
+                    ui,
+                    format!(
+                        "A new version of ZCB is available (latest: {}, this: {}).\n\
+                        Download the new version on the GitHub page, \
+                        Discord server or use the auto-updater (note: you might have \
+                        to restart ZCB).",
+                        update_to_tag,
+                        built_info::PKG_VERSION
+                    ),
+                    Icon::Info,
+                );
             });
             modal.buttons(ui, |ui| {
-                if modal.button(ui, "auto-update")
-                    .on_hover_text("Automatically update to the newest version.\n\
+                if modal
+                    .button(ui, "auto-update")
+                    .on_hover_text(
+                        "Automatically update to the newest version.\n\
                                     This might take some time!\n\
-                                    You might have to restart ZCB")
+                                    You might have to restart ZCB",
+                    )
                     .clicked()
                 {
-                    if let Err(e) = update_to_latest(&tag_string) {
+                    if let Err(e) = update_to_latest(&update_to_tag) {
                         dialog
                             .dialog()
                             .with_title("Failed to perform auto-update")
-                            .with_body(format!("{e}. Try updating manually."))
+                            .with_body(e)
                             .with_icon(Icon::Error)
                             .open();
                     } else {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
-                    self.update_tags = None;
+                    self.update_to_tag = None;
                 }
                 if modal.button(ui, "close").clicked() {
-                    self.update_tags = None;
+                    self.update_to_tag = None;
                 }
             });
         });
@@ -568,20 +584,32 @@ impl App {
 
     fn do_update_check(&mut self, modal: &Modal, dialog: &Modal) {
         let latest_tag = get_latest_tag();
-        let current_tag = get_current_tag();
 
-        if let Ok((tag, tag_str)) = latest_tag {
-            log::info!("latest tag: {tag}, current tag {current_tag}");
-            if tag > current_tag {
-                self.update_tags = Some((tag, current_tag, tag_str));
+        if let Ok(latest_tag) = latest_tag {
+            log::info!(
+                "latest tag: {latest_tag}, current tag {}",
+                built_info::PKG_VERSION
+            );
+            if is_older_version(built_info::PKG_VERSION, &latest_tag) {
+                self.update_to_tag = Some(Rc::new(latest_tag));
                 modal.open();
             } else {
+                let time_traveler = latest_tag != built_info::PKG_VERSION;
                 dialog
                     .dialog()
-                    .with_title("You are up-to-date!")
+                    .with_title(if time_traveler {
+                        "You're a time traveler!"
+                    } else {
+                        "You are up-to-date!"
+                    })
                     .with_body(format!(
-                        "You are running the latest version of ZCB ({}).\n\
+                        "You are running {} of ZCB ({}).\n\
                         You can always download new versions on GitHub or on the Discord server.",
+                        if time_traveler {
+                            "an unreleased version"
+                        } else {
+                            "the latest version"
+                        },
                         get_version(),
                     ))
                     .with_icon(Icon::Success)
