@@ -55,7 +55,7 @@ jobs:
           args: "--release"
           strip: true
       - name: Publish release artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: zcb3-${{ matrix.platform.target }}
           path: "target/${{ matrix.platform.target }}/release/zcb3*"
