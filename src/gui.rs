@@ -165,7 +165,7 @@ struct App {
     last_chars: [Key; 9],
     char_idx: u8,
     expr_error: String,
-    plot_points: Vec<PlotPoint>,
+    plot_points: Rc<Vec<PlotPoint>>,
     update_to_tag: Option<Rc<String>>,
     update_expr: bool,
     clickpack_path: Option<PathBuf>,
@@ -193,7 +193,7 @@ impl Default for App {
             last_chars: [Key::A; 9],
             char_idx: 0,
             expr_error: String::new(),
-            plot_points: vec![],
+            plot_points: Rc::new(vec![]),
             update_to_tag: None,
             update_expr: false,
             clickpack_path: None,
@@ -1831,12 +1831,22 @@ impl App {
                 0.0..num_actions as f64,
                 num_actions.min(MAX_PLOT_POINTS),
             );
-            self.plot_points = points.points().to_vec(); // save in cache
+            self.plot_points = points.points().to_vec().into(); // save in cache
             points
         } else {
-            // this clone is really expensive, but it is faster than
-            // recomputing the entire set of points each frame
-            PlotPoints::Owned(self.plot_points.clone())
+            // PlotPoints can either be an Owned(Vec<PlotPoint>) or a Generator(ExplicitGenerator),
+            // so we have to do this hack in order to not clone all plot points each frame
+            let plot_points = self.plot_points.clone();
+            PlotPoints::from_explicit_callback(
+                move |t| {
+                    plot_points
+                        .get(t as usize)
+                        .unwrap_or(&PlotPoint::new(0.0, 0.0))
+                        .y
+                },
+                0.0..self.plot_points.len().saturating_sub(1) as f64,
+                self.plot_points.len(),
+            )
         };
 
         let line = Line::new(plot_points).name(self.conf.expr_variable.to_string());
