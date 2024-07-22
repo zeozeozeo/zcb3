@@ -1832,6 +1832,7 @@ impl Replay {
         let is_new = action_data_size == size_of::<ActionDataNew>();
 
         // read action data
+        let mut prev_frame_idx = 0;
         for _ in 0..num_actions {
             let mut buf = [0; size_of::<ActionDataNew>()];
             reader.read_exact(&mut buf)?;
@@ -1839,11 +1840,16 @@ impl Replay {
                 let action: ActionDataNew = unsafe { std::mem::transmute(buf) };
                 let button = Button::from_button_idx(action.button, action.hold);
                 let time = action.frame as f32 / self.fps;
-                let f = frame_datas
+                let frame_idx = frame_datas
                     .iter()
-                    .find(|e| e.frame == action.frame && e.player2 == action.player2)
-                    .cloned()
-                    .unwrap_or_default();
+                    .skip(prev_frame_idx)
+                    .position(|e| e.frame == action.frame && e.player2 == action.player2);
+                let f = if let Some(idx) = frame_idx {
+                    prev_frame_idx = idx;
+                    &frame_datas[idx]
+                } else {
+                    &FrameData::default()
+                };
                 if action.player2 {
                     self.process_action_p2(time, button, action.frame);
                     self.extended_p2(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
@@ -1855,11 +1861,16 @@ impl Replay {
                 let action: ActionData = unsafe { std::ptr::read(buf.as_ptr() as *const _) };
                 let button = Button::from_down(action.hold);
                 let time = action.frame as f32 / self.fps;
-                let f = frame_datas
+                let frame_idx = frame_datas
                     .iter()
-                    .find(|e| e.frame == action.frame && e.player2 == action.player2)
-                    .cloned()
-                    .unwrap_or_default();
+                    .skip(prev_frame_idx)
+                    .position(|e| e.frame == action.frame && e.player2 == action.player2);
+                let f = if let Some(idx) = frame_idx {
+                    prev_frame_idx = idx;
+                    &frame_datas[idx]
+                } else {
+                    &FrameData::default()
+                };
                 if action.player2 {
                     self.process_action_p2(time, button, action.frame);
                     self.extended_p2(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
