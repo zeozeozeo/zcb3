@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.5.2"
+version = "3.5.3"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -17,27 +17,27 @@ members = [".", "bot", "bot/ybot_fmt", "bot/gdr"]
 
 [dependencies]
 clap = { version = "4.5.19", features = ["derive"] }
-eframe = "0.28"
-egui-modal = { git = "https://github.com/zeozeozeo/egui-modal" }
+eframe = "0.29.1"
+egui-modal = "0.5.0"
 env_logger = "0.11.5"
 image = { version = "0.25.2", default-features = false, features = ["ico", "png"] }
-rfd = "0.14.1"
+rfd = "0.15.0"
 bot = { path = "bot" }
 serde_json = "1"
 log = "0.4.21"
 anyhow = "1.0.89"
 rayon = "1.10.0"
-egui_extras = { version = "0.28", features = ["image"] }
+egui_extras = { version = "0.29.1", features = ["image"] }
 rustmatica = "0.2.0"
-egui_plot = "0.28"
+egui_plot = "0.29.0"
 serde = "1"
 self-replace = "1.5.0"
 ureq = "2.10.1"
 fastrand = "2.1.1"
-egui_clickpack_db = "0.3.0"
+egui_clickpack_db = "0.4.0"
 chrono = "0.4.38"
 timeago = "0.4.2"
-tempfile = "3.12.0"
+tempfile = "3.13.0"
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]

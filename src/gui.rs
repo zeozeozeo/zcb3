@@ -12,7 +12,7 @@ use eframe::{
 use egui_clickpack_db::ClickpackDb;
 use egui_modal::{Icon, Modal};
 use egui_plot::PlotPoint;
-use image::io::Reader as ImageReader;
+use image::ImageReader;
 use rfd::FileDialog;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -51,7 +51,10 @@ pub fn run_gui() -> Result<(), eframe::Error> {
         options,
         Box::new(|cc| {
             egui_extras::install_image_loaders(&cc.egui_ctx);
-            cc.egui_ctx.style_mut(|s| s.interaction.tooltip_delay = 0.0);
+            cc.egui_ctx.style_mut(|s| {
+                s.interaction.tooltip_delay = 0.0;
+                s.url_in_tooltip = true;
+            });
             Ok(Box::<App>::default())
         }),
     )
@@ -472,11 +475,11 @@ fn update_to_latest(tag: &str) -> Result<()> {
     log::debug!("releases response text: '{body}'");
     let v: Value = serde_json::from_str(&body)?;
 
-    let filename = if cfg!(windows) {
+    let filename = if cfg!(target_os = "windows") {
         "zcb3.exe"
-    } else if cfg!(macos) {
+    } else if cfg!(target_os = "macos") {
         "zcb3_macos"
-    } else if cfg!(unix) {
+    } else if cfg!(target_os = "linux") {
         "zcb3_linux" // might be any other unix-like OS, but we only support Linux for now
     } else {
         anyhow::bail!("unsupported on this platform");
@@ -1234,32 +1237,34 @@ impl App {
         }
 
         ui.collapsing("Supported file formats", |ui| {
-            ui.label("• Mega Hack Replay JSON (.mhr.json)");
-            ui.label("• Mega Hack Replay Binary (.mhr)");
-            ui.label("• TASbot Replay (.json)");
-            ui.label("• zBot Frame Replay (.zbf)");
-            ui.label("• OmegaBot 2 Replay (.replay)");
-            ui.label("• OmegaBot 3 Replay (.replay)");
-            ui.label("• yBot Frame (no extension by default, rename to .ybf)");
-            ui.label("• yBot 2 (.ybot)");
-            ui.label("• Echo (.echo, new binary format, new json format and old json format)");
-            ui.label("• Amethyst Replay (.thyst)");
-            ui.label("• osu! replay (.osr)");
-            ui.label("• GDMO Replay (.macro)");
-            ui.label("• 2.2 GDMO Replay (.macro, old non-Geode version)");
-            ui.label("• ReplayBot Replay (.replay)");
-            ui.label("• KD-BOT Replay (.kd)");
-            ui.label("• Rush Replay (.rsh)");
-            ui.label("• Plaintext (.txt)");
-            ui.label("• GDH Plaintext (.txt)");
-            ui.label("• ReplayEngine Replay (.re, old and new formats)");
-            ui.label("• DDHOR Replay (.ddhor, old frame format)");
-            ui.label("• xBot Frame (.xbot)");
-            ui.label("• xdBot (.xd, old and new formats)");
-            ui.label("• GDReplayFormat (.gdr, used in Geode GDMegaOverlay and 2.2 MH Replay)");
-            ui.label("• qBot (.qb)");
-            ui.label("• RBot (.rbot, old and new formats)");
-            ui.label("• Zephyrus (.zr, used in OpenHack)");
+            ui.label(
+                "• Mega Hack Replay JSON (.mhr.json)
+• Mega Hack Replay Binary (.mhr)
+• TASbot Replay (.json)
+• zBot Frame Replay (.zbf)
+• OmegaBot 2 Replay (.replay)
+• OmegaBot 3 Replay (.replay)
+• yBot Frame (no extension by default, rename to .ybf)
+• yBot 2 (.ybot)
+• Echo (.echo, new binary format, new json format and old json format)
+• Amethyst Replay (.thyst)
+• osu! replay (.osr)
+• GDMO Replay (.macro)
+• 2.2 GDMO Replay (.macro, old non-Geode version)
+• ReplayBot Replay (.replay)
+• KD-BOT Replay (.kd)
+• Rush Replay (.rsh)
+• Plaintext (.txt)
+• GDH Plaintext (.txt)
+• ReplayEngine Replay (.re, old and new formats)
+• DDHOR Replay (.ddhor, old frame format)
+• xBot Frame (.xbot)
+• xdBot (.xd, old and new formats)
+• GDReplayFormat (.gdr, used in Geode GDMegaOverlay and 2.2 MH Replay)
+• qBot (.qb)
+• RBot (.rbot, old and new formats)
+• Zephyrus (.zr, used in OpenHack)",
+            );
         });
 
         // show dialog if there is one
