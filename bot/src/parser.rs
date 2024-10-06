@@ -392,6 +392,8 @@ pub enum ReplayType {
     Rbot,
     /// Zephyrus (OpenHack) .zr files
     Zephyrus,
+    /// ReplayEngine 2 .re2 files
+    ReplayEngine2,
 }
 
 impl ReplayType {
@@ -436,6 +438,7 @@ impl ReplayType {
             "qb" => Qbot,
             "rbot" => Rbot,
             "zr" => Zephyrus,
+            "re2" => ReplayEngine2,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -477,6 +480,7 @@ impl Replay {
         "qb",
         "rbot",
         "zr",
+        "re2",
     ];
 
     pub fn build() -> Self {
@@ -540,6 +544,7 @@ impl Replay {
             ReplayType::Qbot => self.parse_qbot(reader)?,
             ReplayType::Rbot => self.parse_rbot(reader)?,
             ReplayType::Zephyrus => self.parse_zephyrus(reader)?,
+            ReplayType::ReplayEngine2 => self.parse_re2(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -1595,13 +1600,13 @@ impl Replay {
     }
 
     fn parse_replaybot<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
-        const REPLAYBOT_MAGIC: &[u8; 4] = b"RPLY";
+        const REPLAYBOT_MAGIC: [u8; 4] = *b"RPLY";
         let len = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(0))?;
 
         // check if its a version 2 frame replay
         let mut magicbuf = [0; 4];
-        if reader.read_exact(&mut magicbuf).is_err() || &magicbuf != REPLAYBOT_MAGIC {
+        if reader.read_exact(&mut magicbuf).is_err() || magicbuf != REPLAYBOT_MAGIC {
             anyhow::bail!(
                 "old replaybot replay format is not supported, as it does not store frames"
             )
@@ -2426,6 +2431,46 @@ impl Replay {
                     fix.player2.y_speed as f32,
                     fix.player2.rot,
                 );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_re2<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        #[repr(C)]
+        struct FrameData {
+            frame: u32,
+            hold: bool,
+            button: i32,
+            player2: bool,
+        }
+
+        // ensure magic
+        const RE2_MAGIC: [u8; 3] = *b"RE2";
+        let mut magicbuf = [0u8; 3];
+        if reader.read_exact(&mut magicbuf).is_err() || magicbuf != RE2_MAGIC {
+            anyhow::bail!(format!(
+                "invalid re2 magic (got: {magicbuf:?}, expect: {RE2_MAGIC:?})"
+            ))
+        }
+
+        // all re2 replays are 240 fps
+        self.fps = self.get_fps(240.0);
+
+        let num_actions = reader.read_u32::<LittleEndian>()?;
+        for _ in 0..num_actions {
+            let mut buf = [0; size_of::<FrameData>()];
+            reader.read_exact(&mut buf)?;
+            let action: FrameData = unsafe { std::mem::transmute(buf) };
+            let time = action.frame as f32 / 240.0;
+            let button = Button::from_button_idx(action.button, action.hold);
+            if action.player2 {
+                self.process_action_p2(time, button, action.frame);
+                self.extended_p2(action.hold, action.frame, 0.0, 0.0, 0.0, 0.0);
+            } else {
+                self.process_action_p1(time, button, action.frame);
+                self.extended_p1(action.hold, action.frame, 0.0, 0.0, 0.0, 0.0);
             }
         }
 

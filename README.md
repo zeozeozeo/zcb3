@@ -42,6 +42,7 @@ or the Guilded server: https://guilded.gg/clickbot
 * qBot (.qb)
 * RBot (.rbot, old and new formats)
 * Zephyrus (.zr, used in OpenHack)
+* ReplayEngine 2 Replay (.re2)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 

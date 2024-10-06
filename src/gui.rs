@@ -1263,7 +1263,8 @@ impl App {
 • GDReplayFormat (.gdr, used in Geode GDMegaOverlay and 2.2 MH Replay)
 • qBot (.qb)
 • RBot (.rbot, old and new formats)
-• Zephyrus (.zr, used in OpenHack)",
+• Zephyrus (.zr, used in OpenHack)
+• ReplayEngine 2 Replay (.re2)",
             );
         });
 
@@ -1676,20 +1677,22 @@ impl App {
                 depending on some variables.",
         );
         ui.collapsing("Defined variables", |ui| {
-            ui.label("• frame: Current frame");
-            ui.label("• x: Player X position");
-            ui.label("• y: Player Y position");
-            ui.label("• p: Percentage in level, 0-1");
-            ui.label("• player2: 1 if player 2, 0 if player 1");
-            ui.label("• rot: Player rotation");
-            ui.label("• accel: Player Y acceleration");
-            ui.label("• down: Whether the mouse is down, 1 or 0");
-            ui.label("• fps: The FPS of the replay");
-            ui.label("• time: Elapsed time in level, in seconds");
-            ui.label("• frames: Total amount of frames in replay");
-            ui.label("• level_time: Total time in level, in seconds");
-            ui.label("• rand: Random value in the range of 0 to 1");
-            ui.label("• delta: Frame delta between the current and previous action");
+            ui.label(
+                "• frame: Current frame
+• x: Player X position
+• y: Player Y position
+• p: Percentage in level, 0-1
+• player2: 1 if player 2, 0 if player 1
+• rot: Player rotation
+• accel: Player Y acceleration
+• down: Whether the mouse is down, 1 or 0
+• fps: The FPS of the replay
+• time: Elapsed time in level, in seconds
+• frames: Total amount of frames in replay
+• level_time: Total time in level, in seconds
+• rand: Random value in the range of 0 to 1
+• delta: Frame delta between the current and previous action",
+            );
             ui.label(
                 RichText::new(
                     "NOTE: Some variables may not be set due to different replay formats",
