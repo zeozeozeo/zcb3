@@ -65,15 +65,15 @@ struct Args {
     pitch_step: f32,
 
     #[arg(long, help = "Hard click timing", default_value_t = 2.0)]
-    hard_timing: f32,
+    hard_timing: f64,
     #[arg(long, help = "Regular click timing", default_value_t = 0.15)]
-    regular_timing: f32,
+    regular_timing: f64,
     #[arg(
         long,
         help = "Soft click timing (anything below is microclicks)",
         default_value_t = 0.025
     )]
-    soft_timing: f32,
+    soft_timing: f64,
 
     #[arg(long, help = "Enable spam volume changes", default_value_t = true)]
     vol_enabled: bool,
@@ -82,7 +82,7 @@ struct Args {
         help = "Time between actions where clicks are considered spam clicks",
         default_value_t = 0.3
     )]
-    spam_time: f32,
+    spam_time: f64,
     #[arg(
         long,
         help = "The spam volume offset is multiplied by this value",

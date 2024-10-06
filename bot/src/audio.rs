@@ -139,8 +139,8 @@ fn interpolate_frame(
 }
 
 #[inline(always)]
-fn time_to_frame(sample_rate: u32, time: f32) -> usize {
-    (time * sample_rate as f32) as usize
+fn time_to_frame(sample_rate: u32, time: f64) -> usize {
+    (time * sample_rate as f64) as usize
 }
 
 #[derive(Clone, Debug, Default)]
@@ -280,7 +280,7 @@ impl AudioSegment {
         Self::from_media_source(Box::new(Cursor::new(data)))
     }
 
-    pub fn silent(rate: u32, time: f32) -> Self {
+    pub fn silent(rate: u32, time: f64) -> Self {
         Self {
             sample_rate: rate,
             frames: vec![Frame::ZERO; time_to_frame(rate, time)],
@@ -313,12 +313,12 @@ impl AudioSegment {
 
     /// Convert time to samples. Clamps maximum to the segment length.
     #[inline(always)]
-    fn time_to_frame(&self, time: f32) -> usize {
+    fn time_to_frame(&self, time: f64) -> usize {
         time_to_frame(self.sample_rate, time).min(self.frames.len().saturating_sub(1))
     }
 
     #[inline]
-    pub fn overlay_at(&mut self, time: f32, other: &AudioSegment) {
+    pub fn overlay_at(&mut self, time: f64, other: &AudioSegment) {
         assert!(self.sample_rate == other.sample_rate);
 
         let start = self.time_to_frame(time);
@@ -333,7 +333,7 @@ impl AudioSegment {
     }
 
     #[inline]
-    pub fn overlay_at_vol(&mut self, time: f32, other: &AudioSegment, volume: f32, dur: f32) {
+    pub fn overlay_at_vol(&mut self, time: f64, other: &AudioSegment, volume: f32, dur: f64) {
         assert!(self.sample_rate == other.sample_rate);
 
         let start = self.time_to_frame(time);
@@ -450,7 +450,7 @@ impl AudioSegment {
             return 0;
         }
         let time = self.duration() - ago;
-        self.time_to_frame(time.as_secs_f32())
+        self.time_to_frame(time.as_secs_f64())
     }
 
     #[inline(always)]

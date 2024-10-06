@@ -183,8 +183,8 @@ impl PlayerClicks {
     }
 
     /// Finds the longest click amongst all clicks.
-    pub fn longest_click(&self) -> f32 {
-        let mut max = 0.0f32;
+    pub fn longest_click(&self) -> f64 {
+        let mut max = 0.0f64;
         for segments in [
             &self.hardclicks,
             &self.hardreleases,
@@ -196,7 +196,7 @@ impl PlayerClicks {
             &self.microreleases,
         ] {
             for segment in segments {
-                max = max.max(segment.duration().as_secs_f32());
+                max = max.max(segment.duration().as_secs_f64());
             }
         }
         max
@@ -264,9 +264,9 @@ impl Default for Pitch {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct Timings {
-    pub hard: f32,
-    pub regular: f32,
-    pub soft: f32,
+    pub hard: f64,
+    pub regular: f64,
+    pub soft: f64,
 }
 
 impl Default for Timings {
@@ -376,7 +376,7 @@ impl Default for ClickpackConversionSettings {
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub struct VolumeSettings {
     pub enabled: bool,
-    pub spam_time: f32,
+    pub spam_time: f64,
     pub spam_vol_offset_factor: f32,
     pub max_spam_vol_offset: f32,
     pub change_releases_volume: bool,
@@ -483,8 +483,8 @@ impl Clickpack {
             || self.right2.num_sounds() != 0
     }
 
-    fn longest_click(&self) -> f32 {
-        let mut longest = 0.0f32;
+    fn longest_click(&self) -> f64 {
+        let mut longest = 0.0f64;
         for click in [
             &self.player1,
             &self.player2,
@@ -515,7 +515,7 @@ pub struct Bot {
     /// Clicks/releases for player 1 and player 2.
     pub clickpack: Clickpack,
     /// The longest sound (in seconds, not counting the noise sound).
-    pub longest_click: f32,
+    pub longest_click: f64,
     /// Noise audio file. Will be resampled to `sample_rate`.
     pub noise: Option<AudioSegment>,
     /// Output sample rate. Clicks will be sinc-resampled to this rate.
@@ -759,9 +759,9 @@ impl Bot {
         );
 
         let longest_time_offset = if expr_var == ExprVariable::TimeOffset {
-            self.expr_range(replay).1 as f32
+            self.expr_range(replay).1
         } else {
-            0.
+            0.0
         };
 
         let mut segment = AudioSegment::silent(
@@ -820,7 +820,7 @@ impl Bot {
                 click = click.random_pitch(); // if no pitch table is generated, returns self
             }
 
-            let mut until_next = f32::INFINITY;
+            let mut until_next = f64::INFINITY;
             if cut_sounds {
                 // find the time until the next action, so we know when to cut
                 // off this sound
@@ -834,7 +834,7 @@ impl Bot {
 
             // overlay
             segment.overlay_at_vol(
-                action.time + time_offset,
+                action.time + time_offset as f64,
                 click,
                 1.0 + action.vol_offset + expr_vol,
                 until_next,
@@ -847,10 +847,10 @@ impl Bot {
 
             while noise_duration < segment.duration() {
                 segment.overlay_at_vol(
-                    noise_duration.as_secs_f32(),
+                    noise_duration.as_secs_f64(),
                     noise_segment,
                     noise_volume,
-                    f32::INFINITY, // don't cut off
+                    f64::INFINITY, // don't cut off
                 );
                 noise_duration += noise_segment.duration();
             }

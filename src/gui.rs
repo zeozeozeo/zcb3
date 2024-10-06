@@ -178,7 +178,7 @@ struct App {
     clickpack_has_noise: bool,
     expr_variable_variation_negative: bool,
     override_fps_enabled: bool,
-    override_fps: f32,
+    override_fps: f64,
     clickpack_db: ClickpackDb,
     show_clickpack_db: bool,
     clickpack_db_title: String,
@@ -1091,7 +1091,7 @@ impl App {
             let t = &mut self.conf.timings;
 
             drag_value(ui, &mut t.hard, "Hard timing",
-            t.regular..=f32::INFINITY,
+            t.regular..=f64::INFINITY,
             "Hardclick/hardrelease timing");
             drag_value(ui, &mut t.regular, "Regular timing", t.soft..=t.hard,
             "Click/release timing");
@@ -1144,7 +1144,7 @@ impl App {
                     ui,
                     &mut vol.spam_time,
                     "Spam time (between actions)",
-                    0.0..=f32::INFINITY,
+                    0.0..=f64::INFINITY,
                     "Time between clicks which are considered spam clicks",
                 );
                 drag_value(
@@ -1172,7 +1172,7 @@ impl App {
         ui.horizontal(|ui| {
             ui.checkbox(&mut self.override_fps_enabled, "Override FPS");
             if self.override_fps_enabled {
-                drag_value(ui, &mut self.override_fps, "FPS", 0.0..=f32::INFINITY, "");
+                drag_value(ui, &mut self.override_fps, "FPS", 0.0..=f64::INFINITY, "");
             } else {
                 self.override_fps = self.replay.fps;
             }
@@ -1264,7 +1264,8 @@ impl App {
 • qBot (.qb)
 • RBot (.rbot, old and new formats)
 • Zephyrus (.zr, used in OpenHack)
-• ReplayEngine 2 Replay (.re2)",
+• ReplayEngine 2 Replay (.re2)
+• Silicate (.slc)",
             );
         });
 

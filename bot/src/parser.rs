@@ -26,7 +26,7 @@ impl ClickType {
     ///
     /// The click type and the volume offset.
     pub fn from_time(
-        time: f32,
+        time: f64,
         timings: Timings,
         is_click: bool,
         vol: VolumeSettings,
@@ -34,7 +34,7 @@ impl ClickType {
         let rand_var = f32_range(-vol.volume_var..=vol.volume_var);
         let vol_offset =
             if vol.enabled && time < vol.spam_time && !(!vol.change_releases_volume && !is_click) {
-                let offset = (vol.spam_time - time) * vol.spam_vol_offset_factor;
+                let offset = (vol.spam_time - time) as f32 * vol.spam_vol_offset_factor;
                 (offset.clamp(0.0, vol.max_spam_vol_offset) + rand_var) * vol.global_volume
             } else {
                 rand_var * vol.global_volume
@@ -274,7 +274,7 @@ impl Button {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Action {
     /// Time since the replay was started (in seconds).
-    pub time: f32,
+    pub time: f64,
     /// What player this action is for.
     pub player: Player,
     /// Click type for this player.
@@ -286,7 +286,7 @@ pub struct Action {
 }
 
 impl Action {
-    pub const fn new(time: f32, player: Player, click: Click, vol_offset: f32, frame: u32) -> Self {
+    pub const fn new(time: f64, player: Player, click: Click, vol_offset: f32, frame: u32) -> Self {
         Self {
             time,
             player,
@@ -313,15 +313,15 @@ pub struct ExtendedAction {
     pub y: f32,
     pub y_accel: f32,
     pub rot: f32,
-    pub fps_change: Option<f32>,
+    pub fps_change: Option<f64>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct Replay {
     /// Framerate of the replay.
-    pub fps: f32,
+    pub fps: f64,
     /// Duration of the replay (in seconds).
-    pub duration: f32,
+    pub duration: f64,
     /// Actions used for generating clicks.
     pub actions: Vec<Action>,
     /// Whether to populate the `extended` vector.
@@ -331,7 +331,7 @@ pub struct Replay {
 
     // used for determining the click type
     prev_action: (Option<ClickType>, Option<ClickType>),
-    prev_time: (f32, f32),
+    prev_time: (f64, f64),
 
     // used for generating additional click info
     timings: Timings,
@@ -339,7 +339,7 @@ pub struct Replay {
 
     /// Whether to sort actions.
     sort_actions: bool,
-    pub override_fps: Option<f32>,
+    pub override_fps: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -394,6 +394,8 @@ pub enum ReplayType {
     Zephyrus,
     /// ReplayEngine 2 .re2 files
     ReplayEngine2,
+    /// Silicate .slc files
+    Silicate,
 }
 
 impl ReplayType {
@@ -439,6 +441,7 @@ impl ReplayType {
             "rbot" => Rbot,
             "zr" => Zephyrus,
             "re2" => ReplayEngine2,
+            "slc" => Silicate,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -481,6 +484,7 @@ impl Replay {
         "rbot",
         "zr",
         "re2",
+        "slc",
     ];
 
     pub fn build() -> Self {
@@ -492,7 +496,7 @@ impl Replay {
         self
     }
 
-    pub fn with_override_fps(mut self, override_fps: Option<f32>) -> Self {
+    pub fn with_override_fps(mut self, override_fps: Option<f64>) -> Self {
         self.override_fps = override_fps;
         self
     }
@@ -545,6 +549,7 @@ impl Replay {
             ReplayType::Rbot => self.parse_rbot(reader)?,
             ReplayType::Zephyrus => self.parse_zephyrus(reader)?,
             ReplayType::ReplayEngine2 => self.parse_re2(reader)?,
+            ReplayType::Silicate => self.parse_silicate(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -573,7 +578,7 @@ impl Replay {
         self
     }
 
-    fn process_action_p1(&mut self, time: f32, button: Button, frame: u32) {
+    fn process_action_p1(&mut self, time: f64, button: Button, frame: u32) {
         let down = button.is_down();
         if !down && self.actions.is_empty() {
             return;
@@ -601,7 +606,7 @@ impl Replay {
     }
 
     // .0 is changed to .1 here, because it's the second player
-    fn process_action_p2(&mut self, time: f32, button: Button, frame: u32) {
+    fn process_action_p2(&mut self, time: f64, button: Button, frame: u32) {
         let down = button.is_down();
         if !down && self.actions.is_empty() {
             return;
@@ -703,13 +708,13 @@ impl Replay {
     }
 
     #[inline]
-    fn fps_change(&mut self, fps_change: f32) {
+    fn fps_change(&mut self, fps_change: f64) {
         if let Some(last) = self.extended.last_mut() {
             last.fps_change = Some(fps_change);
         }
     }
 
-    fn get_fps(&self, actual: f32) -> f32 {
+    fn get_fps(&self, actual: f64) -> f64 {
         if let Some(override_fps) = self.override_fps {
             override_fps
         } else {
@@ -718,7 +723,7 @@ impl Replay {
     }
 
     fn parse_ybotf<R: Read>(&mut self, mut reader: R) -> Result<()> {
-        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
         let num_actions = reader.read_i32::<LittleEndian>()?;
 
         for _ in (12..12 + num_actions * 8).step_by(8) {
@@ -726,7 +731,7 @@ impl Replay {
             let state = reader.read_u32::<LittleEndian>()?;
             let down = (state & 0b10) == 2;
             let p2 = (state & 0b01) == 1;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
 
             if p2 {
                 self.process_action_p2(time, Button::from_down(down), frame);
@@ -792,7 +797,7 @@ impl Replay {
             anyhow::bail!("xpos replays not supported, because they doesn't store frames")
         };
 
-        self.fps = self.get_fps(decoded.initial_fps);
+        self.fps = self.get_fps(decoded.initial_fps as f64);
         let mut current_fps = self.fps;
 
         for action in decoded.clicks {
@@ -803,7 +808,7 @@ impl Replay {
                     continue;
                 }
             };
-            let time = frame as f32 / current_fps;
+            let time = frame as f64 / current_fps;
             match action.click_type {
                 Obot2ClickType::Player1Down => {
                     self.process_action_p1(time, Button::from_down(true), frame);
@@ -822,8 +827,8 @@ impl Replay {
                     self.extended_p2(false, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::FpsChange(fps) => {
-                    current_fps = fps;
-                    self.fps_change(fps);
+                    current_fps = fps as f64;
+                    self.fps_change(current_fps);
                 }
                 Obot2ClickType::None => {}
             }
@@ -842,13 +847,13 @@ impl Replay {
             log::error!("zbf speedhack is 0.0, defaulting to 1.0");
             speedhack = 1.0; // reset to 1 so we don't get Infinity as fps
         }
-        self.fps = self.get_fps(1.0 / delta / speedhack);
+        self.fps = self.get_fps(1.0 / delta as f64 / speedhack as f64);
 
         for _ in (8..len).step_by(6).enumerate() {
             let frame = reader.read_i32::<LittleEndian>()?;
             let down = reader.read_u8()? == 0x31;
             let p1 = reader.read_u8()? == 0x31;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
 
             if p1 {
                 self.process_action_p1(time, Button::from_down(down), frame as _);
@@ -880,7 +885,7 @@ impl Replay {
             v.get("fps")
                 .context("couldn't get 'fps' field")?
                 .to_f64()
-                .context("couldn't convert 'fps' field to float")? as f32,
+                .context("couldn't convert 'fps' field to float")?,
         );
         let events = v
             .get("macro")
@@ -894,7 +899,7 @@ impl Replay {
                 .context("couldn't get 'frame' field")?
                 .to_u64()
                 .context("'frame' is not a number")?;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
 
             let p1 = ev
                 .get("player_1")
@@ -954,7 +959,7 @@ impl Replay {
                 .get("fps")
                 .context("failed to get 'fps' field")?
                 .to_f64()
-                .context("'fps' field is not a float")? as f32,
+                .context("'fps' field is not a float")?,
         );
 
         let events = v
@@ -969,7 +974,7 @@ impl Replay {
                 .context("failed to get 'frame' field")?
                 .to_u64()
                 .context("'frame' field is not a number")?;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
 
             let down = if let Some(down) = ev.get("down") {
                 down.to_bool().context("'down' field is not a bool")?
@@ -1038,7 +1043,7 @@ impl Replay {
         }
 
         reader.seek(SeekFrom::Start(12))?;
-        self.fps = self.get_fps(reader.read_u32::<LittleEndian>()? as f32);
+        self.fps = self.get_fps(reader.read_u32::<LittleEndian>()? as f64);
         log::debug!("fps: {}", self.fps);
         reader.seek(SeekFrom::Start(28))?;
         let num_actions = reader.read_u32::<LittleEndian>()?;
@@ -1049,7 +1054,7 @@ impl Replay {
             let down = reader.read_u8()? == 1;
             let p1 = reader.read_u8()? == 0;
             let frame = reader.read_u32::<LittleEndian>()?;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
             // skip 24 bytes
             reader.seek(SeekFrom::Current(24))?;
 
@@ -1082,14 +1087,14 @@ impl Replay {
         let action_size = if replay_type == 0x44424700 { 24 } else { 6 };
         let dbg = action_size == 24;
         reader.seek(SeekFrom::Start(24))?;
-        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
         reader.seek(SeekFrom::Start(48))?;
 
         for _ in (48..len).step_by(action_size) {
             let frame = reader.read_u32::<LittleEndian>()?;
             let down = reader.read_u8()? == 1;
             let p1 = reader.read_u8()? == 0;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
 
             // read extra vars (only saved in debug mode)
             let x = if dbg {
@@ -1136,7 +1141,7 @@ impl Replay {
             v.get("FPS")
                 .context("couldn't get 'FPS' field")?
                 .to_f64()
-                .context("'FPS' field is not a float")? as f32,
+                .context("'FPS' field is not a float")?,
         );
         let starting_frame = v
             .get("Starting Frame")
@@ -1155,7 +1160,7 @@ impl Replay {
                 .to_u64()
                 .context("'Frame' field is not a number")?
                 + starting_frame;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
             let p2 = action
                 .get("Player 2")
                 .context("couldn't get 'Player 2' field")?
@@ -1217,7 +1222,7 @@ impl Replay {
         self.fps = self.get_fps(
             v.get("fps")
                 .context("no 'fps' field")?
-                .to_f32()
+                .to_f64()
                 .context("'fps' field is not a float")?,
         );
         for action in v
@@ -1231,7 +1236,7 @@ impl Replay {
                 .context("no 'frame' field")?
                 .to_u64()
                 .context("'frame' field is not a number")?;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
             let down = action
                 .get("holding")
                 .context("no 'holding' field")?
@@ -1289,11 +1294,11 @@ impl Replay {
         reader.read_to_string(&mut data)?;
         let mut lines = data.split('\n');
 
-        let mut get_times = |player, is_clicks| -> Result<Vec<(Player, bool, f32)>> {
+        let mut get_times = |player, is_clicks| -> Result<Vec<(Player, bool, f64)>> {
             let num: usize = lines.next().context("unexpected EOF")?.parse()?;
-            let mut times: Vec<(Player, bool, f32)> = Vec::with_capacity(num);
+            let mut times: Vec<(Player, bool, f64)> = Vec::with_capacity(num);
             for _ in 0..num {
-                let time: f32 = lines.next().context("unexpected EOF")?.parse()?;
+                let time = lines.next().context("unexpected EOF")?.parse()?;
                 times.push((player, is_clicks, time));
             }
             Ok(times)
@@ -1404,7 +1409,7 @@ impl Replay {
                 continue; // -12345 is reserved for the rng seed of the replay
             }
             current_time += delta_time;
-            let time = current_time as f32 / self.fps / speed;
+            let time = current_time as f64 / self.fps / speed;
 
             let keys = vec_params[3].parse::<i32>()?;
 
@@ -1463,9 +1468,9 @@ impl Replay {
             let action: GdmoAction = unsafe { std::mem::transmute(buf) };
             let frame = (action.time * self.fps as f64) as u32;
             if action.player1 {
-                self.process_action_p1(action.time as f32, Button::from_down(action.press), frame);
+                self.process_action_p1(action.time, Button::from_down(action.press), frame);
             } else {
-                self.process_action_p2(action.time as f32, Button::from_down(action.press), frame);
+                self.process_action_p2(action.time, Button::from_down(action.press), frame);
             }
         }
 
@@ -1552,7 +1557,7 @@ impl Replay {
         let mut reader = Cursor::new(data);
 
         use std::mem::size_of;
-        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
 
         let num_actions = reader.read_u32::<LittleEndian>()?;
         let _num_frame_captures = reader.read_u32::<LittleEndian>()?;
@@ -1572,7 +1577,7 @@ impl Replay {
             reader.read_exact(&mut buf)?;
             let action: GdmoAction = unsafe { std::mem::transmute(buf) };
 
-            let time = action.frame as f32 / self.fps;
+            let time = action.frame as f64 / self.fps;
             if action.player2 {
                 self.process_action_p2(time, Button::from_down(action.press), action.frame);
                 self.extended_p2(
@@ -1620,10 +1625,10 @@ impl Replay {
             anyhow::bail!("only frame replays are supported")
         }
 
-        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
         for _ in (10..len).step_by(5) {
             let frame = reader.read_u32::<LittleEndian>()?;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
             let state = reader.read_u8()?;
             let down = state & 0x1 != 0;
             let player2 = state >> 1 != 0;
@@ -1644,11 +1649,11 @@ impl Replay {
         let len = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(0))?;
 
-        self.fps = self.get_fps(reader.read_i16::<LittleEndian>()? as f32);
+        self.fps = self.get_fps(reader.read_i16::<LittleEndian>()? as f64);
 
         for _ in (2..len).step_by(5) {
             let frame = reader.read_i32::<LittleEndian>()?;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
             let state = reader.read_u8()?;
             let down = (state & 1) != 0;
             let p2 = (state >> 1) != 0;
@@ -1669,11 +1674,11 @@ impl Replay {
         let len = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(0))?;
 
-        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
 
         for _ in (4..len).step_by(6) {
             let frame = reader.read_i32::<LittleEndian>()?;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
             let down = reader.read_u8()? == 1;
             let p2 = reader.read_u8()? == 1;
 
@@ -1704,7 +1709,7 @@ impl Replay {
                 log::warn!("plaintext: line {i} length < 3, skipping");
                 continue;
             }
-            let frame: f32 = split.next().unwrap().parse()?;
+            let frame: f64 = split.next().unwrap().parse()?;
             let time = frame / self.fps;
             let down = split.next().unwrap().parse::<u8>()? == 1;
             let pbutton: i32 = split.next().unwrap().parse()?;
@@ -1751,11 +1756,11 @@ impl Replay {
             return self.parse_obot2(reader);
         };
 
-        self.fps = self.get_fps(replay.initial_fps);
+        self.fps = self.get_fps(replay.initial_fps as f64);
         let mut current_fps = self.fps;
 
         for action in replay.clicks {
-            let time = action.frame as f32 / current_fps;
+            let time = action.frame as f64 / current_fps;
             match action.click_type {
                 Obot3ClickType::Player1Down => {
                     self.process_action_p1(time, Button::from_down(true), action.frame);
@@ -1774,8 +1779,8 @@ impl Replay {
                     self.extended_p2(false, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::FpsChange(fps) => {
-                    current_fps = fps;
-                    self.fps_change(fps);
+                    current_fps = fps as f64;
+                    self.fps_change(current_fps);
                 }
                 Obot3ClickType::None => {}
             }
@@ -1789,7 +1794,7 @@ impl Replay {
         let file_len = reader.seek(SeekFrom::End(0))?;
         reader.seek(SeekFrom::Start(0))?;
 
-        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()?);
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
         let num_frame_actions = reader.read_i32::<LittleEndian>()?;
         let num_actions = reader.read_i32::<LittleEndian>()?;
 
@@ -1844,7 +1849,7 @@ impl Replay {
             if is_new {
                 let action: ActionDataNew = unsafe { std::mem::transmute(buf) };
                 let button = Button::from_button_idx(action.button, action.hold);
-                let time = action.frame as f32 / self.fps;
+                let time = action.frame as f64 / self.fps;
                 let frame_idx = frame_datas
                     .iter()
                     .skip(prev_frame_idx)
@@ -1865,7 +1870,7 @@ impl Replay {
             } else {
                 let action: ActionData = unsafe { std::ptr::read(buf.as_ptr() as *const _) };
                 let button = Button::from_down(action.hold);
-                let time = action.frame as f32 / self.fps;
+                let time = action.frame as f64 / self.fps;
                 let frame_idx = frame_datas
                     .iter()
                     .skip(prev_frame_idx)
@@ -1902,12 +1907,12 @@ impl Replay {
             );
         }
 
-        self.fps = self.get_fps(reader.read_i16::<LittleEndian>()? as f32);
+        self.fps = self.get_fps(reader.read_i16::<LittleEndian>()? as f64);
         let num_p1 = reader.read_i32::<LittleEndian>()?; // num p1 actions
         let _num_p2 = reader.read_i32::<LittleEndian>()?; // num p2 actions
 
         for i in (14..len).step_by(5) {
-            let frame = reader.read_f32::<LittleEndian>()?;
+            let frame = reader.read_f32::<LittleEndian>()? as f64;
             let time = frame / self.fps;
             let down = reader.read_u8()? == 0;
             let p2 = i - 14 >= num_p1 as u64 * 5;
@@ -1934,7 +1939,7 @@ impl Replay {
                 .next()
                 .context("first fps line doesn't exist, did you select an empty file?")?
                 .trim()
-                .parse::<u64>()? as f32,
+                .parse::<u64>()? as f64,
         );
 
         if lines.next().context("second line doesn't exist")?.trim() != "frames" {
@@ -1963,7 +1968,7 @@ impl Replay {
             // 3 - p2 down
             let player2 = state > 1;
             let down = state % 2 == 1;
-            let time = frame as f32 / self.fps;
+            let time = frame as f64 / self.fps;
 
             if player2 {
                 self.process_action_p2(time, Button::from_down(down), frame);
@@ -1983,7 +1988,7 @@ impl Replay {
         let date = replay.get(Meta::DATE)?;
         let presses = replay.get(Meta::PRESSES)?;
         let frames = replay.get(Meta::FRAMES)?;
-        let mut current_fps = self.get_fps(replay.get(Meta::FPS)?);
+        let mut current_fps = self.get_fps(replay.get(Meta::FPS)? as f64);
         self.fps = current_fps;
         let total_presses = replay.get(Meta::TOTAL_PRESSES)?;
         let version = replay.version();
@@ -2006,7 +2011,7 @@ impl Replay {
 
             match timed_action.action {
                 Action::Button(p1, push, button) => {
-                    let time = frame as f32 / current_fps;
+                    let time = frame as f64 / current_fps;
                     let b = match button {
                         PlayerButton::Jump => Button::from_down(push),
                         PlayerButton::Left => Button::from_left_down(push),
@@ -2021,8 +2026,8 @@ impl Replay {
                     }
                 }
                 Action::FPS(fps) => {
-                    self.fps_change(fps);
-                    current_fps = fps;
+                    current_fps = fps as f64;
+                    self.fps_change(current_fps);
                 }
             }
         }
@@ -2053,7 +2058,7 @@ impl Replay {
                 self.fps = if let Some(override_fps) = self.override_fps {
                     override_fps
                 } else {
-                    split.next().context("failed to get fps")?.parse::<f32>()?
+                    split.next().context("failed to get fps")?.parse::<f64>()?
                 };
                 continue;
             }
@@ -2095,10 +2100,10 @@ impl Replay {
                 Button::from_down(push)
             };
             if p1 {
-                self.process_action_p1(frame as f32 / self.fps, b, frame as u32);
+                self.process_action_p1(frame as f64 / self.fps, b, frame as u32);
                 self.extended_p1(push, frame as u32, x, y, 0.0, 0.0);
             } else {
-                self.process_action_p2(frame as f32 / self.fps, b, frame as u32);
+                self.process_action_p2(frame as f64 / self.fps, b, frame as u32);
                 self.extended_p2(push, frame as u32, x, y, 0.0, 0.0);
             }
         }
@@ -2112,13 +2117,13 @@ impl Replay {
         self.fps = if let Some(override_fps) = self.override_fps {
             override_fps
         } else {
-            replay.framerate
+            replay.framerate as f64
         };
         for input in &replay.inputs {
             let time = if input.correction.time != 0.0 {
-                input.correction.time
+                input.correction.time as f64
             } else {
-                input.frame as f32 / self.fps
+                input.frame as f64 / self.fps
             };
             if input.player2 {
                 self.process_action_p2(time, Button::from_down(input.down), input.frame);
@@ -2188,9 +2193,9 @@ impl Replay {
         self.fps = if let Some(override_fps) = self.override_fps {
             override_fps
         } else {
-            replay.initial_fps
+            replay.initial_fps as f64
         };
-        let mut fps = replay.initial_fps;
+        let mut fps = replay.initial_fps as f64;
         for click in replay.clicks {
             match click.action {
                 Action::Button {
@@ -2205,14 +2210,14 @@ impl Replay {
                         PlayerButton::Right => Button::from_right_down(push),
                     };
                     let time = if click.time != 0.0 {
-                        click.time as f32
+                        click.time
                     } else {
                         let actual_fps = if let Some(override_fps) = self.override_fps {
                             override_fps
                         } else {
                             fps
                         };
-                        click.frame as f32 / actual_fps
+                        click.frame as f64 / actual_fps
                     };
                     if is_p2 {
                         self.process_action_p2(time, b, click.frame);
@@ -2224,8 +2229,8 @@ impl Replay {
                 }
                 Action::FPS(new_fps) => {
                     if self.override_fps.is_none() {
-                        self.fps_change(new_fps);
-                        fps = new_fps;
+                        fps = new_fps as f64;
+                        self.fps_change(fps);
                     }
                 }
             }
@@ -2240,7 +2245,7 @@ impl Replay {
         self.fps = if let Some(override_fps) = self.override_fps {
             override_fps
         } else {
-            fps as f32
+            fps as f64
         };
 
         let num_actions = d.read_u32::<LittleEndian>()?;
@@ -2249,10 +2254,10 @@ impl Replay {
             let hold = d.read_u8()? != 0;
             let p2 = d.read_u8()? != 0;
             if p2 {
-                self.process_action_p2(frame as f32 / self.fps, Button::from_down(hold), frame);
+                self.process_action_p2(frame as f64 / self.fps, Button::from_down(hold), frame);
                 // self.extended_p2(hold, frame, 0.0, 0.0, 0.0, 0.0);
             } else {
-                self.process_action_p1(frame as f32 / self.fps, Button::from_down(hold), frame);
+                self.process_action_p1(frame as f64 / self.fps, Button::from_down(hold), frame);
                 // self.extended_p1(hold, frame, 0.0, 0.0, 0.0, 0.0);
             }
         }
@@ -2293,7 +2298,7 @@ impl Replay {
         self.fps = if let Some(override_fps) = self.override_fps {
             override_fps
         } else {
-            fps as f32
+            fps as f64
         };
         let num_actions = reader.read_u32::<LittleEndian>()?;
         for _ in 0..num_actions {
@@ -2301,10 +2306,10 @@ impl Replay {
             let push = reader.read_u8()? != 0;
             let p1 = reader.read_u8()? != 0;
             if p1 {
-                self.process_action_p1(frame as f32 / self.fps, Button::from_down(push), frame);
+                self.process_action_p1(frame as f64 / self.fps, Button::from_down(push), frame);
                 self.extended_p1(push, frame, 0.0, 0.0, 0.0, 0.0);
             } else {
-                self.process_action_p2(frame as f32 / self.fps, Button::from_down(push), frame);
+                self.process_action_p2(frame as f64 / self.fps, Button::from_down(push), frame);
                 self.extended_p2(push, frame, 0.0, 0.0, 0.0, 0.0);
             }
         }
@@ -2364,7 +2369,7 @@ impl Replay {
             );
         }
 
-        self.fps = self.get_fps(header.fps as f32);
+        self.fps = self.get_fps(header.fps as f64);
 
         // read actions
         for _ in 0..header.num_actions {
@@ -2375,7 +2380,7 @@ impl Replay {
             let player2 = (action.flags & 0b10000000) != 0;
             let push = (action.flags & 0b01000000) != 0;
             let button = Button::from_button_idx(((action.flags & 0b00110000) >> 4) as i32, push);
-            let time = action.frame as f32 / self.fps;
+            let time = action.frame as f64 / self.fps;
             if player2 {
                 self.process_action_p2(time, button, action.frame);
             } else {
@@ -2463,7 +2468,7 @@ impl Replay {
             let mut buf = [0; size_of::<FrameData>()];
             reader.read_exact(&mut buf)?;
             let action: FrameData = unsafe { std::mem::transmute(buf) };
-            let time = action.frame as f32 / 240.0;
+            let time = action.frame as f64 / self.fps;
             let button = Button::from_button_idx(action.button, action.hold);
             if action.player2 {
                 self.process_action_p2(time, button, action.frame);
@@ -2474,6 +2479,38 @@ impl Replay {
             }
         }
 
+        Ok(())
+    }
+
+    fn parse_silicate<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        self.fps = self.get_fps(reader.read_f64::<LittleEndian>()?);
+        let num_actions = reader.read_u32::<LittleEndian>()?;
+        for _ in 0..num_actions {
+            let action = reader.read_u32::<LittleEndian>()?;
+            // first 28 bits - frame
+            // 29th bit - p2 (1 = p2, 0 = p1)
+            // 30-31st bits - button (1 = click, 2 = left, 3 = right, 0 is reserved)
+            // 32nd bit - down (1 = down, 0 = up)
+            let frame = action >> 4;
+            let player2 = (action & 0b1000) != 0;
+            let down = (action & 0b0001) != 0;
+            let button = Button::from_button_idx(((action & 0b0110) >> 1) as i32, down);
+            let time = frame as f64 / self.fps;
+            if player2 {
+                self.process_action_p2(time, Button::from_button_idx(button as i32, down), frame);
+                self.extended_p2(down, frame, 0.0, 0.0, 0.0, 0.0);
+            } else {
+                self.process_action_p1(time, Button::from_button_idx(button as i32, down), frame);
+                self.extended_p1(down, frame, 0.0, 0.0, 0.0, 0.0);
+            }
+        }
+
+        // read seed for the fun of it
+        if let Ok(seed) = reader.read_u64::<LittleEndian>() {
+            log::info!("silicate: seed: {seed}");
+        } else {
+            log::info!("silicate: no seed stored in macro");
+        }
         Ok(())
     }
 
