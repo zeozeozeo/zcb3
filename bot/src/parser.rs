@@ -2497,10 +2497,10 @@ impl Replay {
             let button = Button::from_button_idx(((action & 0b0110) >> 1) as i32, down);
             let time = frame as f64 / self.fps;
             if player2 {
-                self.process_action_p2(time, Button::from_button_idx(button as i32, down), frame);
+                self.process_action_p2(time, button, frame);
                 self.extended_p2(down, frame, 0.0, 0.0, 0.0, 0.0);
             } else {
-                self.process_action_p1(time, Button::from_button_idx(button as i32, down), frame);
+                self.process_action_p1(time, button, frame);
                 self.extended_p1(down, frame, 0.0, 0.0, 0.0, 0.0);
             }
         }
