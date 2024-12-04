@@ -25,3 +25,4 @@ ybot_fmt = { path = "ybot_fmt" }
 gdr = { path = "gdr" }
 fastrand = "2.2.0"
 flate2 = "1.0.35"
+zip-extract = "0.2.1"

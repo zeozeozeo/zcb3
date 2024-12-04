@@ -64,6 +64,46 @@ impl Index<usize> for PlayerClicks {
     }
 }
 
+// if `path` only has a single subdirectory, returns that subdirectory
+fn fix_root_subdir(dir: &Path) -> PathBuf {
+    if dir.is_dir() {
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let entries: Vec<_> = entries.collect();
+            if entries.len() == 1 {
+                if let Ok(entry) = entries[0].as_ref() {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        return path;
+                    }
+                }
+            }
+        }
+    }
+    dir.to_path_buf()
+}
+
+fn unzip_to_temp_dir(path: &Path) -> Result<PathBuf> {
+    fn random_dirname() -> String {
+        return format!(
+            "zcb-unzipped-{}",
+            std::iter::repeat_with(fastrand::alphanumeric)
+                .take(16)
+                .collect::<String>()
+        );
+    }
+    let mut dir = std::env::temp_dir().join(random_dirname());
+    while dir.exists() {
+        dir.pop();
+        dir.push(random_dirname());
+    }
+
+    std::fs::create_dir_all(&dir)?;
+
+    let f = std::fs::File::open(path)?;
+    zip_extract::extract(f, &dir, true)?;
+    Ok(dir)
+}
+
 impl PlayerClicks {
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn recognize_dir_and_load_files(&mut self, path: &Path, pitch: Pitch, sample_rate: u32) {
@@ -105,6 +145,18 @@ impl PlayerClicks {
 
     pub fn from_path(path: &Path, pitch: Pitch, sample_rate: u32) -> Self {
         let mut player = PlayerClicks::default();
+        let mut path = fix_root_subdir(path);
+        if path.is_file() {
+            // try to unzip
+            match unzip_to_temp_dir(&path) {
+                Ok(p) => {
+                    path = p;
+                }
+                Err(e) => {
+                    log::error!("failed to unzip {path:?}: {e}");
+                }
+            }
+        }
 
         let Ok(dir) = path
             .read_dir()
@@ -114,11 +166,13 @@ impl PlayerClicks {
         };
 
         for entry in dir {
-            let path = entry.unwrap().path();
-            if path.is_dir() {
-                player.recognize_dir_and_load_files(&path, pitch, sample_rate);
-            } else {
-                log::debug!("skipping file {path:?}");
+            if let Ok(entry) = entry {
+                let entry_path = fix_root_subdir(&entry.path());
+                if entry_path.is_dir() {
+                    player.recognize_dir_and_load_files(&entry_path, pitch, sample_rate);
+                } else {
+                    log::debug!("skipping file {entry_path:?}");
+                }
             }
         }
 
@@ -126,7 +180,7 @@ impl PlayerClicks {
             log::warn!("no clicks found, assuming there's no subdirectories");
             player
                 .clicks
-                .extend(read_clicks_in_directory(path, pitch, sample_rate));
+                .extend(read_clicks_in_directory(&path, pitch, sample_rate));
         }
 
         player
@@ -578,6 +632,7 @@ impl Bot {
 
     pub fn load_clickpack(&mut self, clickpack_dir: &Path, pitch: Pitch) -> Result<()> {
         assert!(self.sample_rate > 0);
+        let clickpack_dir = fix_root_subdir(clickpack_dir);
 
         for (i, dir) in CLICKPACK_DIRNAMES.iter().enumerate() {
             let mut path = clickpack_dir.to_path_buf();
@@ -592,7 +647,7 @@ impl Bot {
 
         if !self.has_clicks() {
             log::warn!("folders {CLICKPACK_DIRNAMES:?} were not found in the clickpack, assuming there is only one player");
-            self.clickpack[0] = PlayerClicks::from_path(clickpack_dir, pitch, self.sample_rate);
+            self.clickpack[0] = PlayerClicks::from_path(&clickpack_dir, pitch, self.sample_rate);
         }
 
         // find longest click (will be used to ensure that the end doesn't get cut off)
@@ -601,7 +656,7 @@ impl Bot {
 
         // try to load noise from the root clickpack dir
         if !self.has_noise() {
-            self.load_noise(clickpack_dir);
+            self.load_noise(&clickpack_dir);
         }
 
         if self.has_clicks() {
