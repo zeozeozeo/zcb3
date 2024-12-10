@@ -18,20 +18,21 @@ jobs:
             target: x86_64-pc-windows-msvc
             bin: zcb3.exe
             name: zcb3-Windows-x86_64.zip
-            command: both
+            command: build
 
           - release_for: macOS-x86_64
             os: macOS-latest
             target: x86_64-apple-darwin
             bin: zcb3
             name: zcb3-Darwin-x86_64.tar.gz
-            command: both
+            command: build
 
           - release_for: Linux-x86_64
             os: ubuntu-20.04
             target: x86_64-unknown-linux-gnu
             bin: zcb3
             name: zcb3-Linux-x86_64-musl.tar.gz
+            command: build
 
           # - release_for: FreeBSD-x86_64
           #   os: ubuntu-20.04
