@@ -9,7 +9,7 @@ edition = "2021"
 anyhow = "1.0.93"
 bincode = "1.3.3"
 byteorder = "1.5.0"
-chrono = "0.4.38"
+chrono = "0.4.39"
 dlhn = "0.1.7"
 fasteval2 = { git = "https://github.com/zeozeozeo/fasteval2.git", branch = "sqrt-builtin", default-features = false, features = ["alpha-keywords"]}
 hound = "3.5.1"
@@ -23,6 +23,6 @@ serde_json = "1.0.133"
 symphonia = { version = "0.5.4", features = ["all"] }
 ybot_fmt = { path = "ybot_fmt" }
 gdr = { path = "gdr" }
-fastrand = "2.2.0"
+fastrand = "2.3.0"
 flate2 = "1.0.35"
 zip-extract = "0.2.1"
