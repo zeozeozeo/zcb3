@@ -82,6 +82,7 @@ fn fix_root_subdir(dir: &Path) -> PathBuf {
     dir.to_path_buf()
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unzip_to_temp_dir(path: &Path) -> Result<PathBuf> {
     fn random_dirname() -> String {
         return format!(
@@ -145,7 +146,11 @@ impl PlayerClicks {
 
     pub fn from_path(path: &Path, pitch: Pitch, sample_rate: u32) -> Self {
         let mut player = PlayerClicks::default();
+
+        #[allow(unused_mut)]
         let mut path = fix_root_subdir(path);
+
+        #[cfg(not(target_arch = "wasm32"))]
         if path.is_file() {
             // try to unzip
             match unzip_to_temp_dir(&path) {

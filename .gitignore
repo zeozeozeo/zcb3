@@ -1,3 +1,4 @@
-/target
-/.vscode
-/zcb3.debug
+target/
+.vscode/
+zcb3.debug
+dist/

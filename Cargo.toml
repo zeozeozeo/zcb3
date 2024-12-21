@@ -5,44 +5,56 @@ edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
 
-[profile.release]
-lto = "fat"
-strip = true
-codegen-units = 1
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
 members = [".", "bot", "bot/ybot_fmt", "bot/gdr"]
 
 [dependencies]
-clap = { version = "4.5.23", features = ["derive"] }
-eframe = "0.29.1"
-egui-modal = "0.5.0"
-env_logger = "0.11.5"
+eframe = "0.30.0"
+egui-modal = { git = "https://github.com/dest4590/egui-modal.git", rev = "330915d0dcebde5b15bf16f9a2776ada9d6b3329" } # TODO: change once https://github.com/n00kii/egui-modal/pull/23 is merged
 image = { version = "0.25.5", default-features = false, features = ["ico", "png"] }
-rfd = "0.15.0"
+rfd = "0.15.1"
 bot = { path = "bot" }
 serde_json = "1"
-log = "0.4.21"
-anyhow = "1.0.93"
+log = "0.4.22"
+anyhow = "1.0.94"
 rayon = "1.10.0"
-egui_extras = { version = "0.29.1", features = ["image"] }
+egui_extras = { version = "0.30.0", features = ["image"] }
 rustmatica = "0.2.0"
-egui_plot = "0.29.0"
+egui_plot = "0.30.0"
 serde = "1"
-self-replace = "1.5.0"
-ureq = "2.10.1"
 fastrand = "2.3.0"
-egui_clickpack_db = "0.4.0"
 chrono = "0.4.39"
 timeago = "0.4.2"
+flowync = { version = "5.1", features = ["compact"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["full"] }
+egui_clickpack_db = "0.5.0"
+clap = { version = "4.5.23", features = ["derive"] }
+ureq = "2.10.1"
+self-replace = "1.5.0"
+env_logger = "0.11.6"
 tempfile = "3.14.0"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.2.15", features = ["js"] }
+wasm-bindgen-futures = "0.4.49"
+web-sys = "0.3.76" # to access the DOM (to hide the loading text)
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+strip = true
+codegen-units = 1
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["wincon", "winuser"] }
 
-[build-dependencies]
+[target.'cfg(target_os = "windows")'.build-dependencies]
 winres = "0.1.12"
+
+[build-dependencies]
 built = "0.7.5"
