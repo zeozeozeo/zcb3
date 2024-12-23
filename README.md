@@ -12,7 +12,11 @@ Free and easy to use Geometry Dash clickbot.
 
 or the Guilded server: https://guilded.gg/clickbot
 
-![](https://www.guilded.gg/canvas_index.html?route=%2Fcanvas%2Fembed%2Fteamcard%2Fjb721qzR&size=large)
+# ZCB Live
+
+ZCB also has an in-game version that can be downloaded from the Geode Index: https://geode-sdk.org/mods/zeozeozeo.zcblive
+
+![ZCB Live](/screenshots/live.png)
 
 # Supported replay formats
 
