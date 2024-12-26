@@ -110,7 +110,7 @@ struct Args {
         default_value_t = 0.2
     )]
     volume_var: f32,
-    #[arg(long, help = "Audio framerate", default_value_t = 44100)]
+    #[arg(long, help = "Audio framerate", default_value_t = 48000)]
     sample_rate: u32,
     #[arg(long, help = "Sort actions by time / frame", default_value_t = true)]
     sort_actions: bool,

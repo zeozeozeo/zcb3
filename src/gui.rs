@@ -146,7 +146,7 @@ impl Default for Config {
             vol_settings: VolumeSettings::default(),
             litematic_export_releases: false,
             midi_key: 60, // C4
-            sample_rate: 44100,
+            sample_rate: 48000,
             expr_text: String::new(),
             expr_variable: ExprVariable::Variation { negative: true },
             sort_actions: true,
