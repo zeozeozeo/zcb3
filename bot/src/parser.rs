@@ -893,6 +893,8 @@ impl Replay {
             .as_array()
             .context("'macro' is not an array")?;
 
+        let mut prev_action = (0, 0);
+
         for ev in events {
             let frame = ev
                 .get("frame")
@@ -915,38 +917,37 @@ impl Replay {
                 .context("couldn't get p2 'click' field")?
                 .to_i64()
                 .context("p2 'click' field is not a number")?;
+            let x = ev
+                .get("player_1")
+                .map(|v| {
+                    v.get("x_position")
+                        .map(|v| v.to_f64().unwrap_or(0.) as f32)
+                        .unwrap_or(0.0)
+                })
+                .unwrap_or(0.0);
 
-            self.process_action_p1(time, Button::from_down(p1 == 1), frame as _);
-            self.process_action_p2(time, Button::from_down(p2 == 1), frame as _);
+            // 0 = nothing, 1 = click, 2 = release
+            if p1 != 0 {
+                if p1 == 1 && prev_action.0 == 1 {
+                    // if the previous frame also was a click, this actually means there
+                    // was a release before this, if i understand this correctly
+                    self.process_action_p1(time, Button::Release, frame as _);
+                    self.extended_p1(false, frame as u32, x, 0., 0., 0.);
+                }
+                self.process_action_p1(time, Button::from_down(p1 == 1), frame as _);
+                self.extended_p1(p1 == 1, frame as u32, x, 0., 0., 0.);
+            }
+            if p2 != 0 {
+                if p2 == 1 && prev_action.1 == 1 {
+                    // same thing for p2
+                    self.process_action_p2(time, Button::Release, frame as _);
+                    self.extended_p2(false, frame as u32, x, 0., 0., 0.);
+                }
+                self.process_action_p2(time, Button::from_down(p2 == 1), frame as _);
+                self.extended_p2(p2 == 1, frame as u32, x, 0., 0., 0.);
+            }
 
-            self.extended_p1(
-                p1 == 1,
-                frame as u32,
-                ev.get("player_1")
-                    .map(|v| {
-                        v.get("x_position")
-                            .map(|v| v.to_f64().unwrap_or(0.) as f32)
-                            .unwrap_or(0.0)
-                    })
-                    .unwrap_or(0.0),
-                0.,
-                0.,
-                0.,
-            );
-            self.extended_p2(
-                p2 == 1,
-                frame as u32,
-                ev.get("player_2")
-                    .map(|v| {
-                        v.get("x_position")
-                            .map(|v| v.to_f64().unwrap_or(0.) as f32)
-                            .unwrap_or(0.0)
-                    })
-                    .unwrap_or(0.0),
-                0.,
-                0.,
-                0.,
-            );
+            prev_action = (p1, p2);
         }
 
         Ok(())
