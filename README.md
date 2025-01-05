@@ -38,7 +38,6 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 * Rush Replay (.rsh)
 * Plaintext (.txt)
 * GDH Plaintext (.txt)
-* ReplayEngine Replay (.re, old and new formats)
 * DDHOR Replay (.ddhor, old frame format)
 * xBot Frame (.xbot)
 * [xdBot (.xd)](https://geode-sdk.org/mods/zilko.xdbot/), old and new formats
@@ -46,8 +45,10 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 * qBot (.qb)
 * RBot (.rbot, old and new formats)
 * Zephyrus (.zr, used in OpenHack)
-* ReplayEngine 2 Replay (.re2)
 * Silicate (.slc)
+* ReplayEngine 1 Replay (.re, old and new formats)
+* ReplayEngine 2 Replay (.re2)
+* ReplayEngine 3 Replay (.re3)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
@@ -92,7 +93,8 @@ If you run without any arguments, the GUI will start.
 
 To build, clone the repository (or download zip and extract) and run `cargo build` for debug builds and `cargo build --release` for release builds. Note that release builds take a lot of time to build, because they use LTO and they strip debug symbols.
 
-TODO: should we compile with `RUSTFLAGS="--emit=asm"`?
+> [!NOTE]  
+> On Windows, try building with the `stable-x86_64-pc-windows-gnu` toolchain incase linking fails on `stable-x86_64-pc-windows-msvc`. Seems to be an issue with flate2.
 
 # Donations 
 

@@ -1256,7 +1256,6 @@ impl App {
 • Rush Replay (.rsh)
 • Plaintext (.txt)
 • GDH Plaintext (.txt)
-• ReplayEngine Replay (.re, old and new formats)
 • DDHOR Replay (.ddhor, old frame format)
 • xBot Frame (.xbot)
 • xdBot (.xd, old and new formats)
@@ -1264,8 +1263,10 @@ impl App {
 • qBot (.qb)
 • RBot (.rbot, old and new formats)
 • Zephyrus (.zr, used in OpenHack)
+• Silicate (.slc)
+• ReplayEngine 1 Replay (.re, old and new formats)
 • ReplayEngine 2 Replay (.re2)
-• Silicate (.slc)",
+• ReplayEngine 3 Replay (.re3)",
             );
         });
 

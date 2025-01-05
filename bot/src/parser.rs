@@ -3,7 +3,10 @@ use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use ijson::IValue;
 use serde::Deserialize;
-use std::io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom};
+use std::{
+    collections::HashMap,
+    io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom},
+};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum ClickType {
@@ -396,6 +399,8 @@ pub enum ReplayType {
     ReplayEngine2,
     /// Silicate .slc files
     Silicate,
+    /// ReplayEngine 3 .re3 files
+    ReplayEngine3,
 }
 
 impl ReplayType {
@@ -442,6 +447,7 @@ impl ReplayType {
             "zr" => Zephyrus,
             "re2" => ReplayEngine2,
             "slc" => Silicate,
+            "re3" => ReplayEngine3,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -485,6 +491,7 @@ impl Replay {
         "zr",
         "re2",
         "slc",
+        "re3",
     ];
 
     pub fn build() -> Self {
@@ -550,6 +557,7 @@ impl Replay {
             ReplayType::Zephyrus => self.parse_zephyrus(reader)?,
             ReplayType::ReplayEngine2 => self.parse_re2(reader)?,
             ReplayType::Silicate => self.parse_silicate(reader)?,
+            ReplayType::ReplayEngine3 => self.parse_re3(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -1796,8 +1804,8 @@ impl Replay {
         reader.seek(SeekFrom::Start(0))?;
 
         self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
-        let num_frame_actions = reader.read_i32::<LittleEndian>()?;
-        let num_actions = reader.read_i32::<LittleEndian>()?;
+        let num_frame_actions = reader.read_u32::<LittleEndian>()?;
+        let num_actions = reader.read_u32::<LittleEndian>()?;
 
         #[derive(Default, Clone)]
         #[repr(C)]
@@ -1822,6 +1830,12 @@ impl Replay {
             button: i32,
             player2: bool,
         }
+        const DEFAULT_ACTION: ActionDataNew = ActionDataNew {
+            frame: 0,
+            hold: false,
+            button: 0,
+            player2: false,
+        };
 
         // read frame data
         let mut frame_datas: Vec<FrameData> = vec![];
@@ -1831,7 +1845,8 @@ impl Replay {
             frame_datas.push(unsafe { std::mem::transmute(buf) });
         }
 
-        // detect action data type
+        // detect action data type (there are actually 2 versions of replayengine v1,
+        // so we have to handle both)
         let action_data_size =
             (file_len - reader.stream_position()?) as usize / num_actions as usize;
         log::debug!("predicted action data size: {action_data_size}");
@@ -1842,53 +1857,52 @@ impl Replay {
         }
         let is_new = action_data_size == size_of::<ActionDataNew>();
 
-        // read action data
-        let mut prev_frame_idx = 0;
+        // hash action datas
+        let mut actions = HashMap::new();
         for _ in 0..num_actions {
-            let mut buf = [0; size_of::<ActionDataNew>()];
-            reader.read_exact(&mut buf)?;
-            if is_new {
-                let action: ActionDataNew = unsafe { std::mem::transmute(buf) };
-                let button = Button::from_button_idx(action.button, action.hold);
-                let time = action.frame as f64 / self.fps;
-                let frame_idx = frame_datas
-                    .iter()
-                    .skip(prev_frame_idx)
-                    .position(|e| e.frame == action.frame && e.player2 == action.player2);
-                let f = if let Some(idx) = frame_idx {
-                    prev_frame_idx = idx;
-                    &frame_datas[idx]
-                } else {
-                    &FrameData::default()
-                };
-                if action.player2 {
-                    self.process_action_p2(time, button, action.frame);
-                    self.extended_p2(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
-                } else {
-                    self.process_action_p1(time, button, 0);
-                    self.extended_p1(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
-                }
+            let action = if is_new {
+                let mut buf = [0; size_of::<ActionDataNew>()];
+                reader.read_exact(&mut buf)?;
+                unsafe { std::mem::transmute(buf) }
             } else {
-                let action: ActionData = unsafe { std::ptr::read(buf.as_ptr() as *const _) };
-                let button = Button::from_down(action.hold);
-                let time = action.frame as f64 / self.fps;
-                let frame_idx = frame_datas
-                    .iter()
-                    .skip(prev_frame_idx)
-                    .position(|e| e.frame == action.frame && e.player2 == action.player2);
-                let f = if let Some(idx) = frame_idx {
-                    prev_frame_idx = idx;
-                    &frame_datas[idx]
-                } else {
-                    &FrameData::default()
-                };
-                if action.player2 {
-                    self.process_action_p2(time, button, action.frame);
-                    self.extended_p2(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
-                } else {
-                    self.process_action_p1(time, button, 0);
-                    self.extended_p1(action.hold, action.frame, f.x, f.y, f.y_accel as _, f.rot);
+                let mut buf = [0; size_of::<ActionData>()];
+                reader.read_exact(&mut buf)?;
+                let action: ActionData = unsafe { std::mem::transmute(buf) };
+                ActionDataNew {
+                    frame: action.frame,
+                    hold: action.hold,
+                    button: 1,
+                    player2: action.player2,
                 }
+            };
+            actions.insert(action.frame, action);
+        }
+
+        for frame_data in frame_datas {
+            // to get the button we need to lookup the action hashmap
+            let action = actions.get(&frame_data.frame).unwrap_or(&DEFAULT_ACTION);
+            let time = frame_data.frame as f64 / self.fps;
+            let button = Button::from_button_idx(action.button, action.hold);
+            if action.player2 {
+                self.process_action_p2(time, button, frame_data.frame);
+                self.extended_p2(
+                    action.hold,
+                    frame_data.frame,
+                    frame_data.x,
+                    frame_data.y,
+                    frame_data.y_accel as _,
+                    frame_data.rot,
+                );
+            } else {
+                self.process_action_p1(time, button, frame_data.frame);
+                self.extended_p1(
+                    action.hold,
+                    frame_data.frame,
+                    frame_data.x,
+                    frame_data.y,
+                    frame_data.y_accel as _,
+                    frame_data.rot,
+                );
             }
         }
 
@@ -2512,6 +2526,75 @@ impl Replay {
         } else {
             log::info!("silicate: no seed stored in macro");
         }
+        Ok(())
+    }
+
+    fn parse_re3<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        // a bit similar to re1, but the p1 and p2 actions are stored separately
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
+
+        // mirrors https://github.com/TobyAdd/GDH/blob/088b5accb04cddcbd09cac29b2e9850ebcea5c60/src/replayEngine.hpp#L11-L27
+        #[repr(C)]
+        struct FrameData {
+            frame: u32,
+            x: f32,
+            y: f32,
+            rot: f32,
+            y_accel: f64,
+            player2: bool,
+        }
+        #[repr(C)]
+        struct ActionData {
+            frame: u32,
+            down: bool,
+            button: i32,
+            player1: bool,
+        }
+        const DEFAULT_ACTION: ActionData = ActionData {
+            frame: 0,
+            down: false,
+            button: 0,
+            player1: true,
+        };
+
+        let p1_size = reader.read_u32::<LittleEndian>()? as usize;
+        let p2_size = reader.read_u32::<LittleEndian>()? as usize;
+        let p1_input_size = reader.read_u32::<LittleEndian>()? as usize;
+        let p2_input_size = reader.read_u32::<LittleEndian>()? as usize;
+
+        // read p1 and p2 frame datas
+        let mut frame_datas: Vec<FrameData> = vec![];
+        for _ in 0..p1_size + p2_size {
+            let mut buf = [0; size_of::<FrameData>()];
+            reader.read_exact(&mut buf)?;
+            frame_datas.push(unsafe { std::mem::transmute(buf) });
+        }
+        // stored separately, so sort by frame
+        frame_datas.sort_by_key(|f| f.frame);
+
+        // hash action datas
+        let mut actions = HashMap::new();
+        for _ in 0..p1_input_size + p2_input_size {
+            let mut buf = [0; size_of::<ActionData>()];
+            reader.read_exact(&mut buf)?;
+            let action: ActionData = unsafe { std::mem::transmute(buf) };
+            actions.insert(action.frame, action);
+        }
+
+        for frame_data in frame_datas {
+            let time = frame_data.frame as f64 / self.fps;
+            // to get the button, we need to lookup the action hashmap
+            let action = actions.get(&frame_data.frame).unwrap_or(&DEFAULT_ACTION);
+            let button = Button::from_button_idx(action.button, action.down);
+            if frame_data.player2 {
+                self.process_action_p2(time, button, frame_data.frame);
+                self.extended_p2(action.down, frame_data.frame, 0.0, 0.0, 0.0, 0.0);
+            } else {
+                self.process_action_p1(time, button, frame_data.frame);
+                self.extended_p1(action.down, frame_data.frame, 0.0, 0.0, 0.0, 0.0);
+            }
+        }
+
         Ok(())
     }
 
