@@ -109,4 +109,4 @@ By donating you'll get a custom role on the Discord server (dm me) and early acc
 
 # License
 
-Boost Software License - Version 1.0 - August 17th, 2003
+Public domain (The Unlicense)
