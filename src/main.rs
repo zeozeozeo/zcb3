@@ -130,6 +130,12 @@ struct Args {
         default_value_t = false
     )]
     cut_sounds: bool,
+    #[arg(
+        long,
+        help = "Whether to start rendering from the first action after the last death. Only applies to GDReplayFormat 2",
+        default_value_t = true
+    )]
+    discard_deaths: bool,
 }
 
 #[cfg(windows)]
@@ -214,6 +220,7 @@ fn run_cli(mut args: Args) {
         .with_vol_settings(vol_settings)
         .with_extended(true)
         .with_sort_actions(args.sort_actions)
+        .with_discard_deaths(args.discard_deaths)
         .parse(format, BufReader::new(f))
         .unwrap();
 

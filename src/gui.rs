@@ -90,6 +90,7 @@ fn f32_one() -> f32 {
 }
 
 #[derive(Serialize, Deserialize, Clone)]
+#[serde(default)]
 struct Config {
     #[serde(default = "get_version")]
     version: String,
@@ -105,6 +106,7 @@ struct Config {
     expr_text: String,
     expr_variable: ExprVariable,
     sort_actions: bool,
+    discard_deaths: bool,
     plot_data_aspect: f32,
     #[serde(default = "ClickpackConversionSettings::default")]
     conversion_settings: ClickpackConversionSettings,
@@ -131,6 +133,7 @@ impl Config {
         self.timings != other.timings
             || self.vol_settings != other.vol_settings
             || self.sort_actions != other.sort_actions
+            || self.discard_deaths != other.discard_deaths
     }
 }
 
@@ -154,6 +157,7 @@ impl Default for Config {
             conversion_settings: ClickpackConversionSettings::default(),
             cut_sounds: false,
             noise_volume: 1.0,
+            discard_deaths: true,
         }
     }
 }
@@ -1044,6 +1048,7 @@ impl App {
                 .with_vol_settings(self.conf.vol_settings)
                 .with_extended(true)
                 .with_sort_actions(self.conf.sort_actions)
+                .with_discard_deaths(self.conf.discard_deaths)
                 .with_override_fps(if self.override_fps_enabled {
                     Some(self.override_fps)
                 } else {
@@ -1167,6 +1172,13 @@ impl App {
         help_text(ui, "Sort actions by time", |ui| {
             ui.checkbox(&mut self.conf.sort_actions, "Sort actions");
         });
+        help_text(
+            ui,
+            "Whether to start rendering from the first action after the last death\nOnly applies to GDReplayFormat 2",
+            |ui| {
+                ui.checkbox(&mut self.conf.discard_deaths, "Discard deaths");
+            },
+        );
         ui.separator();
 
         ui.horizontal(|ui| {
@@ -1266,7 +1278,8 @@ impl App {
 • Silicate (.slc)
 • ReplayEngine 1 Replay (.re, old and new formats)
 • ReplayEngine 2 Replay (.re2)
-• ReplayEngine 3 Replay (.re3)",
+• ReplayEngine 3 Replay (.re3)
+• GDReplayFormat 2 (.gdr2)",
             );
         });
 
