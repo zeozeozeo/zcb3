@@ -23,6 +23,7 @@ serde_json = "1.0.133"
 symphonia = { version = "0.5.4", features = ["all"] }
 ybot_fmt = { path = "ybot_fmt" }
 gdr = { path = "gdr" }
+gdr2 = { path = "gdr2" }
 fastrand = "2.3.0"
 flate2 = "1.0.35"
 zip-extract = "0.2.1"

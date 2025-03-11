@@ -466,18 +466,6 @@ impl ReplayType {
 //     }};
 // }
 
-fn read_cstring(reader: &mut impl Read) -> Result<String> {
-    let mut buf = Vec::new();
-    loop {
-        let byte = reader.read_u8()?;
-        if byte == b'\0' {
-            break;
-        }
-        buf.push(byte);
-    }
-    Ok(String::from_utf8(buf)?)
-}
-
 impl Replay {
     pub const SUPPORTED_EXTENSIONS: &'static [&'static str] = &[
         "json",
@@ -2622,164 +2610,44 @@ impl Replay {
     }
 
     fn parse_gdr2<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
-        // 1. read header
-        // 1.1. magic must be "GDR"
-        let mut magicbuf = [0; 3];
-        reader.read_exact(&mut magicbuf)?;
-        if magicbuf != *b"GDR" {
-            return Err(anyhow::anyhow!("invalid gdr2 magic"));
-        }
+        let mut buf = vec![];
+        reader.read_to_end(&mut buf)?;
+        let replay = gdr2::Replay::import_data(&buf)?;
 
-        // 1.2. version
-        let version = leb128::read::unsigned(&mut reader)?;
-        log::info!("gdr2 version: {version}");
+        self.fps = self.get_fps(replay.framerate);
 
-        // 1.3. input tag (cstring)
-        let input_tag = read_cstring(&mut reader)?;
-        log::info!("gdr2 input tag: {input_tag}");
-        let has_extensions = !input_tag.is_empty();
-        log::info!("gdr2 extensions enabled: {has_extensions}");
+        log::info!("gdr2 replay author: {}", replay.author);
+        log::info!("gdr2 replay description: {}", replay.description);
+        log::info!("gdr2 replay game version: {}", replay.game_version);
+        log::info!("gdr2 replay duration: {}", replay.duration);
+        log::info!("gdr2 replay seed: {}", replay.seed);
+        log::info!("gdr2 bot info: {:?}", replay.bot_info);
+        log::info!("gdr2 level info: {:?}", replay.level_info);
 
-        // 2. replay metadata
-        // 2.1. author
-        let author = read_cstring(&mut reader)?;
-        log::info!("gdr2 author: {author}");
-
-        // 2.2. description
-        let description = read_cstring(&mut reader)?;
-        log::info!("gdr2 description: {description}");
-
-        // 2.3. duration
-        let duration = leb128::read::unsigned(&mut reader)?;
-        log::info!("gdr2 duration: {duration}");
-
-        // 2.4. game version
-        let game_version = leb128::read::unsigned(&mut reader)?;
-        log::info!("gdr2 game version: {game_version}");
-
-        // 2.5. framerate
-        let framerate = leb128::read::unsigned(&mut reader)?;
-        self.fps = self.get_fps(framerate as f64);
-        log::info!("gdr2 framerate: {framerate}");
-
-        // 2.6. seed
-        let seed = leb128::read::unsigned(&mut reader)?;
-        log::info!("gdr2 seed: {seed}");
-
-        // 2.7. coins
-        let coins = leb128::read::unsigned(&mut reader)?;
-        log::info!("gdr2 coins: {coins}");
-
-        // 2.8. ldm enabled
-        let ldm_enabled = reader.read_u8()? != 0;
-        log::info!("gdr2 ldm enabled: {ldm_enabled}");
-
-        // 2.9. platformer
-        let platformer = reader.read_u8()? != 0;
-        log::info!("gdr2 platformer: {platformer}");
-
-        // 2.10. bot name
-        let bot_name = read_cstring(&mut reader)?;
-        log::info!("gdr2 bot name: {bot_name}");
-
-        // 2.11. bot version
-        let bot_version = leb128::read::unsigned(&mut reader)?;
-        log::info!("gdr2 bot version: {bot_version}");
-
-        // 2.12. level id
-        let level_id = leb128::read::unsigned(&mut reader)?;
-        log::info!("gdr2 level id: {level_id}");
-
-        // 2.13. level name
-        let level_name = read_cstring(&mut reader)?;
-        log::info!("gdr2 level name: {level_name}");
-
-        // 2.14. extension size
-        let extension_size = leb128::read::unsigned(&mut reader)?;
-        log::info!("gdr2 extension size: {extension_size}");
-
-        // 2.15. extension data
-        if extension_size > 0 {
-            reader.seek(SeekFrom::Current(extension_size as i64))?;
-        }
-
-        // 3. death frames
-        // 3.1. death count
-        let death_count = leb128::read::unsigned(&mut reader)? as usize;
-        log::info!("gdr2 death count: {death_count}");
-
-        // 3.2. death frames
-        let mut death_frames = Vec::with_capacity(death_count);
-        for _ in 0..death_count {
-            let frame = leb128::read::unsigned(&mut reader)? as usize;
-            death_frames.push(frame);
-        }
-        log::info!("gdr2 death frames: {death_frames:?}");
-
-        // check when we should start parsing (non-inclusive)
         let start_frame = if self.discard_deaths {
-            death_frames.last().copied().unwrap_or(0) as u64
+            replay.deaths.last().copied().unwrap_or(0)
         } else {
             0
         };
-        if self.discard_deaths {
-            log::info!("will discard frames before frame {start_frame}");
-        }
 
-        // 4. input data
-        // 4.1. input count
-        let input_count = leb128::read::unsigned(&mut reader)? as usize;
-        // 4.2. p1 input count
-        let mut p1_input_count = leb128::read::unsigned(&mut reader)? as usize;
+        log::info!(
+            "gdr2 replay start frame: {} (discard deaths: {})",
+            start_frame,
+            self.discard_deaths
+        );
 
-        // 4.3. inputs
-        let mut frame = 0;
-        for _ in 0..input_count {
-            // input format:
-            // | Field                     | Type     | Description                                                         |
-            // |---------------------------|----------|---------------------------------------------------------------------|
-            // | Packed                    | `varint` | Input frame delta and button press bitmask packed in a single value |
-            // | Extension Size (Optional) | `varint` | Size of custom extension data                                       |
-            // | Extension Data (Optional) | `bytes`  | Custom input extension data                                         |
-            //
-            // bitmask format:
-            //
-            // | Bit Position   | Meaning                                                 |
-            // |----------------|---------------------------------------------------------|
-            // | 0              | Button press state (1 = down, 0 = up)                   |
-            // | 1-2 (Optional) | Button ID (00 = None, 01 = Jump, 10 = Left, 11 = Right) |
-
-            let packed = leb128::read::unsigned(&mut reader)?;
-            let delta = packed >> 3;
-            let button = if platformer { (packed >> 1) & 3 } else { 1 };
-            let down = (packed & 1) != 0;
-            let button = Button::from_button_idx(button as _, down);
-            frame += delta;
-            let time = frame as f64 / self.fps;
-
-            if (self.discard_deaths && frame > start_frame) || !self.discard_deaths {
-                if p1_input_count == 0 {
-                    self.process_action_p2(time, button, frame as _);
-                    self.extended_p2(down, frame as _, 0.0, 0.0, 0.0, 0.0);
-                } else {
-                    self.process_action_p1(time, button, frame as _);
-                    self.extended_p1(down, frame as _, 0.0, 0.0, 0.0, 0.0);
-                }
+        for input in &replay.inputs {
+            if input.frame < start_frame {
+                continue;
             }
-
-            if has_extensions {
-                let extension_size = leb128::read::unsigned(&mut reader)?;
-                if extension_size > 0 {
-                    reader.seek(SeekFrom::Current(extension_size as i64))?;
-                }
-            }
-
-            // check if we read all player1 inputs
-            if p1_input_count > 0 {
-                p1_input_count -= 1;
-                if p1_input_count == 0 {
-                    frame = 0;
-                }
+            let time = input.frame as f64 / self.fps;
+            let button = Button::from_button_idx(input.button as _, input.down);
+            if input.player2 {
+                self.process_action_p2(time, button, input.frame as _);
+                self.extended_p2(input.down, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+            } else {
+                self.process_action_p1(time, button, input.frame as _);
+                self.extended_p1(input.down, input.frame as _, 0.0, 0.0, 0.0, 0.0);
             }
         }
 

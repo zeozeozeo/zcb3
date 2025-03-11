@@ -17,7 +17,7 @@ lto = "off"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [workspace]
-members = [".", "bot", "bot/ybot_fmt", "bot/gdr"]
+members = [".", "bot", "bot/ybot_fmt", "bot/gdr", "bot/gdr2"]
 
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }
