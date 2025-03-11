@@ -3,10 +3,12 @@ use std::path::Path;
 
 mod binary;
 mod error;
+mod physics;
 mod tests;
 
 pub use binary::{BinaryReader, BinaryWriter};
 pub use error::{Error, Result};
+use physics::PhysicsData;
 
 const GDR_MAGIC: &[u8; 3] = b"GDR";
 const GDR_VERSION: i32 = 2;
@@ -54,6 +56,7 @@ pub struct Input {
     pub player2: bool,
     /// Whether the button was pressed or released
     pub down: bool,
+    pub physics: Option<PhysicsData>,
 }
 
 impl Input {
@@ -63,6 +66,48 @@ impl Input {
             button,
             player2,
             down,
+            physics: None,
+        }
+    }
+
+    pub fn with_physics(
+        frame: u64,
+        button: u8,
+        player2: bool,
+        down: bool,
+        physics: PhysicsData,
+    ) -> Self {
+        Self {
+            frame,
+            button,
+            player2,
+            down,
+            physics: Some(physics),
+        }
+    }
+
+    fn read_extension(&mut self, reader: &mut BinaryReader, extension_tag: &str) -> Result<()> {
+        if extension_tag == "Phys" {
+            self.physics = Some(PhysicsData {
+                x_position: reader.read_f32()?,
+                y_position: reader.read_f32()?,
+                rotation: reader.read_f32()?,
+                x_velocity: reader.read_f64()?,
+                y_velocity: reader.read_f64()?,
+            });
+        }
+        Ok(())
+    }
+
+    fn write_extension(&self, writer: &mut BinaryWriter, extension_tag: &str) {
+        if extension_tag == "Phys" {
+            if let Some(physics) = &self.physics {
+                writer.write_f32(physics.x_position);
+                writer.write_f32(physics.y_position);
+                writer.write_f32(physics.rotation);
+                writer.write_f64(physics.x_velocity);
+                writer.write_f64(physics.y_velocity);
+            }
         }
     }
 }
@@ -105,7 +150,10 @@ impl Replay {
         // Write header
         writer.write_bytes(GDR_MAGIC);
         writer.write_varint(GDR_VERSION);
-        writer.write_string(""); // Input tag (no extensions)
+
+        // Write input tag
+        let has_physics = self.inputs.iter().any(|input| input.physics.is_some());
+        writer.write_string(if has_physics { "Phys" } else { "" });
 
         // Write metadata
         writer.write_string(&self.author);
@@ -140,7 +188,6 @@ impl Replay {
         writer.write_varint(self.inputs.len() as i32);
         writer.write_varint(p1_inputs as i32);
 
-        // Write player 1 inputs
         let mut prev = 0;
         for input in &self.inputs {
             if input.player2 {
@@ -154,6 +201,15 @@ impl Replay {
                 (delta << 1) | (input.down as u64)
             };
             writer.write_varint(packed as i32);
+
+            // Write physics extension if present
+            if has_physics {
+                let mut ext_writer = BinaryWriter::new();
+                input.write_extension(&mut ext_writer, "Phys");
+                writer.write_varint(ext_writer.data().len() as i32);
+                writer.write_bytes(&ext_writer.data());
+            }
+
             prev = input.frame;
         }
 
@@ -171,6 +227,15 @@ impl Replay {
                 (delta << 1) | (input.down as u64)
             };
             writer.write_varint(packed as i32);
+
+            // Write physics extension if present
+            if has_physics {
+                let mut ext_writer = BinaryWriter::new();
+                input.write_extension(&mut ext_writer, "Phys");
+                writer.write_varint(ext_writer.data().len() as i32);
+                writer.write_bytes(&ext_writer.data());
+            }
+
             prev = input.frame;
         }
 
@@ -199,7 +264,9 @@ impl Replay {
         if version != GDR_VERSION {
             return Err(Error::UnsupportedVersion(version));
         }
-        let _input_tag = reader.read_string()?;
+
+        let input_tag = reader.read_string()?;
+        let has_extension = !input_tag.is_empty();
 
         // Read metadata
         replay.author = reader.read_string()?;
@@ -237,42 +304,58 @@ impl Replay {
         let mut prev = 0;
         for _ in 0..p1_inputs {
             let packed = reader.read_varint()? as u64;
-            let (frame, button, down) = if replay.platformer {
-                (
+            let mut input = if replay.platformer {
+                Input::new(
                     prev + (packed >> 3),
                     ((packed >> 1) & 3) as u8,
+                    false,
                     (packed & 1) != 0,
                 )
             } else {
-                (
-                    prev + (packed >> 1),
-                    1, // Always use jump button (1) in non-platformer mode
-                    (packed & 1) != 0,
-                )
+                Input::new(prev + (packed >> 1), 1, false, (packed & 1) != 0)
             };
-            replay.inputs.push(Input::new(frame, button, false, down));
-            prev = frame;
+
+            if has_extension {
+                let ext_size = reader.read_varint()? as usize;
+                if ext_size > 0 {
+                    let ext_data = reader.peek(ext_size).ok_or(Error::UnexpectedEof)?;
+                    let mut ext_reader = BinaryReader::new(ext_data);
+                    input.read_extension(&mut ext_reader, &input_tag)?;
+                    reader.skip(ext_size)?;
+                }
+            }
+
+            prev = input.frame;
+            replay.inputs.push(input);
         }
 
         // Read player 2 inputs
         let mut prev = 0;
         for _ in p1_inputs..total_inputs {
             let packed = reader.read_varint()? as u64;
-            let (frame, button, down) = if replay.platformer {
-                (
+            let mut input = if replay.platformer {
+                Input::new(
                     prev + (packed >> 3),
                     ((packed >> 1) & 3) as u8,
+                    true,
                     (packed & 1) != 0,
                 )
             } else {
-                (
-                    prev + (packed >> 1),
-                    1, // Always use jump button (1) in non-platformer mode
-                    (packed & 1) != 0,
-                )
+                Input::new(prev + (packed >> 1), 1, true, (packed & 1) != 0)
             };
-            replay.inputs.push(Input::new(frame, button, true, down));
-            prev = frame;
+
+            if has_extension {
+                let ext_size = reader.read_varint()? as usize;
+                if ext_size > 0 {
+                    let ext_data = reader.peek(ext_size).ok_or(Error::UnexpectedEof)?;
+                    let mut ext_reader = BinaryReader::new(ext_data);
+                    input.read_extension(&mut ext_reader, &input_tag)?;
+                    reader.skip(ext_size)?;
+                }
+            }
+
+            prev = input.frame;
+            replay.inputs.push(input);
         }
 
         replay.sort_inputs();

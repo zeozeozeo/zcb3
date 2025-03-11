@@ -2642,12 +2642,27 @@ impl Replay {
             }
             let time = input.frame as f64 / self.fps;
             let button = Button::from_button_idx(input.button as _, input.down);
+            let p = input.physics.clone().unwrap_or_default();
             if input.player2 {
                 self.process_action_p2(time, button, input.frame as _);
-                self.extended_p2(input.down, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+                self.extended_p2(
+                    input.down,
+                    input.frame as _,
+                    p.x_position,
+                    p.y_position,
+                    p.y_velocity as _,
+                    p.rotation,
+                );
             } else {
                 self.process_action_p1(time, button, input.frame as _);
-                self.extended_p1(input.down, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+                self.extended_p1(
+                    input.down,
+                    input.frame as _,
+                    p.x_position,
+                    p.y_position,
+                    p.y_velocity as _,
+                    p.rotation,
+                );
             }
         }
 

@@ -20,6 +20,16 @@ impl<'a> BinaryReader<'a> {
         Ok(slice)
     }
 
+    /// Returns a view of the next `size` bytes without consuming them
+    /// Returns None if there aren't enough bytes available
+    pub fn peek(&self, size: usize) -> Option<&[u8]> {
+        if self.pos + size <= self.data.len() {
+            Some(&self.data[self.pos..self.pos + size])
+        } else {
+            None
+        }
+    }
+
     pub fn read_string(&mut self) -> Result<String> {
         let len = self.read_varint()? as usize;
         if len > 0xFFFF {
@@ -87,6 +97,10 @@ pub struct BinaryWriter {
 impl BinaryWriter {
     pub fn new() -> Self {
         Self { data: Vec::new() }
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
     }
 
     pub fn write_bytes(&mut self, bytes: &[u8]) {
