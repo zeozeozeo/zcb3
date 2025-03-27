@@ -1174,7 +1174,7 @@ impl App {
         });
         help_text(
             ui,
-            "Whether to start rendering from the first action after the last death\nOnly applies to GDReplayFormat 2",
+            "Whether to start rendering from the first action after the last death\nOnly applies to GDReplayFormat 2 and Silicate 2",
             |ui| {
                 ui.checkbox(&mut self.conf.discard_deaths, "Discard deaths");
             },

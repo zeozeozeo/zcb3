@@ -132,7 +132,7 @@ struct Args {
     cut_sounds: bool,
     #[arg(
         long,
-        help = "Whether to start rendering from the first action after the last death. Only applies to GDReplayFormat 2",
+        help = "Whether to start rendering from the first action after the last death. Only applies to GDReplayFormat 2 and Silicate 2",
         default_value_t = true
     )]
     discard_deaths: bool,
