@@ -49,7 +49,7 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 * ReplayEngine 2 Replay (.re2)
 * ReplayEngine 3 Replay (.re3)
 * Silicate (.slc)
-* Silicate 2 (.slc2)
+* Silicate 2 (.slc)
 * GDReplayFormat 2 (.gdr2)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)

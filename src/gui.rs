@@ -1279,7 +1279,7 @@ impl App {
 • ReplayEngine 2 Replay (.re2)
 • ReplayEngine 3 Replay (.re3)
 • Silicate (.slc)
-• Silicate 2 (.slc2)
+• Silicate 2 (.slc)
 • GDReplayFormat 2 (.gdr2)",
             );
         });

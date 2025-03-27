@@ -2676,6 +2676,7 @@ impl Replay {
         use slc_oxide::{input::InputData, meta::Meta, replay::Replay};
 
         #[repr(C, packed)]
+        #[derive(Debug)]
         struct SilicateMeta {
             seed: u64,
             _reserved: [u8; 56],
@@ -2704,6 +2705,7 @@ impl Replay {
         }
 
         let replay = Replay::<SilicateMeta>::read(&mut reader)?;
+        log::info!("slc2: meta: {:?}", replay.meta);
         self.fps = self.get_fps(replay.tps);
 
         let start = if self.discard_deaths {
