@@ -2500,6 +2500,18 @@ impl Replay {
     }
 
     fn parse_slc<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        // compare slc2 header
+        let mut header_buf = [0u8; 4];
+        if reader
+            .read_exact(&mut header_buf)
+            .is_ok_and(|_| header_buf == [0x53, 0x49, 0x4C, 0x4C])
+        {
+            reader.seek(SeekFrom::Start(0))?;
+            return self.parse_slc2(reader);
+        }
+
+        reader.seek(SeekFrom::Start(0))?;
+
         self.fps = self.get_fps(reader.read_f64::<LittleEndian>()?);
         let num_actions = reader.read_u32::<LittleEndian>()?;
         for _ in 0..num_actions {
@@ -2661,9 +2673,37 @@ impl Replay {
     }
 
     fn parse_slc2<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
-        use slc_oxide::{input::InputData, replay::Replay};
+        use slc_oxide::{input::InputData, meta::Meta, replay::Replay};
 
-        let replay = Replay::<()>::read(&mut reader)?;
+        #[repr(C, packed)]
+        struct SilicateMeta {
+            seed: u64,
+            _reserved: [u8; 56],
+        }
+
+        impl Meta for SilicateMeta {
+            fn size() -> u64 {
+                size_of::<SilicateMeta>() as _
+            }
+
+            fn from_bytes(bytes: &[u8]) -> Self {
+                let mut seed_buf = [0u8; 8];
+                seed_buf.copy_from_slice(&bytes[0..8]);
+                Self {
+                    seed: u64::from_le_bytes(seed_buf),
+                    _reserved: [0u8; 56],
+                }
+            }
+
+            fn to_bytes(&self) -> Box<[u8]> {
+                let mut buf = vec![];
+                buf.extend_from_slice(&self.seed.to_le_bytes());
+                buf.extend_from_slice(&[0u8; 56]);
+                buf.into()
+            }
+        }
+
+        let replay = Replay::<SilicateMeta>::read(&mut reader)?;
         self.fps = self.get_fps(replay.tps);
 
         let start = if self.discard_deaths {
