@@ -27,3 +27,4 @@ gdr2 = { path = "gdr2" }
 fastrand = "2.3.0"
 flate2 = "1.0.35"
 zip-extract = "0.2.1"
+slc_oxide = "0.1.0"

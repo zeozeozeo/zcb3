@@ -398,10 +398,12 @@ pub enum ReplayType {
     Zephyrus,
     /// ReplayEngine 2 .re2 files
     ReplayEngine2,
-    /// Silicate .slc files
-    Silicate,
     /// ReplayEngine 3 .re3 files
     ReplayEngine3,
+    /// Silicate .slc files
+    Silicate,
+    /// Silicate .slc2 files
+    Silicate2,
     /// GDReplayFormat 2 .gdr2 files
     Gdr2,
 }
@@ -449,8 +451,9 @@ impl ReplayType {
             "rbot" => Rbot,
             "zr" => Zephyrus,
             "re2" => ReplayEngine2,
-            "slc" => Silicate,
             "re3" => ReplayEngine3,
+            "slc" => Silicate,
+            "slc2" => Silicate2,
             "gdr2" => Gdr2,
             _ => anyhow::bail!("unknown replay format"),
         })
@@ -494,8 +497,9 @@ impl Replay {
         "rbot",
         "zr",
         "re2",
-        "slc",
         "re3",
+        "slc",
+        "slc2",
         "gdr2",
     ];
 
@@ -566,9 +570,10 @@ impl Replay {
             ReplayType::Rbot => self.parse_rbot(reader)?,
             ReplayType::Zephyrus => self.parse_zephyrus(reader)?,
             ReplayType::ReplayEngine2 => self.parse_re2(reader)?,
-            ReplayType::Silicate => self.parse_silicate(reader)?,
             ReplayType::ReplayEngine3 => self.parse_re3(reader)?,
             ReplayType::Gdr2 => self.parse_gdr2(reader)?,
+            ReplayType::Silicate => self.parse_slc(reader)?,
+            ReplayType::Silicate2 => self.parse_slc2(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
         }
 
@@ -817,7 +822,6 @@ impl Replay {
         };
 
         self.fps = self.get_fps(decoded.initial_fps as f64);
-        let mut current_fps = self.fps;
 
         for action in decoded.clicks {
             let frame = match action.location {
@@ -827,7 +831,7 @@ impl Replay {
                     continue;
                 }
             };
-            let time = frame as f64 / current_fps;
+            let time = frame as f64 / self.fps;
             match action.click_type {
                 Obot2ClickType::Player1Down => {
                     self.process_action_p1(time, Button::from_down(true), frame);
@@ -846,8 +850,8 @@ impl Replay {
                     self.extended_p2(false, frame, 0., 0., 0., 0.);
                 }
                 Obot2ClickType::FpsChange(fps) => {
-                    current_fps = fps as f64;
-                    self.fps_change(current_fps);
+                    self.fps = self.get_fps(fps as _);
+                    self.fps_change(fps as _);
                 }
                 Obot2ClickType::None => {}
             }
@@ -1777,10 +1781,9 @@ impl Replay {
         };
 
         self.fps = self.get_fps(replay.initial_fps as f64);
-        let mut current_fps = self.fps;
 
         for action in replay.clicks {
-            let time = action.frame as f64 / current_fps;
+            let time = action.frame as f64 / self.fps;
             match action.click_type {
                 Obot3ClickType::Player1Down => {
                     self.process_action_p1(time, Button::from_down(true), action.frame);
@@ -1799,8 +1802,8 @@ impl Replay {
                     self.extended_p2(false, action.frame, 0., 0., 0., 0.);
                 }
                 Obot3ClickType::FpsChange(fps) => {
-                    current_fps = fps as f64;
-                    self.fps_change(current_fps);
+                    self.fps = self.get_fps(fps as _);
+                    self.fps_change(fps as _);
                 }
                 Obot3ClickType::None => {}
             }
@@ -2014,13 +2017,13 @@ impl Replay {
         let date = replay.get(Meta::DATE)?;
         let presses = replay.get(Meta::PRESSES)?;
         let frames = replay.get(Meta::FRAMES)?;
-        let mut current_fps = self.get_fps(replay.get(Meta::FPS)? as f64);
-        self.fps = current_fps;
+        self.fps = self.get_fps(replay.get(Meta::FPS)? as f64);
         let total_presses = replay.get(Meta::TOTAL_PRESSES)?;
         let version = replay.version();
         log::info!(
             "ybot2 replay: version {version}, {presses} presses, \
-            {frames} frames, {current_fps} FPS, {total_presses} total presses"
+            {frames} frames, {} FPS, {total_presses} total presses",
+            self.fps
         );
 
         // log datetime
@@ -2037,7 +2040,7 @@ impl Replay {
 
             match timed_action.action {
                 Action::Button(p1, push, button) => {
-                    let time = frame as f64 / current_fps;
+                    let time = frame as f64 / self.fps;
                     let b = match button {
                         PlayerButton::Jump => Button::from_down(push),
                         PlayerButton::Left => Button::from_left_down(push),
@@ -2052,8 +2055,8 @@ impl Replay {
                     }
                 }
                 Action::FPS(fps) => {
-                    current_fps = fps as f64;
-                    self.fps_change(current_fps);
+                    self.fps = self.get_fps(fps as _);
+                    self.fps_change(fps as _);
                 }
             }
         }
@@ -2216,12 +2219,7 @@ impl Replay {
         }
         let mut deserializer = dlhn::Deserializer::new(&mut reader);
         let replay = Replay::deserialize(&mut deserializer)?;
-        self.fps = if let Some(override_fps) = self.override_fps {
-            override_fps
-        } else {
-            replay.initial_fps as f64
-        };
-        let mut fps = replay.initial_fps as f64;
+        self.fps = self.get_fps(replay.initial_fps as _);
         for click in replay.clicks {
             match click.action {
                 Action::Button {
@@ -2238,12 +2236,7 @@ impl Replay {
                     let time = if click.time != 0.0 {
                         click.time
                     } else {
-                        let actual_fps = if let Some(override_fps) = self.override_fps {
-                            override_fps
-                        } else {
-                            fps
-                        };
-                        click.frame as f64 / actual_fps
+                        click.frame as f64 / self.fps
                     };
                     if is_p2 {
                         self.process_action_p2(time, b, click.frame);
@@ -2254,10 +2247,8 @@ impl Replay {
                     }
                 }
                 Action::FPS(new_fps) => {
-                    if self.override_fps.is_none() {
-                        fps = new_fps as f64;
-                        self.fps_change(fps);
-                    }
+                    self.fps = self.get_fps(new_fps as _);
+                    self.fps_change(new_fps as _);
                 }
             }
         }
@@ -2508,7 +2499,7 @@ impl Replay {
         Ok(())
     }
 
-    fn parse_silicate<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+    fn parse_slc<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         self.fps = self.get_fps(reader.read_f64::<LittleEndian>()?);
         let num_actions = reader.read_u32::<LittleEndian>()?;
         for _ in 0..num_actions {
@@ -2663,6 +2654,52 @@ impl Replay {
                     p.y_velocity as _,
                     p.rotation,
                 );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_slc2<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        use slc_oxide::{input::InputData, replay::Replay};
+
+        let replay = Replay::<()>::read(&mut reader)?;
+        self.fps = self.get_fps(replay.tps);
+
+        let start = if self.discard_deaths {
+            // find the last death
+            replay
+                .inputs
+                .iter()
+                .rposition(|i| {
+                    matches!(
+                        i.data,
+                        InputData::Restart | InputData::RestartFull | InputData::Death
+                    )
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        for input in replay.inputs.iter().skip(start) {
+            let time = input.frame as f64 / self.fps;
+            match &input.data {
+                InputData::TPS(tps) => {
+                    self.fps = self.get_fps(*tps);
+                    self.fps_change(*tps);
+                }
+                InputData::Player(player) => {
+                    let button = Button::from_button_idx(player.button as _, player.hold);
+                    if player.player_2 {
+                        self.process_action_p2(time, button, input.frame as _);
+                        self.extended_p2(player.hold, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+                    } else {
+                        self.process_action_p1(time, button, input.frame as _);
+                        self.extended_p1(player.hold, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+                    }
+                }
+                _ => (),
             }
         }
 

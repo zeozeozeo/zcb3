@@ -15,7 +15,7 @@ jobs:
         platform:
           - release_for: Windows-x86_64
             os: windows-latest
-            target: x86_64-pc-windows-msvc
+            target: x86_64-pc-windows-gnu
             bin: zcb3.exe
             name: zcb3-Windows-x86_64.zip
             command: build
@@ -57,6 +57,7 @@ jobs:
           target: ${{ matrix.platform.target }}
           args: "--release"
           strip: true
+          toolchain: nightly
       - name: Publish release artifacts
         uses: actions/upload-artifact@v4
         with:

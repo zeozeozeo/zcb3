@@ -1275,10 +1275,11 @@ impl App {
 • qBot (.qb)
 • RBot (.rbot, old and new formats)
 • Zephyrus (.zr, used in OpenHack)
-• Silicate (.slc)
 • ReplayEngine 1 Replay (.re, old and new formats)
 • ReplayEngine 2 Replay (.re2)
 • ReplayEngine 3 Replay (.re3)
+• Silicate (.slc)
+• Silicate 2 (.slc2)
 • GDReplayFormat 2 (.gdr2)",
             );
         });

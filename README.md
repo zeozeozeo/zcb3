@@ -45,17 +45,18 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 * qBot (.qb)
 * RBot (.rbot, old and new formats)
 * Zephyrus (.zr, used in OpenHack)
-* Silicate (.slc)
 * ReplayEngine 1 Replay (.re, old and new formats)
 * ReplayEngine 2 Replay (.re2)
 * ReplayEngine 3 Replay (.re3)
+* Silicate (.slc)
+* Silicate 2 (.slc2)
 * GDReplayFormat 2 (.gdr2)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
 # ClickpackDB
 
-A collection of 300+ clickpacks sourced from the [ZCB Discord](https://discord.com/invite/b4kBQyXYZT), accessible from within ZCB.
+A collection of 400+ clickpacks sourced from the [ZCB Discord](https://discord.com/invite/b4kBQyXYZT), accessible from within ZCB.
 
 ![ClickpackDB window](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/3.png?raw=true)
 
@@ -95,7 +96,7 @@ If you run without any arguments, the GUI will start.
 To build, clone the repository (or download zip and extract) and run `cargo build` for debug builds and `cargo build --release` for release builds. Note that release builds take a lot of time to build, because they use LTO and they strip debug symbols.
 
 > [!NOTE]  
-> On Windows, try building with the `stable-x86_64-pc-windows-gnu` toolchain incase linking fails on `stable-x86_64-pc-windows-msvc`. Seems to be an issue with flate2.
+> On Windows, try building with the `nightly-x86_64-pc-windows-gnu` toolchain incase linking fails on `nightly-x86_64-pc-windows-msvc`. Seems to be an issue with flate2.
 
 # Donations 
 
