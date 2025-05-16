@@ -675,6 +675,7 @@ dependencies = [
  "gdr2",
  "hound",
  "ijson",
+ "indexmap",
  "leb128",
  "log",
  "lzma-rs",

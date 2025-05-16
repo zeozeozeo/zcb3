@@ -2,6 +2,7 @@ use crate::{f32_range, Timings, VolumeSettings};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use ijson::IValue;
+use indexmap::IndexMap;
 use serde::Deserialize;
 use std::{
     collections::HashMap,
@@ -2549,6 +2550,7 @@ impl Replay {
 
         // mirrors https://github.com/TobyAdd/GDH/blob/088b5accb04cddcbd09cac29b2e9850ebcea5c60/src/replayEngine.hpp#L11-L27
         #[repr(C)]
+        #[derive(Default)]
         struct FrameData {
             frame: u32,
             x: f32,
@@ -2558,55 +2560,147 @@ impl Replay {
             player2: bool,
         }
         #[repr(C)]
+        #[derive(Default)]
         struct ActionData {
             frame: u32,
             down: bool,
             button: i32,
             player1: bool,
         }
-        const DEFAULT_ACTION: ActionData = ActionData {
-            frame: 0,
-            down: false,
-            button: 0,
-            player1: true,
-        };
+
+        #[derive(Default)]
+        struct AmalgamatedActionDatas {
+            p1_frame: FrameData,
+            p2_frame: FrameData,
+            p1_action: Option<ActionData>,
+            p2_action: Option<ActionData>,
+        }
 
         let p1_size = reader.read_u32::<LittleEndian>()? as usize;
         let p2_size = reader.read_u32::<LittleEndian>()? as usize;
         let p1_input_size = reader.read_u32::<LittleEndian>()? as usize;
         let p2_input_size = reader.read_u32::<LittleEndian>()? as usize;
 
-        // read p1 and p2 frame datas
-        let mut frame_datas: Vec<FrameData> = vec![];
-        for _ in 0..p1_size + p2_size {
+        // an indexmap to store our amalgamated actions
+        let mut amalgamated_action_datas: IndexMap<u32, AmalgamatedActionDatas> = IndexMap::new();
+
+        // read p1 frame datas
+        for _ in 0..p1_size {
             let mut buf = [0; size_of::<FrameData>()];
             reader.read_exact(&mut buf)?;
-            frame_datas.push(unsafe { std::mem::transmute(buf) });
+            let frame_data: FrameData = unsafe { std::mem::transmute(buf) };
+            if let Some(action_data) = amalgamated_action_datas.get_mut(&frame_data.frame) {
+                action_data.p1_frame = frame_data;
+            } else {
+                amalgamated_action_datas.insert(
+                    frame_data.frame,
+                    AmalgamatedActionDatas {
+                        p1_frame: frame_data,
+                        ..Default::default()
+                    },
+                );
+            }
         }
-        // stored separately, so sort by frame
-        frame_datas.sort_by_key(|f| f.frame);
 
-        // hash action datas
-        let mut actions = HashMap::new();
-        for _ in 0..p1_input_size + p2_input_size {
+        // read p2 frame datas
+        for _ in 0..p2_size {
+            let mut buf = [0; size_of::<FrameData>()];
+            reader.read_exact(&mut buf)?;
+            let frame_data: FrameData = unsafe { std::mem::transmute(buf) };
+            if let Some(action_data) = amalgamated_action_datas.get_mut(&frame_data.frame) {
+                action_data.p2_frame = frame_data;
+            } else {
+                amalgamated_action_datas.insert(
+                    frame_data.frame,
+                    AmalgamatedActionDatas {
+                        p2_frame: frame_data,
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        // now, add action datas into our amalgamation
+
+        // read p1 action datas
+        for _ in 0..p1_input_size {
             let mut buf = [0; size_of::<ActionData>()];
             reader.read_exact(&mut buf)?;
             let action: ActionData = unsafe { std::mem::transmute(buf) };
-            actions.insert(action.frame, action);
+            if let Some(action_data) = amalgamated_action_datas.get_mut(&action.frame) {
+                action_data.p1_action = Some(action);
+            } else {
+                amalgamated_action_datas.insert(
+                    action.frame,
+                    AmalgamatedActionDatas {
+                        p1_action: Some(action),
+                        ..Default::default()
+                    },
+                );
+            }
         }
 
-        for frame_data in frame_datas {
-            let time = frame_data.frame as f64 / self.fps;
-            // to get the button, we need to lookup the action hashmap
-            let action = actions.get(&frame_data.frame).unwrap_or(&DEFAULT_ACTION);
-            let button = Button::from_button_idx(action.button, action.down);
-            if frame_data.player2 {
-                self.process_action_p2(time, button, frame_data.frame);
-                self.extended_p2(action.down, frame_data.frame, 0.0, 0.0, 0.0, 0.0);
+        // read p2 action datas
+        for _ in 0..p2_input_size {
+            let mut buf = [0; size_of::<ActionData>()];
+            reader.read_exact(&mut buf)?;
+            let action: ActionData = unsafe { std::mem::transmute(buf) };
+            if let Some(action_data) = amalgamated_action_datas.get_mut(&action.frame) {
+                action_data.p2_action = Some(action);
             } else {
-                self.process_action_p1(time, button, frame_data.frame);
-                self.extended_p1(action.down, frame_data.frame, 0.0, 0.0, 0.0, 0.0);
+                amalgamated_action_datas.insert(
+                    action.frame,
+                    AmalgamatedActionDatas {
+                        p2_action: Some(action),
+                        ..Default::default()
+                    },
+                );
             }
+        }
+
+        // now sort by frame, since everything is separate in 4 chunks
+        amalgamated_action_datas.sort_by(|k1, _, k2, _| k1.cmp(&k2));
+
+        // now we can process the amalgamation
+        for (frame, action_data) in amalgamated_action_datas {
+            let AmalgamatedActionDatas {
+                p1_frame,
+                p2_frame,
+                p1_action,
+                p2_action,
+            } = &action_data;
+
+            let time = frame as f64 / self.fps;
+
+            let down = if let Some(ac) = p1_action {
+                let button = Button::from_button_idx(ac.button, ac.down);
+                self.process_action_p1(time, button, frame);
+                ac.down
+            } else if let Some(ac) = p2_action {
+                let button = Button::from_button_idx(ac.button, ac.down);
+                self.process_action_p2(time, button, frame);
+                ac.down
+            } else {
+                false
+            };
+
+            // add extended
+            self.extended_p1(
+                down,
+                frame,
+                p1_frame.x,
+                p1_frame.y,
+                p1_frame.y_accel as _,
+                p1_frame.rot,
+            );
+            self.extended_p2(
+                down,
+                frame,
+                p2_frame.x,
+                p2_frame.y,
+                p2_frame.y_accel as _,
+                p2_frame.rot,
+            );
         }
 
         Ok(())
