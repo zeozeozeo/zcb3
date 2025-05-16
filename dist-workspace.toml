@@ -13,7 +13,7 @@ installers = ["shell", "powershell", "msi"]
 targets = [
     "aarch64-apple-darwin",
     "aarch64-unknown-linux-gnu",
-    "aarch64-pc-windows-msvc",
+    #"aarch64-pc-windows-msvc",
     "x86_64-apple-darwin",
     "x86_64-unknown-linux-gnu",
     "x86_64-unknown-linux-musl",
@@ -31,7 +31,7 @@ aarch64-unknown-linux-gnu = "ubuntu-latest"
 arm-unknown-linux-gnueabihf = "ubuntu-latest"
 arm-unknown-linux-musleabihf = "ubuntu-latest"
 x86_64-apple-darwin = "macos-13"
-aarch64-pc-windows-msvc = "ubuntu-latest"
+#aarch64-pc-windows-msvc = "ubuntu-latest"
 x86_64-pc-windows-msvc = "windows-latest"
 armv7-unknown-linux-gnueabihf = "ubuntu-latest"
 armv7-unknown-linux-musleabihf = "ubuntu-latest"
