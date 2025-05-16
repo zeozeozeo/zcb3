@@ -2570,8 +2570,8 @@ impl Replay {
 
         #[derive(Default)]
         struct AmalgamatedActionDatas {
-            p1_frame: FrameData,
-            p2_frame: FrameData,
+            p1_frame: Option<FrameData>,
+            p2_frame: Option<FrameData>,
             p1_action: Option<ActionData>,
             p2_action: Option<ActionData>,
         }
@@ -2590,12 +2590,12 @@ impl Replay {
             reader.read_exact(&mut buf)?;
             let frame_data: FrameData = unsafe { std::mem::transmute(buf) };
             if let Some(action_data) = amalgamated_action_datas.get_mut(&frame_data.frame) {
-                action_data.p1_frame = frame_data;
+                action_data.p1_frame = Some(frame_data);
             } else {
                 amalgamated_action_datas.insert(
                     frame_data.frame,
                     AmalgamatedActionDatas {
-                        p1_frame: frame_data,
+                        p1_frame: Some(frame_data),
                         ..Default::default()
                     },
                 );
@@ -2608,12 +2608,12 @@ impl Replay {
             reader.read_exact(&mut buf)?;
             let frame_data: FrameData = unsafe { std::mem::transmute(buf) };
             if let Some(action_data) = amalgamated_action_datas.get_mut(&frame_data.frame) {
-                action_data.p2_frame = frame_data;
+                action_data.p2_frame = Some(frame_data);
             } else {
                 amalgamated_action_datas.insert(
                     frame_data.frame,
                     AmalgamatedActionDatas {
-                        p2_frame: frame_data,
+                        p2_frame: Some(frame_data),
                         ..Default::default()
                     },
                 );
@@ -2685,22 +2685,26 @@ impl Replay {
             };
 
             // add extended
-            self.extended_p1(
-                down,
-                frame,
-                p1_frame.x,
-                p1_frame.y,
-                p1_frame.y_accel as _,
-                p1_frame.rot,
-            );
-            self.extended_p2(
-                down,
-                frame,
-                p2_frame.x,
-                p2_frame.y,
-                p2_frame.y_accel as _,
-                p2_frame.rot,
-            );
+            if let Some(p1_frame) = p1_frame {
+                self.extended_p1(
+                    down,
+                    frame,
+                    p1_frame.x,
+                    p1_frame.y,
+                    p1_frame.y_accel as _,
+                    p1_frame.rot,
+                );
+            }
+            if let Some(p2_frame) = p2_frame {
+                self.extended_p2(
+                    down,
+                    frame,
+                    p2_frame.x,
+                    p2_frame.y,
+                    p2_frame.y_accel as _,
+                    p2_frame.rot,
+                );
+            }
         }
 
         Ok(())
