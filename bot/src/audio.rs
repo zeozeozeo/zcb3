@@ -138,8 +138,6 @@ pub struct AudioSegment {
     /// Interleaved channel data. Always [`AudioSegment::NUM_CHANNELS`] channels.
     pub frames: Vec<Frame>,
     pub pitch_table: Vec<AudioSegment>,
-    /// Amount of silent frames before playback after asynchronous resample.
-    delay: usize,
 }
 
 fn load_frames_from_buffer_ref(buffer: &AudioBufferRef) -> Result<Vec<Frame>> {
@@ -321,7 +319,7 @@ impl AudioSegment {
         let end = (start + other.frames.len().min(self.time_to_frame(dur)))
             .min(self.frames.len().saturating_sub(1));
 
-        self.frames[start + self.delay..end]
+        self.frames[start..end]
             .par_iter_mut()
             .zip(&other.frames)
             .for_each(|(s, o)| {
@@ -344,7 +342,7 @@ impl AudioSegment {
         let end = (start + other.frames.len().min(self.time_to_frame(dur)))
             .min(self.frames.len().saturating_sub(1));
 
-        self.frames[start + self.delay..end] // resampler delay
+        self.frames[start..end] // resampler delay
             .par_iter_mut() // run in parallel
             .zip(&other.frames)
             .for_each(|(s, o)| {
@@ -370,8 +368,8 @@ impl AudioSegment {
         // create resampler
         let f_ratio = rate as f64 / self.sample_rate.max(1) as f64;
         let sinc_len = 128;
-        let oversampling_factor = 256;
-        let interpolation = SincInterpolationType::Quadratic;
+        let oversampling_factor = 128;
+        let interpolation = SincInterpolationType::Linear;
         let window = WindowFunction::BlackmanHarris2;
         let f_cutoff = rubato::calculate_cutoff(sinc_len, window);
         let params = SincInterpolationParameters {
@@ -383,7 +381,7 @@ impl AudioSegment {
         };
         let mut resampler = Async::<f32>::new_sinc(
             f_ratio,
-            10.0, // max_resample_ratio_relative
+            1.1, // max_resample_ratio_relative
             params,
             1024,
             Self::NUM_CHANNELS,
@@ -405,7 +403,8 @@ impl AudioSegment {
             InterleavedSlice::new(&input_data, Self::NUM_CHANNELS, num_input_frames).unwrap();
 
         // allocate output buffer
-        let outdata_capacity = (num_input_frames as f64 * f_ratio) as usize;
+        // FIXME: currently we overshoot by 1.5x cuz rubato cannot decide how many frames it needs
+        let outdata_capacity = (num_input_frames as f64 * f_ratio) as usize * 3 / 2;
         let mut outdata = vec![0.0f32; outdata_capacity * Self::NUM_CHANNELS];
 
         // and create the adaptor for the output buffer (yes, outdata_capacity shouldn't be multiplied by NUM_CHANNELS)
@@ -436,14 +435,19 @@ impl AudioSegment {
 
         // process last partial chunk
         indexing.partial_len = Some(input_frames_left);
-        let (_num_in, _num_out) = resampler
+        let (_num_in, num_out) = resampler
             .process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing))
             .unwrap();
+        indexing.output_offset += num_out;
 
-        // transmute interleaved floats back to [Frame]s
-        self.frames = unsafe { std::mem::transmute(outdata) };
+        // mutate self with correct output slice
+        self.frames = outdata[resampler.output_delay() * Self::NUM_CHANNELS
+            ..indexing.output_offset * Self::NUM_CHANNELS]
+            .chunks_exact(2)
+            .map(|chunk| Frame::from([chunk[0], chunk[1]]))
+            .collect();
+
         self.sample_rate = rate;
-        self.delay = resampler.output_delay();
         self
     }
 

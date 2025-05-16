@@ -1316,9 +1316,9 @@ dependencies = [
 
 [[package]]
 name = "egui_clickpack_db"
-version = "0.7.0"
+version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "165066fb4823429bbfd91e6d2804cb0bc8f0795754b237dfd9feccbae64d3f07"
+checksum = "4a968240f48fafb0b42e451b7080c8cdb74974f9433ca2074705e28921c0b203"
 dependencies = [
  "egui",
  "egui_extras",
@@ -1329,6 +1329,7 @@ dependencies = [
  "open",
  "serde",
  "serde_json",
+ "urlencoding",
  "zip-extract",
 ]
 
@@ -3663,17 +3664,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "self-replace"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "03ec815b5eab420ab893f63393878d89c90fdd94c0bcc44c07abb8ad95552fb7"
-dependencies = [
- "fastrand",
- "tempfile",
- "windows-sys 0.52.0",
-]
-
-[[package]]
 name = "serde"
 version = "1.0.219"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5678,7 +5668,7 @@ dependencies = [
 
 [[package]]
 name = "zcb3"
-version = "3.5.10"
+version = "3.6.0"
 dependencies = [
  "anyhow",
  "bot",
@@ -5697,7 +5687,6 @@ dependencies = [
  "rayon",
  "rfd",
  "rustmatica",
- "self-replace",
  "serde",
  "serde_json",
  "tempfile",

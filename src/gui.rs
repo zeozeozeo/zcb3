@@ -197,6 +197,7 @@ struct App {
     clickpack_db: ClickpackDb,
     show_clickpack_db: bool,
     clickpack_db_title: String,
+    show_suitable_step_notice: bool,
 }
 
 impl Default for App {
@@ -225,6 +226,7 @@ impl Default for App {
             clickpack_db: ClickpackDb::default(),
             show_clickpack_db: false,
             clickpack_db_title: String::new(),
+            show_suitable_step_notice: false,
         }
     }
 }
@@ -250,17 +252,19 @@ fn help_text<R>(ui: &mut egui::Ui, help: &str, add_contents: impl FnOnce(&mut eg
     });
 }
 
+/// Returns whether changed
 fn drag_value<Num: emath::Numeric>(
     ui: &mut egui::Ui,
     value: &mut Num,
     text: impl Into<String>,
     clamp_range: RangeInclusive<Num>,
     help: &str,
-) {
+) -> bool {
+    let mut changed = false;
     help_text(ui, help, |ui| {
-        let dragged = ui
-            .add(DragValue::new(value).range(clamp_range.clone()).speed(0.01))
-            .dragged();
+        let resp = ui.add(DragValue::new(value).range(clamp_range.clone()).speed(0.01));
+        let dragged = resp.dragged();
+        changed = resp.changed();
         ui.label(
             if dragged && (clamp_range.start() == value || clamp_range.end() == value) {
                 RichText::new(text).color(Color32::LIGHT_RED)
@@ -269,6 +273,7 @@ fn drag_value<Num: emath::Numeric>(
             },
         );
     });
+    changed
 }
 
 impl eframe::App for App {
@@ -372,7 +377,7 @@ impl eframe::App for App {
             update_dialog.show_dialog();
             modal.show_dialog();
 
-            self.show_update_check_modal(&modal, &update_dialog, ctx);
+            self.show_update_check_modal(&modal);
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -445,7 +450,8 @@ fn ureq_agent() -> ureq::Agent {
     ureq::Agent::new_with_config(config)
 }
 
-fn ureq_get(url: &str, post: bool) -> Result<Vec<u8>, String> {
+fn ureq_fn(url: &str, post: bool) -> Result<Vec<u8>, String> {
+    log::debug!("request url: '{url}', POST={post}");
     if post {
         return ureq_agent()
             .post(url)
@@ -489,65 +495,6 @@ fn is_older_version(current: &str, latest: &str) -> bool {
         .any(|(c, l)| c < l)
 }
 
-fn update_to_latest(tag: &str) -> Result<()> {
-    let body = ureq_agent()
-        .get("https://api.github.com/repos/zeozeozeo/zcb3/releases/latest")
-        .call()?
-        .body_mut()
-        .read_to_string()?;
-
-    log::debug!("releases response text: '{body}'");
-    let v: Value = serde_json::from_str(&body)?;
-
-    let filename = if cfg!(target_os = "windows") {
-        "zcb3.exe"
-    } else if cfg!(target_os = "macos") {
-        "zcb3_macos"
-    } else if cfg!(target_os = "linux") {
-        "zcb3_linux" // might be any other unix-like OS, but we only support Linux for now
-    } else {
-        anyhow::bail!("unsupported on this platform");
-    };
-
-    // search for the required asset
-    let asset_url: Option<&str> = v["assets"]
-        .as_array()
-        .context("failed to get 'assets' array")?
-        .iter()
-        .map(|v| v["browser_download_url"].as_str().unwrap_or(""))
-        .find(|url| url.contains(filename));
-
-    if let Some(url) = asset_url {
-        let mut call = ureq_agent().get(url).call()?;
-
-        // generate random string
-        let random_str: String = std::iter::repeat_with(fastrand::alphanumeric)
-            .take(8)
-            .collect();
-
-        let new_binary = format!(
-            "zcb3_update_{tag}_{random_str}{}",
-            if cfg!(windows) { ".exe" } else { "" }
-        );
-
-        // write the file
-        let mut f = std::fs::File::create(&new_binary)?;
-        std::io::copy(&mut call.body_mut().as_reader(), &mut f)?;
-
-        // replace executable
-        self_replace::self_replace(&new_binary)
-            .map_err(|e| anyhow::anyhow!("{e}. Use the created executable: {new_binary}"))?;
-
-        if std::path::Path::new(&new_binary).try_exists()? {
-            std::fs::remove_file(new_binary)?;
-        }
-    } else {
-        anyhow::bail!("failed to find required asset for tag {tag} (filename: {filename})")
-    }
-
-    Ok(())
-}
-
 fn capitalize_first_letter(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
@@ -557,7 +504,7 @@ fn capitalize_first_letter(s: &str) -> String {
 }
 
 impl App {
-    fn show_update_check_modal(&mut self, modal: &Modal, dialog: &Modal, ctx: &egui::Context) {
+    fn show_update_check_modal(&mut self, modal: &Modal) {
         let Some(update_to_tag) = self.update_to_tag.clone() else {
             return;
         };
@@ -578,27 +525,6 @@ impl App {
                 );
             });
             modal.buttons(ui, |ui| {
-                if modal
-                    .button(ui, "auto-update")
-                    .on_hover_text(
-                        "Automatically update to the newest version.\n\
-                                    This might take some time!\n\
-                                    You might have to restart ZCB",
-                    )
-                    .clicked()
-                {
-                    if let Err(e) = update_to_latest(&update_to_tag) {
-                        dialog
-                            .dialog()
-                            .with_title("Failed to perform auto-update")
-                            .with_body(e)
-                            .with_icon(Icon::Error)
-                            .open();
-                    } else {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                    self.update_to_tag = None;
-                }
                 if modal.button(ui, "close").clicked() {
                     self.update_to_tag = None;
                 }
@@ -1343,27 +1269,44 @@ impl App {
             ui.checkbox(&mut self.conf.pitch_enabled, "Enable pitch variation");
             ui.add_enabled_ui(self.conf.pitch_enabled, |ui| {
                 let p = &mut self.conf.pitch;
-                drag_value(
+                let mut changed = false;
+                changed |= drag_value(
                     ui,
                     &mut p.from,
                     "Minimum pitch",
                     0.0..=p.to,
                     "Minimum pitch value, 1 means no change",
                 );
-                drag_value(
+                changed |= drag_value(
                     ui,
                     &mut p.to,
                     "Maximum pitch",
                     p.from..=f32::INFINITY,
                     "Maximum pitch value, 1 means no change",
                 );
-                drag_value(
-                    ui,
-                    &mut p.step,
-                    "Pitch step",
-                    0.0001..=f32::INFINITY,
-                    "Step between pitch values. The less = the better & the slower",
-                );
+
+                if changed {
+                    p.step = p.suitable_step();
+                    self.show_suitable_step_notice = true;
+                }
+
+                ui.horizontal(|ui| {
+                    if drag_value(
+                        ui,
+                        &mut p.step,
+                        "Pitch step",
+                        0.0001..=f32::INFINITY,
+                        "Step between pitch values. The less = the better & the slower",
+                    ) {
+                        self.show_suitable_step_notice = false;
+                    }
+                    if self.show_suitable_step_notice {
+                        ui.add_enabled(
+                            false,
+                            egui::Label::new("(notice: automatically set to a sane value)"),
+                        );
+                    }
+                });
             });
         });
 
@@ -2066,7 +2009,7 @@ impl App {
 
     fn show_clickpack_db(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
         self.clickpack_db
-            .show(ui, &ureq_get, &|| FileDialog::new().pick_folder());
+            .show(ui, &ureq_fn, &|| FileDialog::new().pick_folder());
 
         if let Some(select_path) = self.clickpack_db.select_clickpack.take() {
             self.select_clickpack(&select_path);

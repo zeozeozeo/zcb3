@@ -304,6 +304,15 @@ impl Pitch {
         to: 1.0,
         step: 0.0,
     };
+
+    // ~20 variations per 0.1 step
+    pub fn suitable_step(&self) -> f32 {
+        if self.to - self.from == 0.0 {
+            0.0
+        } else {
+            (self.to - self.from).abs() * 0.05
+        }
+    }
 }
 
 impl Default for Pitch {
@@ -311,7 +320,7 @@ impl Default for Pitch {
         Self {
             from: 0.98,
             to: 1.02,
-            step: 0.0005,
+            step: 0.002,
         }
     }
 }

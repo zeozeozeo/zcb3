@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.5.10"
+version = "3.6.0"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -38,10 +38,9 @@ egui_extras = { version = "0.31", features = ["image"] }
 rustmatica = "0.2.0"
 egui_plot = "0.31"
 serde = "1"
-self-replace = "1.5.0"
 ureq = "3.0.10"
 fastrand = "2.3.0"
-egui_clickpack_db = "0.7.0"
+egui_clickpack_db = "0.7.2"
 chrono = "0.4"
 timeago = "0.4.2"
 tempfile = "3.20.0"
