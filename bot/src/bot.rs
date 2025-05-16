@@ -587,15 +587,21 @@ pub fn find_noise_file(dir: &Path) -> Option<PathBuf> {
     for entry in dir {
         let path = entry.ok()?.path();
         let filename = path.file_name()?.to_str()?;
-        // if it's a noise*, etc file we should try to load it
-        let lower_filename = filename.to_lowercase();
-        if path.is_file()
-            && (lower_filename.starts_with("noise")
+        if path.is_file() {
+            let lower_filename: String = filename
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .flat_map(|c| c.to_lowercase())
+                .collect();
+            // if it's a noise*, etc file we should try to load it
+            if lower_filename.starts_with("noise")
                 || lower_filename.starts_with("whitenoise")
                 || lower_filename.starts_with("pcnoise")
-                || lower_filename.starts_with("background"))
-        {
-            return Some(path);
+                || lower_filename.starts_with("background")
+                || lower_filename.starts_with("silent")
+            {
+                return Some(path);
+            }
         }
     }
     None
@@ -1009,7 +1015,7 @@ impl Bot {
 
                     // export wave file
                     log::debug!("exporting wav file to {player_path:?}");
-                    click.export_wav(f)?;
+                    click.export_wav(f, false)?;
                     player_path.pop();
                 }
                 player_path.pop();

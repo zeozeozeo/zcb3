@@ -4,15 +4,15 @@ version = "3.5.10"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
+repository = "https://github.com/zeozeozeo/zcb3"
+description = " The most feature-complete Geometry Dash clickbot."
+license = "Unlicense"
 
-[profile.release]
-lto = "fat"
-strip = true
-codegen-units = 1
-
-[profile.release-no-lto]
-inherits = "release"
-lto = "off"
+[package.metadata.wix]
+upgrade-guid = "A776E6E4-67D5-49CD-9134-D9BBB7DA6CC1"
+path-guid = "2659187C-A1B2-4807-95B1-4E67C0813540"
+license = false
+eula = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -20,28 +20,31 @@ lto = "off"
 members = [".", "bot", "bot/ybot_fmt", "bot/gdr", "bot/gdr2"]
 
 [dependencies]
-clap = { version = "4.5.23", features = ["derive"] }
-eframe = "0.29.1"
-egui-modal = "0.5.0"
-env_logger = "0.11.5"
-image = { version = "0.25.5", default-features = false, features = ["ico", "png"] }
-rfd = "0.15.0"
+clap = { version = "4.5", features = ["derive"] }
+eframe = "0.31"
+egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.31" }
+env_logger = "0.11.8"
+image = { version = "0.25.6", default-features = false, features = [
+    "ico",
+    "png",
+] }
+rfd = "0.15.3"
 bot = { path = "bot" }
 serde_json = "1"
-log = "0.4.21"
-anyhow = "1.0.93"
+log = "0.4"
+anyhow = "1"
 rayon = "1.10.0"
-egui_extras = { version = "0.29.1", features = ["image"] }
+egui_extras = { version = "0.31", features = ["image"] }
 rustmatica = "0.2.0"
-egui_plot = "0.29.0"
+egui_plot = "0.31"
 serde = "1"
 self-replace = "1.5.0"
-ureq = "2.10.1"
+ureq = "3.0.10"
 fastrand = "2.3.0"
-egui_clickpack_db = "0.4.0"
-chrono = "0.4.39"
+egui_clickpack_db = "0.7.0"
+chrono = "0.4"
 timeago = "0.4.2"
-tempfile = "3.14.0"
+tempfile = "3.20.0"
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -49,4 +52,9 @@ winapi = { version = "0.3.9", features = ["wincon", "winuser"] }
 
 [build-dependencies]
 winres = "0.1.12"
-built = "0.7.5"
+built = "0.8.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "fat"

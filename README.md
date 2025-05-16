@@ -20,37 +20,37 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 
 # Supported replay formats
 
-* Mega Hack Replay JSON (.mhr.json)
-* Mega Hack Replay Binary (.mhr)
-* TASbot Replay (.json)
-* zBot Frame Replay (.zbf)
-* OmegaBot 2 Replay (.replay)
-* OmegaBot 3 Replay (.replay)
-* yBot Frame (no extension by default, rename to .ybf)
-* yBot 2 (.ybot)
-* Echo (.echo, new binary format, new json format and old json format)
-* Amethyst Replay (.thyst)
-* osu! replay (.osr)
-* GDMO Replay (.macro)
-* 2.2 GDMO Replay (.macro, old non-Geode version)
-* ReplayBot Replay (.replay)
-* KD-BOT Replay (.kd)
-* Rush Replay (.rsh)
-* Plaintext (.txt)
-* GDH Plaintext (.txt)
-* DDHOR Replay (.ddhor, old frame format)
-* xBot Frame (.xbot)
-* [xdBot (.xd)](https://geode-sdk.org/mods/zilko.xdbot/), old and new formats
-* GDReplayFormat (.gdr, used in Geode GDMegaOverlay and 2.2 MH Replay)
-* qBot (.qb)
-* RBot (.rbot, old and new formats)
-* Zephyrus (.zr, used in OpenHack)
-* ReplayEngine 1 Replay (.re, old and new formats)
-* ReplayEngine 2 Replay (.re2)
-* ReplayEngine 3 Replay (.re3)
-* Silicate (.slc)
-* Silicate 2 (.slc)
-* GDReplayFormat 2 (.gdr2)
+- Mega Hack Replay JSON (.mhr.json)
+- Mega Hack Replay Binary (.mhr)
+- TASbot Replay (.json)
+- zBot Frame Replay (.zbf)
+- OmegaBot 2 Replay (.replay)
+- OmegaBot 3 Replay (.replay)
+- yBot Frame (no extension by default, rename to .ybf)
+- yBot 2 (.ybot)
+- Echo (.echo, new binary format, new json format and old json format)
+- Amethyst Replay (.thyst)
+- osu! replay (.osr)
+- GDMO Replay (.macro)
+- 2.2 GDMO Replay (.macro, old non-Geode version)
+- ReplayBot Replay (.replay)
+- KD-BOT Replay (.kd)
+- Rush Replay (.rsh)
+- Plaintext (.txt)
+- GDH Plaintext (.txt)
+- DDHOR Replay (.ddhor, old frame format)
+- xBot Frame (.xbot)
+- [xdBot (.xd)](https://geode-sdk.org/mods/zilko.xdbot/), old and new formats
+- GDReplayFormat (.gdr, used in Geode GDMegaOverlay and 2.2 MH Replay)
+- qBot (.qb)
+- RBot (.rbot, old and new formats)
+- Zephyrus (.zr, used in OpenHack)
+- ReplayEngine 1 Replay (.re, old and new formats)
+- ReplayEngine 2 Replay (.re2)
+- ReplayEngine 3 Replay (.re3)
+- Silicate (.slc)
+- Silicate 2 (.slc)
+- GDReplayFormat 2 (.gdr2)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
@@ -60,13 +60,14 @@ A collection of 400+ clickpacks sourced from the [ZCB Discord](https://discord.c
 
 ![ClickpackDB window](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/3.png?raw=true)
 
-* To access ClickpackDB, navigate to:
-  
-    <kbd>Clickpack</kbd> > <kbd>Open ClickpackDB…</kbd>
-* Download clickpacks into a specified folder by clicking <kbd>Download</kbd> next to a clickpack
-* Download and select clickpacks by clicking <kbd>Select</kbd>
-* Use the searchbar and the <kbd>Tags…</kbd> combobox to filter clickpacks
-* Hover on icons next to clickpack names to see their meaning
+- To access ClickpackDB, navigate to:
+
+  <kbd>Clickpack</kbd> > <kbd>Open ClickpackDB…</kbd>
+
+- Download clickpacks into a specified folder by clicking <kbd>Download</kbd> next to a clickpack
+- Download and select clickpacks by clicking <kbd>Select</kbd>
+- Use the searchbar and the <kbd>Tags…</kbd> combobox to filter clickpacks
+- Hover on icons next to clickpack names to see their meaning
 
 # Clickpack format
 
@@ -88,26 +89,23 @@ If you run without any arguments, the GUI will start.
 
 # TODO
 
-* Translate to other languages
-* Progress bar for rendering audio and loading clickpacks
+- Translate to other languages
+- Progress bar for rendering audio and loading clickpacks
 
 # Building
 
-To build, clone the repository (or download zip and extract) and run `cargo build` for debug builds and `cargo build --release` for release builds. Note that release builds take a lot of time to build, because they use LTO and they strip debug symbols.
+To build, clone the repository (or download zip and extract) and run `cargo build` for debug builds and `cargo build --release` for release builds.
 
-> [!NOTE]  
-> On Windows, try building with the `nightly-x86_64-pc-windows-gnu` toolchain incase linking fails on `nightly-x86_64-pc-windows-msvc`. Seems to be an issue with flate2.
-
-# Donations 
+# Donations
 
 ZCB is completely free software. Donations are welcome! :D
 
 By donating you'll get a custom role on the Discord server (dm me) and early access to some of my future mods.
 
-* [Ko-fi](https://ko-fi.com/zeozeozeo)
-* [Liberapay](https://liberapay.com/zeo)
-* [DonationAlerts](https://donationalerts.com/r/zeozeozeo)
-* [Boosty](https://boosty.to/zeozeozeo/donate)
+- [Ko-fi](https://ko-fi.com/zeozeozeo)
+- [Liberapay](https://liberapay.com/zeo)
+- [DonationAlerts](https://donationalerts.com/r/zeozeozeo)
+- [Boosty](https://boosty.to/zeozeozeo/donate)
 
 # License
 

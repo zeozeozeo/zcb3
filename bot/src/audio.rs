@@ -1,5 +1,10 @@
 use anyhow::{Context, Result};
+use audioadapter::direct::InterleavedSlice;
 use rayon::prelude::*;
+use rubato::{
+    Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
+    WindowFunction,
+};
 use std::io::{BufWriter, Cursor};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use std::time::{Duration, Instant};
@@ -122,22 +127,6 @@ impl Neg for Frame {
     }
 }
 
-/// p. 43: http://yehar.com/blog/wp-content/uploads/2009/08/deip.pdf
-#[inline]
-fn interpolate_frame(
-    previous: Frame,
-    current: Frame,
-    next: Frame,
-    next_next: Frame,
-    fraction: f32,
-) -> Frame {
-    let c0 = current;
-    let c1 = (next - previous) * 0.5;
-    let c2 = previous - current * 2.5 + next * 2.0 - next_next * 0.5;
-    let c3 = (next_next - previous) * 0.5 + (current - next) * 1.5;
-    ((c3 * fraction + c2) * fraction + c1) * fraction + c0
-}
-
 #[inline(always)]
 fn time_to_frame(sample_rate: u32, time: f64) -> usize {
     (time * sample_rate as f64) as usize
@@ -149,6 +138,8 @@ pub struct AudioSegment {
     /// Interleaved channel data. Always [`AudioSegment::NUM_CHANNELS`] channels.
     pub frames: Vec<Frame>,
     pub pitch_table: Vec<AudioSegment>,
+    /// Amount of silent frames before playback after asynchronous resample.
+    delay: usize,
 }
 
 fn load_frames_from_buffer_ref(buffer: &AudioBufferRef) -> Result<Vec<Frame>> {
@@ -188,6 +179,8 @@ where
 }
 
 impl AudioSegment {
+    pub const NUM_CHANNELS: usize = 2;
+
     pub fn extend_with(&mut self, data: &[Frame]) {
         self.frames.extend_from_slice(data)
     }
@@ -229,14 +222,6 @@ impl AudioSegment {
             .sample_rate
             .context("failed to get sample rate")?;
 
-        // if the file is mono, multiply the sample rate by 4
-        // (i have not figured out why this works yet)
-        // SPOILER: IT REALLY DOESNT
-        // if track.codec_params.channels == Some(Channels::FRONT_LEFT) {
-        //     log::debug!("detected mono file, multiplying sample rate by 4");
-        //     sample_rate *= 4;
-        // }
-
         log::info!(
             "sample rate: {sample_rate}, chns: {}",
             track.codec_params.channels.unwrap_or_default()
@@ -253,7 +238,7 @@ impl AudioSegment {
                     if e.kind() == UnexpectedEof {
                         break;
                     }
-                    // ...otherwise return KaError
+                    // ...otherwise return IoError
                     return Err(Error::IoError(e).into());
                 }
                 Err(e) => return Err(e.into()), // not io error
@@ -272,7 +257,7 @@ impl AudioSegment {
         Ok(Self {
             sample_rate,
             frames,
-            pitch_table: vec![],
+            ..Default::default()
         })
     }
 
@@ -284,13 +269,17 @@ impl AudioSegment {
         Self {
             sample_rate: rate,
             frames: vec![Frame::ZERO; time_to_frame(rate, time)],
-            pitch_table: vec![],
+            ..Default::default()
         }
     }
 
-    pub fn export_wav<W: std::io::Write + std::io::Seek>(&self, writer: W) -> Result<()> {
+    pub fn export_wav<W: std::io::Write + std::io::Seek>(
+        &self,
+        writer: W,
+        clamp: bool,
+    ) -> Result<()> {
         let spec = hound::WavSpec {
-            channels: 2,
+            channels: Self::NUM_CHANNELS as _,
             sample_rate: self.sample_rate,
             bits_per_sample: 32,
             sample_format: hound::SampleFormat::Float,
@@ -301,9 +290,16 @@ impl AudioSegment {
         // create buffered writer with 16mb buffer size
         let mut wav =
             hound::WavWriter::new(BufWriter::with_capacity(16 * 1024 * 1024, writer), spec)?;
-        for frame in &self.frames {
-            wav.write_sample(frame.left)?;
-            wav.write_sample(frame.right)?;
+        if clamp {
+            for frame in &self.frames {
+                wav.write_sample(frame.left.clamp(-1.0, 1.0))?;
+                wav.write_sample(frame.right.clamp(-1.0, 1.0))?;
+            }
+        } else {
+            for frame in &self.frames {
+                wav.write_sample(frame.left)?;
+                wav.write_sample(frame.right)?;
+            }
         }
         wav.finalize()?; // flush writer
 
@@ -318,13 +314,15 @@ impl AudioSegment {
     }
 
     #[inline]
-    pub fn overlay_at(&mut self, time: f64, other: &AudioSegment) {
-        assert!(self.sample_rate == other.sample_rate);
+    pub fn overlay_at(&mut self, time: f64, other: &AudioSegment, dur: f64) {
+        debug_assert!(self.sample_rate == other.sample_rate);
 
         let start = self.time_to_frame(time);
-        let end = (start + other.frames.len()).min(self.frames.len().saturating_sub(1));
-        self.frames[start..end]
-            .par_iter_mut() // run in parallel
+        let end = (start + other.frames.len().min(self.time_to_frame(dur)))
+            .min(self.frames.len().saturating_sub(1));
+
+        self.frames[start + self.delay..end]
+            .par_iter_mut()
             .zip(&other.frames)
             .for_each(|(s, o)| {
                 s.left += o.left;
@@ -334,12 +332,19 @@ impl AudioSegment {
 
     #[inline]
     pub fn overlay_at_vol(&mut self, time: f64, other: &AudioSegment, volume: f32, dur: f64) {
-        assert!(self.sample_rate == other.sample_rate);
+        debug_assert!(self.sample_rate == other.sample_rate);
+        if volume == 0.0 {
+            return;
+        }
+        if volume == 1.0 {
+            return self.overlay_at(time, other, dur);
+        }
 
         let start = self.time_to_frame(time);
         let end = (start + other.frames.len().min(self.time_to_frame(dur)))
             .min(self.frames.len().saturating_sub(1));
-        self.frames[start..end]
+
+        self.frames[start + self.delay..end] // resampler delay
             .par_iter_mut() // run in parallel
             .zip(&other.frames)
             .for_each(|(s, o)| {
@@ -358,47 +363,87 @@ impl AudioSegment {
     ///
     /// Does not do anything if sample rate is the same.
     pub fn resample(&mut self, rate: u32) -> &mut Self {
-        let mut fractional_position = 0.0f64;
-        let mut iter = self.frames.iter();
-        let mut frames = [Frame::ZERO; 4]; // prev, cur, next, next next
-        macro_rules! push_frame {
-            ($frame:expr) => {
-                for i in 0..frames.len() - 1 {
-                    frames[i] = frames[i + 1];
-                }
-                frames[frames.len() - 1] = $frame;
-            };
+        if self.sample_rate == rate {
+            return self;
         }
 
-        // fill resampler with 3 frames
-        for _ in 0..3 {
-            push_frame!(iter.next().copied().unwrap_or(Frame::ZERO));
+        // create resampler
+        let f_ratio = rate as f64 / self.sample_rate.max(1) as f64;
+        let sinc_len = 128;
+        let oversampling_factor = 256;
+        let interpolation = SincInterpolationType::Quadratic;
+        let window = WindowFunction::BlackmanHarris2;
+        let f_cutoff = rubato::calculate_cutoff(sinc_len, window);
+        let params = SincInterpolationParameters {
+            sinc_len,
+            f_cutoff,
+            interpolation,
+            oversampling_factor,
+            window,
+        };
+        let mut resampler = Async::<f32>::new_sinc(
+            f_ratio,
+            10.0, // max_resample_ratio_relative
+            params,
+            1024,
+            Self::NUM_CHANNELS,
+            FixedAsync::Input,
+        )
+        .unwrap();
+
+        // prepare input data (reinterpret as interleaved f32)
+        let num_input_frames = self.frames.len();
+        let input_data: &[f32] = unsafe {
+            std::slice::from_raw_parts(
+                self.frames.as_ptr() as *const f32,
+                num_input_frames * Self::NUM_CHANNELS,
+            )
+        };
+
+        // create input buffer
+        let input_adapter =
+            InterleavedSlice::new(&input_data, Self::NUM_CHANNELS, num_input_frames).unwrap();
+
+        // allocate output buffer
+        let outdata_capacity = (num_input_frames as f64 * f_ratio) as usize;
+        let mut outdata = vec![0.0f32; outdata_capacity * Self::NUM_CHANNELS];
+
+        // and create the adaptor for the output buffer (yes, outdata_capacity shouldn't be multiplied by NUM_CHANNELS)
+        let mut output_adapter =
+            InterleavedSlice::new_mut(&mut outdata, Self::NUM_CHANNELS, outdata_capacity).unwrap();
+
+        // process full chunks
+        let mut indexing = Indexing {
+            input_offset: 0,
+            output_offset: 0,
+            active_channels_mask: None,
+            partial_len: None,
+        };
+
+        let mut input_frames_next = resampler.input_frames_next();
+
+        let mut input_frames_left = num_input_frames;
+        while input_frames_left >= input_frames_next {
+            let (num_in, num_out) = resampler
+                .process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing))
+                .unwrap();
+
+            indexing.input_offset += num_in;
+            indexing.output_offset += num_out;
+            input_frames_left -= num_in;
+            input_frames_next = resampler.input_frames_next();
         }
 
-        let mut resampled_frames = Vec::with_capacity(self.frames.len());
-        let dt = rate as f64 / self.sample_rate as f64;
+        // process last partial chunk
+        indexing.partial_len = Some(input_frames_left);
+        let (_num_in, _num_out) = resampler
+            .process_into_buffer(&input_adapter, &mut output_adapter, Some(&indexing))
+            .unwrap();
 
-        'outer: loop {
-            resampled_frames.push(interpolate_frame(
-                frames[0],
-                frames[1],
-                frames[2],
-                frames[3],
-                fractional_position as f32,
-            ));
-
-            fractional_position += dt;
-            while fractional_position >= 1.0 {
-                fractional_position -= 1.0;
-                let Some(frame) = iter.next().copied() else {
-                    break 'outer;
-                };
-                push_frame!(frame);
-            }
-        }
-
+        // transmute interleaved floats back to [Frame]s
+        self.frames = unsafe { std::mem::transmute(outdata) };
         self.sample_rate = rate;
-        self.frames = resampled_frames;
+        self.delay = resampler.output_delay();
         self
     }
 

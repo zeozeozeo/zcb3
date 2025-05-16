@@ -81,6 +81,17 @@ impl Stage {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq)]
+pub enum RenderPostprocessType {
+    /// Save the audio file as-is.
+    #[default]
+    None,
+    /// Normalize the audio file.
+    Normalize,
+    /// Clamp samples to `[-1.0, 1.0]`.
+    Clamp,
+}
+
 fn get_version() -> String {
     built_info::PKG_VERSION.to_string()
 }
@@ -95,7 +106,6 @@ struct Config {
     #[serde(default = "get_version")]
     version: String,
     noise: bool,
-    normalize: bool,
     pitch_enabled: bool,
     pitch: Pitch,
     timings: Timings,
@@ -114,6 +124,7 @@ struct Config {
     cut_sounds: bool,
     #[serde(default = "f32_one")]
     noise_volume: f32,
+    postprocess_type: RenderPostprocessType,
 }
 
 impl Config {
@@ -142,7 +153,6 @@ impl Default for Config {
         Self {
             version: get_version(),
             noise: false,
-            normalize: false,
             pitch_enabled: true,
             pitch: Pitch::default(),
             timings: Timings::default(),
@@ -158,6 +168,7 @@ impl Default for Config {
             cut_sounds: false,
             noise_volume: 1.0,
             discard_deaths: true,
+            postprocess_type: RenderPostprocessType::default(),
         }
     }
 }
@@ -427,30 +438,38 @@ impl eframe::App for App {
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/37.0.2062.94 Chrome/37.0.2062.94 Safari/537.36";
 
 fn ureq_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
-        .timeout_read(Duration::from_secs(15))
-        .timeout_write(Duration::from_secs(15))
+    let config = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(15)))
         .user_agent(USER_AGENT)
-        .build()
+        .build();
+    ureq::Agent::new_with_config(config)
 }
 
-fn ureq_get(url: &str) -> Result<Vec<u8>, String> {
-    let mut buf = Vec::new();
+fn ureq_get(url: &str, post: bool) -> Result<Vec<u8>, String> {
+    if post {
+        return ureq_agent()
+            .post(url)
+            .send_empty()
+            .map_err(|e| e.to_string())?
+            .body_mut()
+            .read_to_vec()
+            .map_err(|_| "failed to read body".to_string());
+    }
     ureq_agent()
         .get(url)
         .call()
         .map_err(|e| e.to_string())?
-        .into_reader()
-        .read_to_end(&mut buf)
-        .map_err(|_| "failed to read body".to_string())?;
-    Ok(buf)
+        .body_mut()
+        .read_to_vec()
+        .map_err(|_| "failed to read body".to_string())
 }
 
 fn get_latest_tag() -> Result<String> {
     let body = ureq_agent()
         .get("https://api.github.com/repos/zeozeozeo/zcb3/tags")
         .call()?
-        .into_string()?;
+        .body_mut()
+        .read_to_string()?;
 
     log::debug!("response text: '{body}'");
     let v: Value = serde_json::from_str(&body)?;
@@ -474,7 +493,8 @@ fn update_to_latest(tag: &str) -> Result<()> {
     let body = ureq_agent()
         .get("https://api.github.com/repos/zeozeozeo/zcb3/releases/latest")
         .call()?
-        .into_string()?;
+        .body_mut()
+        .read_to_string()?;
 
     log::debug!("releases response text: '{body}'");
     let v: Value = serde_json::from_str(&body)?;
@@ -498,7 +518,7 @@ fn update_to_latest(tag: &str) -> Result<()> {
         .find(|url| url.contains(filename));
 
     if let Some(url) = asset_url {
-        let mut reader = ureq_agent().get(url).call()?.into_reader();
+        let mut call = ureq_agent().get(url).call()?;
 
         // generate random string
         let random_str: String = std::iter::repeat_with(fastrand::alphanumeric)
@@ -512,7 +532,7 @@ fn update_to_latest(tag: &str) -> Result<()> {
 
         // write the file
         let mut f = std::fs::File::create(&new_binary)?;
-        std::io::copy(&mut reader, &mut f)?;
+        std::io::copy(&mut call.body_mut().as_reader(), &mut f)?;
 
         // replace executable
         self_replace::self_replace(&new_binary)
@@ -1631,7 +1651,7 @@ impl App {
             &self.replay,
             self.conf.noise,
             self.conf.noise_volume,
-            self.conf.normalize,
+            self.conf.postprocess_type == RenderPostprocessType::Normalize,
             if !self.conf.expr_text.is_empty() && self.expr_error.is_empty() {
                 self.conf.expr_variable
             } else {
@@ -1650,7 +1670,10 @@ impl App {
         let f = std::fs::File::create(output.clone());
 
         if let Ok(f) = f {
-            if let Err(e) = segment.export_wav(f) {
+            if let Err(e) = segment.export_wav(
+                f,
+                self.conf.postprocess_type == RenderPostprocessType::Clamp,
+            ) {
                 dialog
                     .dialog()
                     .with_title("Failed to write output file!")
@@ -1896,6 +1919,8 @@ impl App {
     fn show_render_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.heading("Render");
 
+        ui.label("Select the output audio file. In the dialog, choose an arbitrary name for the new file and click 'Save'.");
+
         let mut dialog = Modal::new(ctx, "render_stage_dialog");
 
         ui.horizontal(|ui| {
@@ -1959,22 +1984,47 @@ impl App {
                 |ui| ui.checkbox(&mut self.conf.cut_sounds, "Cut sounds"),
             );
 
-            // normalize audio checkbox
-            ui.checkbox(&mut self.conf.normalize, "Normalize audio")
-                .on_hover_text(
-                "Whether to normalize the output audio\n(make all samples to be in range of 0-1)",
-            );
+            // postprocessing options
+            ui.horizontal(|ui| {
+                ui.radio_value(
+                    &mut self.conf.postprocess_type,
+                    RenderPostprocessType::None,
+                    "None",
+                )
+                .on_hover_text("Save the audio as-is, uncapped float range (default)");
+                ui.radio_value(
+                    &mut self.conf.postprocess_type,
+                    RenderPostprocessType::Normalize,
+                    "Normalize",
+                )
+                .on_hover_text("Normalize samples to [-1.0, 1.0]");
+                ui.radio_value(
+                    &mut self.conf.postprocess_type,
+                    RenderPostprocessType::Clamp,
+                    "Clamp",
+                )
+                .on_hover_text("Clamp samples to [-1.0, 1.0] (ACB)");
+
+                help_text(
+                    ui,
+                    "None = uncapped range (ZCB)\nNormalize = adjust volume of all samples\n\
+                    Clamp = clamp samples, do not readjust volume (ACB)",
+                    |ui| {
+                        ui.label("Postprocessing");
+                    },
+                );
+            });
 
             // audio framerate inputfield
             ui.horizontal(|ui| {
-                u32_edit_field_min1(ui, &mut self.conf.sample_rate);
-                help_text(
-                    ui,
-                    "Audio framerate.\nDon't touch this if you don't know what you're doing",
-                    |ui| {
-                        ui.label("Sample rate");
-                    },
-                );
+                if u32_edit_field_min1(ui, &mut self.conf.sample_rate).changed() {
+                    // this is bad
+                    self.bot.borrow_mut().sample_rate = self.conf.sample_rate;
+                }
+
+                help_text(ui, "Audio framerate", |ui| {
+                    ui.label("Sample rate");
+                });
             });
         });
 

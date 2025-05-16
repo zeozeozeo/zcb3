@@ -26,6 +26,22 @@ impl std::fmt::Display for ArgExprVariable {
     }
 }
 
+#[derive(ValueEnum, Debug, Clone, PartialEq)]
+pub enum ArgRenderPostprocessType {
+    /// Save the audio file as-is (ZCB).
+    None,
+    /// Normalize the audio file.
+    Normalize,
+    /// Clamp samples to `[-1.0, 1.0]` (ACB).
+    Clamp,
+}
+
+impl std::fmt::Display for ArgRenderPostprocessType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Run without any arguments to launch GUI.", long_about = None)]
 struct Args {
@@ -43,12 +59,8 @@ struct Args {
     noise_volume: f32,
     #[arg(long, short, help = "Path to output file", default_value_t = String::from("output.wav"))]
     output: String,
-    #[arg(
-        long,
-        help = "Whether to normalize the output audio (make all samples to be in range of 0-1)",
-        default_value_t = false
-    )]
-    normalize: bool,
+    #[arg(long, help = "Audio postprocessing type", default_value_t = ArgRenderPostprocessType::None)]
+    postprocess_type: ArgRenderPostprocessType,
 
     #[arg(
         long,
@@ -150,7 +162,9 @@ fn hide_console_window() {
 }
 
 fn main() {
-    env_logger::init(); // set envvar RUST_LOG=debug to see logs
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Debug)
+        .init();
 
     if std::env::args().len() > 1 {
         // we have arguments, probably need to run in cli mode
@@ -244,7 +258,7 @@ fn run_cli(mut args: Args) {
         &replay,
         args.noise,
         args.noise_volume,
-        args.normalize,
+        args.postprocess_type == ArgRenderPostprocessType::Normalize,
         if !args.volume_expr.is_empty() {
             match args.expr_variable {
                 ArgExprVariable::None => ExprVariable::None,
@@ -270,5 +284,7 @@ fn run_cli(mut args: Args) {
     }
 
     let f = std::fs::File::create(args.output).unwrap();
-    segment.export_wav(f).unwrap();
+    segment
+        .export_wav(f, args.postprocess_type == ArgRenderPostprocessType::Clamp)
+        .unwrap();
 }

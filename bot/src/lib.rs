@@ -1,3 +1,5 @@
+#![feature(portable_simd)]
+
 mod audio;
 mod bot;
 mod parser;
