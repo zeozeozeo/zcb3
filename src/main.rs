@@ -7,8 +7,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use malloc_best_effort::BEMalloc;
+
 #[global_allocator]
-static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+static GLOBAL: BEMalloc = BEMalloc::new(); // tcmalloc on linux/mac, mimalloc on winders
 
 pub mod built_info {
     // the file has been placed there by the build script.
@@ -165,6 +167,8 @@ fn hide_console_window() {
 }
 
 fn main() {
+    BEMalloc::init();
+
     env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
         .init();

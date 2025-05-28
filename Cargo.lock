@@ -2376,6 +2376,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libtcmalloc-sys"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e334c31a1ec3f9636f6c8fadd4adcc7264f22f76c68e11a7fa7ae8e779e3149"
+dependencies = [
+ "cc",
+ "document-features",
+ "libc",
+]
+
+[[package]]
 name = "libz-rs-sys"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2443,6 +2454,17 @@ dependencies = [
  "cc",
  "libc",
  "pkg-config",
+]
+
+[[package]]
+name = "malloc-best-effort"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "650fd2b65255e229426a17c9250d240f3208d0c897e41a287ead851b20d2a1d5"
+dependencies = [
+ "document-features",
+ "mimalloc",
+ "tcmalloc-better",
 ]
 
 [[package]]
@@ -4181,6 +4203,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tcmalloc-better"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00a06332be41fc22397e44ec1e93ea3e0a73206b19da1b4f38d274093d0916ed"
+dependencies = [
+ "document-features",
+ "libtcmalloc-sys",
+]
+
+[[package]]
 name = "tempfile"
 version = "3.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4325,15 +4357,6 @@ checksum = "5d4f6d1145dcb577acf783d4e601bc1d76a13337bb54e6233add580b07344c8b"
 dependencies = [
  "displaydoc",
  "zerovec",
-]
-
-[[package]]
-name = "toml"
-version = "0.5.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4f7f0dd8d50a853a531c426359045b1998f04219d88799810762cd4ad314234"
-dependencies = [
- "serde",
 ]
 
 [[package]]
@@ -5403,15 +5426,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "winres"
-version = "0.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b68db261ef59e9e52806f688020631e987592bd83619edccda9c47d42cde4f6c"
-dependencies = [
- "toml",
-]
-
-[[package]]
 name = "wit-bindgen-rt"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5716,7 +5730,7 @@ dependencies = [
  "fastrand",
  "image",
  "log",
- "mimalloc",
+ "malloc-best-effort",
  "rayon",
  "rfd",
  "rustmatica",
@@ -5726,7 +5740,6 @@ dependencies = [
  "timeago",
  "ureq",
  "winapi",
- "winres",
 ]
 
 [[package]]
