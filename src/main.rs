@@ -7,8 +7,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(not(target_env = "musl"))]
 use malloc_best_effort::BEMalloc;
 
+#[cfg(not(target_env = "musl"))]
 #[global_allocator]
 static GLOBAL: BEMalloc = BEMalloc::new(); // tcmalloc on linux/mac, mimalloc on winders
 
@@ -167,7 +169,10 @@ fn hide_console_window() {
 }
 
 fn main() {
-    BEMalloc::init();
+    #[cfg(not(target_env = "musl"))]
+    {
+        BEMalloc::init();
+    }
 
     env_logger::builder()
         .filter_level(log::LevelFilter::Debug)
