@@ -39,7 +39,8 @@ x86_64-unknown-linux-musl = "ubuntu-latest"
 x86_64-unknown-linux-gnu = "ubuntu-latest"
 
 [dist.dependencies.apt]
-"musl-g++" = { version = "*", targets = [
+musl-dev = { version = "*", targets = [
     "aarch64-unknown-linux-musl",
     "x86_64-unknown-linux-musl",
 ] }
+# musl-tools should be added by cargo-dist
