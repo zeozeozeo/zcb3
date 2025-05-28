@@ -7,6 +7,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 pub mod built_info {
     // the file has been placed there by the build script.
     include!(concat!(env!("OUT_DIR"), "/built.rs"));

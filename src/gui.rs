@@ -1839,7 +1839,7 @@ impl App {
             )
         };
 
-        let line = Line::new(plot_points).name(self.conf.expr_variable.to_string());
+        let line = Line::new(self.conf.expr_variable.to_string(), plot_points);
         ui.add_space(4.0);
 
         ui.add_enabled_ui(self.expr_error.is_empty() && num_actions > 0, |ui| {

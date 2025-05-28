@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.6.1"
+version = "3.6.2"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -36,7 +36,7 @@ anyhow = "1"
 rayon = "1.10.0"
 egui_extras = { version = "0.31", features = ["image"] }
 rustmatica = "0.2.0"
-egui_plot = "0.31"
+egui_plot = "0.32.1"
 serde = "1"
 ureq = "3.0.10"
 fastrand = "2.3.0"
@@ -44,6 +44,7 @@ egui_clickpack_db = "0.7.2"
 chrono = "0.4"
 timeago = "0.4.2"
 tempfile = "3.20.0"
+mimalloc = "0.1"
 
 # needed to hide console window on windows
 [target.'cfg(target_os = "windows")'.dependencies]
