@@ -37,3 +37,9 @@ armv7-unknown-linux-gnueabihf = "ubuntu-latest"
 armv7-unknown-linux-musleabihf = "ubuntu-latest"
 x86_64-unknown-linux-musl = "ubuntu-latest"
 x86_64-unknown-linux-gnu = "ubuntu-latest"
+
+[dist.dependencies.apt]
+"musl-g++" = { version = "*", targets = [
+    "aarch64-unknown-linux-musl",
+    "x86_64-unknown-linux-musl",
+] }
