@@ -27,12 +27,6 @@ enum ArgExprVariable {
     TimeOffset,
 }
 
-impl std::fmt::Display for ArgExprVariable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
-}
-
 #[derive(ValueEnum, Debug, Clone, PartialEq)]
 pub enum ArgRenderPostprocessType {
     /// Save the audio file as-is (ZCB).
@@ -41,12 +35,6 @@ pub enum ArgRenderPostprocessType {
     Normalize,
     /// Clamp samples to `[-1.0, 1.0]` (ACB).
     Clamp,
-}
-
-impl std::fmt::Display for ArgRenderPostprocessType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
 }
 
 #[derive(Parser, Debug)]
@@ -66,7 +54,7 @@ struct Args {
     noise_volume: f32,
     #[arg(long, short, help = "Path to output file", default_value_t = String::from("output.wav"))]
     output: String,
-    #[arg(long, help = "Audio postprocessing type", default_value_t = ArgRenderPostprocessType::None)]
+    #[arg(long, help = "Audio postprocessing type", default_value_t = ArgRenderPostprocessType::None, value_enum)]
     postprocess_type: ArgRenderPostprocessType,
 
     #[arg(
@@ -135,7 +123,7 @@ struct Args {
     sort_actions: bool,
     #[arg(long, help = "Volume expression", default_value_t = String::new())]
     volume_expr: String,
-    #[arg(long, help = "The variable that the expression should affect", default_value_t = ArgExprVariable::None)]
+    #[arg(long, help = "The variable that the expression should affect", default_value_t = ArgExprVariable::None, value_enum)]
     expr_variable: ArgExprVariable,
     #[arg(
         long,
