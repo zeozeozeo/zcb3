@@ -36,7 +36,7 @@ egui_extras = { version = "0.31", features = ["image"] }
 rustmatica = "0.2.0"
 egui_plot = "0.32.1"
 serde = "1"
-ureq = "3.0.10"
+ureq = "3.0.12"
 fastrand = "2.3.0"
 egui_clickpack_db = "0.7.2"
 chrono = "0.4"
