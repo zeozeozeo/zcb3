@@ -927,7 +927,7 @@ impl App {
 
     fn show_pwease_donate_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.heading("Donations");
-        ui.label("ZCB is completely free software, donations are appreciated :3");
+        ui.label("ZCB is a completely free software, donations are appreciated :3");
 
         ui.add_space(8.0);
 
