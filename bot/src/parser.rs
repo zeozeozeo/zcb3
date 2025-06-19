@@ -345,6 +345,7 @@ pub struct Replay {
     sort_actions: bool,
     pub override_fps: Option<f64>,
     discard_deaths: bool,
+    swap_players: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -538,6 +539,11 @@ impl Replay {
         self
     }
 
+    pub fn with_swap_players(mut self, swap_players: bool) -> Self {
+        self.swap_players = swap_players;
+        self
+    }
+
     #[inline]
     pub fn has_actions(&self) -> bool {
         !self.actions.is_empty()
@@ -623,7 +629,11 @@ impl Replay {
         self.prev_action.0 = Some(typ);
         self.actions.push(Action::new(
             time,
-            Player::One,
+            if self.swap_players {
+                Player::Two
+            } else {
+                Player::One
+            },
             Click::from_button_and_typ(button, typ),
             vol_offset,
             frame,
@@ -649,7 +659,11 @@ impl Replay {
         self.prev_action.1 = Some(typ);
         self.actions.push(Action::new(
             time,
-            Player::Two,
+            if self.swap_players {
+                Player::One
+            } else {
+                Player::Two
+            },
             Click::from_button_and_typ(button, typ),
             vol_offset,
             frame,

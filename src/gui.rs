@@ -117,6 +117,7 @@ struct Config {
     expr_variable: ExprVariable,
     sort_actions: bool,
     discard_deaths: bool,
+    swap_players: bool,
     plot_data_aspect: f32,
     #[serde(default = "ClickpackConversionSettings::default")]
     conversion_settings: ClickpackConversionSettings,
@@ -168,6 +169,7 @@ impl Default for Config {
             cut_sounds: false,
             noise_volume: 1.0,
             discard_deaths: true,
+            swap_players: false,
             postprocess_type: RenderPostprocessType::default(),
         }
     }
@@ -995,6 +997,7 @@ impl App {
                 .with_extended(true)
                 .with_sort_actions(self.conf.sort_actions)
                 .with_discard_deaths(self.conf.discard_deaths)
+                .with_swap_players(self.conf.swap_players)
                 .with_override_fps(if self.override_fps_enabled {
                     Some(self.override_fps)
                 } else {
@@ -1123,6 +1126,13 @@ impl App {
             "Whether to start rendering from the first action after the last death\nOnly applies to GDReplayFormat 2 and Silicate 2",
             |ui| {
                 ui.checkbox(&mut self.conf.discard_deaths, "Discard deaths");
+            },
+        );
+        help_text(
+            ui,
+            "Whether to swap player 1 and player 2\nFixes a bug in xdBot which assumes player 2 to be player 1",
+            |ui| {
+                ui.checkbox(&mut self.conf.swap_players, "Swap players (xdBot)");
             },
         );
         ui.separator();
