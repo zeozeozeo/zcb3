@@ -686,7 +686,7 @@ dependencies = [
  "slc_oxide",
  "symphonia",
  "ybot_fmt",
- "zip-extract 0.4.0",
+ "zip-extract 0.4.1",
 ]
 
 [[package]]
@@ -5940,9 +5940,9 @@ dependencies = [
 
 [[package]]
 name = "zip-extract"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aed5f10c571472911e37d8f7601a8dfba52b4f7f73a344015291b82ab292faf6"
+checksum = "7fa5b9958fd0b5b685af54f2c3fa21fca05fe295ebaf3e77b6d24d96c4174037"
 dependencies = [
  "log",
  "thiserror 2.0.12",
