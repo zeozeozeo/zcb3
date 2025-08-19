@@ -34,7 +34,7 @@ anyhow = "1"
 rayon = "1.10.0"
 egui_extras = { version = "0.31", features = ["image"] }
 rustmatica = "0.2.0"
-egui_plot = "0.32.1"
+egui_plot = "0.33.0"
 serde = "1"
 ureq = "3.0.12"
 fastrand = "2.3.0"
