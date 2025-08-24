@@ -281,7 +281,7 @@ impl<T: Read + Seek> Macro<T> {
     /// Returns an iterator over the actions in this macro. The iterator simply
     /// calls `self.next()` on each iteration, and only advances the inner
     /// reader each iteration.
-    pub fn actions(&mut self) -> Actions<T> {
+    pub fn actions(&mut self) -> Actions<'_, T> {
         Actions { m: self }
     }
 }

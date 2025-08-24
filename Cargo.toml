@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.6.3"
+version = "3.6.4"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -19,29 +19,29 @@ members = [".", "bot", "bot/ybot_fmt", "bot/gdr", "bot/gdr2"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-eframe = "0.31"
-egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.31" }
+eframe = "0.32"
+egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.32" }
 env_logger = "0.11.8"
 image = { version = "0.25.6", default-features = false, features = [
     "ico",
     "png",
 ] }
-rfd = "0.15.3"
+rfd = "0.15.4"
 bot = { path = "bot" }
 serde_json = "1"
 log = "0.4"
 anyhow = "1"
-rayon = "1.10.0"
-egui_extras = { version = "0.31", features = ["image"] }
+rayon = "1.11.0"
+egui_extras = { version = "0.32", features = ["image"] }
 rustmatica = "0.2.0"
-egui_plot = "0.32.1"
+egui_plot = "0.33"
 serde = "1"
-ureq = "3.0.12"
+ureq = "3.1.0"
 fastrand = "2.3.0"
-egui_clickpack_db = "0.7.2"
+egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git" }
 chrono = "0.4"
-timeago = "0.4.2"
-tempfile = "3.20.0"
+timeago = "0.5.0"
+tempfile = "3.21.0"
 
 # getting annoying musl-g++ errors in CI, so fuck custom allocators on musl altogether
 [target.'cfg(not(target_env = "musl"))'.dependencies]

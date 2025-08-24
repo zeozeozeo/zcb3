@@ -82,28 +82,6 @@ fn fix_root_subdir(dir: &Path) -> PathBuf {
     dir.to_path_buf()
 }
 
-fn unzip_to_temp_dir(path: &Path) -> Result<PathBuf> {
-    fn random_dirname() -> String {
-        return format!(
-            "zcb-unzipped-{}",
-            std::iter::repeat_with(fastrand::alphanumeric)
-                .take(16)
-                .collect::<String>()
-        );
-    }
-    let mut dir = std::env::temp_dir().join(random_dirname());
-    while dir.exists() {
-        dir.pop();
-        dir.push(random_dirname());
-    }
-
-    std::fs::create_dir_all(&dir)?;
-
-    let f = std::fs::File::open(path)?;
-    zip_extract::extract(f, &dir, true)?;
-    Ok(dir)
-}
-
 impl PlayerClicks {
     // parses folders like "softclicks", "soft_clicks", "soft click", "microblablablarelease"
     fn recognize_dir_and_load_files(&mut self, path: &Path, pitch: Pitch, sample_rate: u32) {
@@ -145,18 +123,7 @@ impl PlayerClicks {
 
     pub fn from_path(path: &Path, pitch: Pitch, sample_rate: u32) -> Self {
         let mut player = PlayerClicks::default();
-        let mut path = fix_root_subdir(path);
-        if path.is_file() {
-            // try to unzip
-            match unzip_to_temp_dir(&path) {
-                Ok(p) => {
-                    path = p;
-                }
-                Err(e) => {
-                    log::error!("failed to unzip {path:?}: {e}");
-                }
-            }
-        }
+        let path = fix_root_subdir(path);
 
         let Ok(dir) = path
             .read_dir()

@@ -1236,7 +1236,8 @@ impl App {
 • ReplayEngine 3 Replay (.re3)
 • Silicate (.slc)
 • Silicate 2 (.slc)
-• GDReplayFormat 2 (.gdr2)",
+• GDReplayFormat 2 (.gdr2)
+• uvBot (.uv)",
             );
         });
 
