@@ -2910,17 +2910,16 @@ impl Replay {
             ))
         }
 
-        // 240 TPS is implied
         self.fps = self.get_fps(240.0);
 
-        // Mix all inputs
+        // mix all inputs
 
         struct InputAction {
             player_2: bool,
             button: Button,
         }
 
-        struct PhysicAction {
+        struct PhysicsAction {
             x: f32,
             y: f32,
             rotation: f32,
@@ -2930,8 +2929,8 @@ impl Replay {
         #[derive(Default)]
         struct Action {
             input: Option<InputAction>,
-            p1_physic: Option<PhysicAction>,
-            p2_physic: Option<PhysicAction>,
+            p1_physics: Option<PhysicsAction>,
+            p2_physics: Option<PhysicsAction>,
         }
 
         let mut actions: IndexMap<u64, Action> = IndexMap::new();
@@ -2978,7 +2977,7 @@ impl Replay {
             let rotation = reader.read_f32::<LittleEndian>()?;
             let y_velocity = reader.read_f64::<LittleEndian>()?;
 
-            let physic_action = PhysicAction {
+            let physics_action = PhysicsAction {
                 x: x,
                 y: y,
                 rotation: rotation,
@@ -2986,12 +2985,12 @@ impl Replay {
             };
 
             if let Some(action) = actions.get_mut(&frame) {
-                action.p1_physic = Some(physic_action);
+                action.p1_physics = Some(physics_action);
             } else {
                 actions.insert(
                     frame,
                     Action {
-                        p1_physic: Some(physic_action),
+                        p1_physics: Some(physics_action),
                         ..Default::default()
                     },
                 );
@@ -3005,7 +3004,7 @@ impl Replay {
             let rotation = reader.read_f32::<LittleEndian>()?;
             let y_velocity = reader.read_f64::<LittleEndian>()?;
 
-            let physic_action = PhysicAction {
+            let physic_action = PhysicsAction {
                 x: x,
                 y: y,
                 rotation: rotation,
@@ -3013,12 +3012,12 @@ impl Replay {
             };
 
             if let Some(action) = actions.get_mut(&frame) {
-                action.p2_physic = Some(physic_action);
+                action.p2_physics = Some(physic_action);
             } else {
                 actions.insert(
                     frame,
                     Action {
-                        p2_physic: Some(physic_action),
+                        p2_physics: Some(physic_action),
                         ..Default::default()
                     },
                 );
@@ -3028,7 +3027,7 @@ impl Replay {
         reader.read_exact(&mut magic)?;
         if magic != "TOBVU".as_bytes() {
             anyhow::bail!(format!(
-                "invalid uvbot backmagic (got: {magic:?}, expect: TOBVU)"
+                "invalid uvbot magic (got: {magic:?}, expect: TOBVU)"
             ))
         }
 
@@ -3037,8 +3036,8 @@ impl Replay {
         for (frame, action) in actions {
             let Action {
                 input,
-                p1_physic,
-                p2_physic,
+                p1_physics,
+                p2_physics,
             } = action;
 
             let time = frame as f64 / self.fps;
@@ -3062,25 +3061,25 @@ impl Replay {
                 }
             }
 
-            if let Some(p1_physic) = p1_physic {
+            if let Some(p1_physics) = p1_physics {
                 self.extended_p1(
                     down,
                     frame as _,
-                    p1_physic.x,
-                    p1_physic.y,
-                    p1_physic.y_velocity as _,
-                    p1_physic.rotation,
+                    p1_physics.x,
+                    p1_physics.y,
+                    p1_physics.y_velocity as _,
+                    p1_physics.rotation,
                 );
             }
 
-            if let Some(p2_physic) = p2_physic {
+            if let Some(p2_physics) = p2_physics {
                 self.extended_p2(
                     down,
                     frame as _,
-                    p2_physic.x,
-                    p2_physic.y,
-                    p2_physic.y_velocity as _,
-                    p2_physic.rotation,
+                    p2_physics.x,
+                    p2_physics.y,
+                    p2_physics.y_velocity as _,
+                    p2_physics.rotation,
                 );
             }
         }
