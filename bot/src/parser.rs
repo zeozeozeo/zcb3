@@ -408,6 +408,8 @@ pub enum ReplayType {
     Silicate2,
     /// GDReplayFormat 2 .gdr2 files
     Gdr2,
+    /// uvBot .uv files
+    UvBot,
 }
 
 impl ReplayType {
@@ -457,6 +459,7 @@ impl ReplayType {
             "slc" => Silicate,
             "slc2" => Silicate2,
             "gdr2" => Gdr2,
+            "uv" => UvBot,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -503,6 +506,7 @@ impl Replay {
         "slc",
         "slc2",
         "gdr2",
+        "uv",
     ];
 
     pub fn build() -> Self {
@@ -582,6 +586,7 @@ impl Replay {
             ReplayType::Silicate => self.parse_slc(reader)?,
             ReplayType::Silicate2 => self.parse_slc2(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
+            ReplayType::UvBot => self.parse_uvbot(reader)?,
         }
 
         // sort actions by time / frame
@@ -2888,4 +2893,197 @@ impl Replay {
         Ok(())
     }
     */
+
+    fn parse_uvbot<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        let mut magic = [0; 5];
+        reader.read_exact(&mut magic)?;
+        if magic != "UVBOT".as_bytes() {
+            anyhow::bail!(format!(
+                "invalid uvbot magic (got: {magic:?}, expect: UVBOT)"
+            ))
+        }
+
+        let version = reader.read_u8()?;
+        if version != 1 {
+            anyhow::bail!(format!(
+                "invalid uvbot version (got: {version:?}, expect: 1)"
+            ))
+        }
+
+        self.fps = self.get_fps(240.0);
+
+        // mix all inputs
+
+        struct InputAction {
+            player_2: bool,
+            button: Button,
+        }
+
+        struct PhysicsAction {
+            x: f32,
+            y: f32,
+            rotation: f32,
+            y_velocity: f64,
+        }
+
+        #[derive(Default)]
+        struct Action {
+            input: Option<InputAction>,
+            p1_physics: Option<PhysicsAction>,
+            p2_physics: Option<PhysicsAction>,
+        }
+
+        let mut actions: IndexMap<u64, Action> = IndexMap::new();
+
+        let input_actions = reader.read_i32::<LittleEndian>()?;
+        let physics_p1_actions = reader.read_i32::<LittleEndian>()?;
+        let physics_p2_actions = reader.read_i32::<LittleEndian>()?;
+
+        for _ in 0..input_actions {
+            let frame = reader.read_u64::<LittleEndian>()?;
+            let flags = reader.read_u8()?;
+
+            let hold = (flags & 1) != 0;
+            let button = (flags >> 1) % 3;
+            let player_2 = (flags >> 1) > 2;
+
+            let input_action = InputAction {
+                player_2: player_2,
+                button: match button {
+                    0 => Button::from_down(hold),
+                    1 => Button::from_left_down(hold),
+                    2 => Button::from_right_down(hold),
+                    _ => todo!(),
+                },
+            };
+
+            if let Some(action) = actions.get_mut(&frame) {
+                action.input = Some(input_action);
+            } else {
+                actions.insert(
+                    frame,
+                    Action {
+                        input: Some(input_action),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        for _ in 0..physics_p1_actions {
+            let frame = reader.read_u64::<LittleEndian>()?;
+            let x = reader.read_f32::<LittleEndian>()?;
+            let y = reader.read_f32::<LittleEndian>()?;
+            let rotation = reader.read_f32::<LittleEndian>()?;
+            let y_velocity = reader.read_f64::<LittleEndian>()?;
+
+            let physics_action = PhysicsAction {
+                x: x,
+                y: y,
+                rotation: rotation,
+                y_velocity: y_velocity,
+            };
+
+            if let Some(action) = actions.get_mut(&frame) {
+                action.p1_physics = Some(physics_action);
+            } else {
+                actions.insert(
+                    frame,
+                    Action {
+                        p1_physics: Some(physics_action),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        for _ in 0..physics_p2_actions {
+            let frame = reader.read_u64::<LittleEndian>()?;
+            let x = reader.read_f32::<LittleEndian>()?;
+            let y = reader.read_f32::<LittleEndian>()?;
+            let rotation = reader.read_f32::<LittleEndian>()?;
+            let y_velocity = reader.read_f64::<LittleEndian>()?;
+
+            let physic_action = PhysicsAction {
+                x: x,
+                y: y,
+                rotation: rotation,
+                y_velocity: y_velocity,
+            };
+
+            if let Some(action) = actions.get_mut(&frame) {
+                action.p2_physics = Some(physic_action);
+            } else {
+                actions.insert(
+                    frame,
+                    Action {
+                        p2_physics: Some(physic_action),
+                        ..Default::default()
+                    },
+                );
+            }
+        }
+
+        reader.read_exact(&mut magic)?;
+        if magic != "TOBVU".as_bytes() {
+            anyhow::bail!(format!(
+                "invalid uvbot magic (got: {magic:?}, expect: TOBVU)"
+            ))
+        }
+
+        actions.sort_by(|k1, _, k2, _| k1.cmp(&k2));
+
+        for (frame, action) in actions {
+            let Action {
+                input,
+                p1_physics,
+                p2_physics,
+            } = action;
+
+            let time = frame as f64 / self.fps;
+
+            let down = if let Some(ref input) = input {
+                match input.button {
+                    Button::Push => true,
+                    Button::LeftPush => true,
+                    Button::RightPush => true,
+                    _ => false,
+                }
+            } else {
+                false
+            };
+
+            if let Some(input) = input {
+                if !input.player_2 {
+                    self.process_action_p1(time, input.button, frame as _);
+                } else {
+                    self.process_action_p2(time, input.button, frame as _);
+                }
+            }
+
+            if let Some(p1_physics) = p1_physics {
+                self.extended_p1(
+                    down,
+                    frame as _,
+                    p1_physics.x,
+                    p1_physics.y,
+                    p1_physics.y_velocity as _,
+                    p1_physics.rotation,
+                );
+            }
+
+            if let Some(p2_physics) = p2_physics {
+                self.extended_p2(
+                    down,
+                    frame as _,
+                    p2_physics.x,
+                    p2_physics.y,
+                    p2_physics.y_velocity as _,
+                    p2_physics.rotation,
+                );
+            }
+        }
+
+        Ok(())
+    }
 }
