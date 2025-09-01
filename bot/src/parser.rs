@@ -2906,7 +2906,7 @@ impl Replay {
         let version = reader.read_u8()?;
         if version != 1 && version != 2 {
             anyhow::bail!(format!(
-                "invalid uvbot version (got: {version:?}, expect: 1)"
+                "invalid uvbot version (got: {version:?}, expect: 1 or 2)"
             ))
         }
 
