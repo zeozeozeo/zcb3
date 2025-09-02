@@ -22,7 +22,7 @@ clap = { version = "4.5", features = ["derive"] }
 eframe = "0.32"
 egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.32" }
 env_logger = "0.11.8"
-image = { version = "0.25.6", default-features = false, features = [
+image = { version = "0.25.7", default-features = false, features = [
     "ico",
     "png",
 ] }
