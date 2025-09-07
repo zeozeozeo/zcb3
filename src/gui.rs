@@ -1237,7 +1237,8 @@ impl App {
 • Silicate (.slc)
 • Silicate 2 (.slc)
 • GDReplayFormat 2 (.gdr2)
-• uvBot (.uv)",
+• uvBot (.uv)
+• TCBot (.tcm)",
             );
         });
 

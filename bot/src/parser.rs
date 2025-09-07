@@ -410,6 +410,8 @@ pub enum ReplayType {
     Gdr2,
     /// uvBot .uv files
     UvBot,
+    // TCBot .tcm files
+    TcBot,
 }
 
 impl ReplayType {
@@ -460,6 +462,7 @@ impl ReplayType {
             "slc2" => Silicate2,
             "gdr2" => Gdr2,
             "uv" => UvBot,
+            "tcm" => TcBot,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -507,6 +510,7 @@ impl Replay {
         "slc2",
         "gdr2",
         "uv",
+        "tcm",
     ];
 
     pub fn build() -> Self {
@@ -587,6 +591,7 @@ impl Replay {
             ReplayType::Silicate2 => self.parse_slc2(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
             ReplayType::UvBot => self.parse_uvbot(reader)?,
+            ReplayType::TcBot => self.parse_tcm(reader)?,
         }
 
         // sort actions by time / frame
@@ -3084,6 +3089,50 @@ impl Replay {
             }
         }
 
+        Ok(())
+    }
+
+    fn parse_tcm<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let replay = tcm::DynamicReplay::from_reader(&mut reader)?;
+
+        self.fps = self.get_fps(replay.meta.tps() as _);
+
+        for input in &replay.inputs {
+            let time = input.frame as f64 / self.fps;
+            use tcm::input::{Input::*, TpsInput};
+
+            match &input.input {
+                Restart(_) => {
+                    if self.discard_deaths {
+                        self.actions.clear();
+                        self.extended.clear();
+                    }
+                }
+                Tps(TpsInput { tps }) => {
+                    let tps = *tps as f64;
+                    self.fps = self.get_fps(tps);
+                    self.fps_change(tps);
+                }
+                Vanilla(v) => {
+                    if v.player2 {
+                        self.process_action_p1(
+                            time,
+                            Button::from_button_idx(v.button as _, v.push),
+                            input.frame as _,
+                        );
+                        self.extended_p1(v.push, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+                    } else {
+                        self.process_action_p2(
+                            time,
+                            Button::from_button_idx(v.button as _, v.push),
+                            input.frame as _,
+                        );
+                        self.extended_p2(v.push, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+                    }
+                }
+                _ => (),
+            }
+        }
         Ok(())
     }
 }

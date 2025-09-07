@@ -32,3 +32,4 @@ slc_oxide = "0.1.0"
 rubato = { git = "https://github.com/HEnquist/rubato", branch = "adapter_v2" }
 audioadapter = "0.4.0"
 indexmap = "2.10.0"
+tcm = "0.1.0"

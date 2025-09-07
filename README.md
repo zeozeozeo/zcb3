@@ -52,6 +52,7 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 - Silicate 2 (.slc)
 - GDReplayFormat 2 (.gdr2)
 - [uvBot (.uv)](https://github.com/thisisignitedoreo/uvbot), thanks @thisisignitedoreo
+- TCBot (.tcm)
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
