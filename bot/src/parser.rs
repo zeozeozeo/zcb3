@@ -2909,13 +2909,18 @@ impl Replay {
         }
 
         let version = reader.read_u8()?;
-        if version != 1 {
+        if version != 1 && version != 2 {
             anyhow::bail!(format!(
-                "invalid uvbot version (got: {version:?}, expect: 1)"
+                "invalid uvbot version (got: {version:?}, expect: 1 or 2)"
             ))
         }
 
-        self.fps = self.get_fps(240.0);
+        if version == 1 {
+            self.fps = self.get_fps(240.0);
+        } else {
+            let tps = reader.read_f32::<LittleEndian>()?;
+            self.fps = self.get_fps(tps as _);
+        }
 
         // mix all inputs
 
