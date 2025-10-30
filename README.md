@@ -50,6 +50,7 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 - ReplayEngine 3 Replay (.re3)
 - Silicate (.slc)
 - Silicate 2 (.slc)
+- Silicate 3 (.slc)
 - GDReplayFormat 2 (.gdr2)
 - [uvBot (.uv)](https://github.com/thisisignitedoreo/uvbot), thanks @thisisignitedoreo
 - TCBot (.tcm)

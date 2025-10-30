@@ -1123,7 +1123,7 @@ impl App {
         });
         help_text(
             ui,
-            "Whether to start rendering from the first action after the last death\nOnly applies to GDReplayFormat 2 and Silicate 2",
+            "Whether to start rendering from the first action after the last death\nOnly works with bots that record death actions",
             |ui| {
                 ui.checkbox(&mut self.conf.discard_deaths, "Discard deaths");
             },
@@ -1236,6 +1236,7 @@ impl App {
 • ReplayEngine 3 Replay (.re3)
 • Silicate (.slc)
 • Silicate 2 (.slc)
+• Silicate 3 (.slc)
 • GDReplayFormat 2 (.gdr2)
 • uvBot (.uv)
 • TCBot (.tcm)",
