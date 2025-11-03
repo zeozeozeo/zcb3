@@ -532,6 +532,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "audioadapter"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97a7eb2dd328c502242b70923fa7a20f237bfe9998146ca2e5ce354b59030dce"
+dependencies = [
+ "audio-core",
+ "num-traits",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -632,7 +642,7 @@ name = "bot"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "audioadapter",
+ "audioadapter 1.0.0",
  "bincode",
  "byteorder",
  "chrono",
@@ -3478,7 +3488,7 @@ name = "rubato"
 version = "0.17.0"
 source = "git+https://github.com/HEnquist/rubato?branch=adapter_v2#09c39f99b5a869d20ccec8a57bda25a2022e1e58"
 dependencies = [
- "audioadapter",
+ "audioadapter 0.4.0",
  "num-complex",
  "num-integer",
  "num-traits",
