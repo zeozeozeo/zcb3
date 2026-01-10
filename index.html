@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta
+            name="description"
+            content="The most feature-complete Geometry Dash clickbot"
+        />
+        <title>ZCB3</title>
+
+        <style>
+            html,
+            body {
+                margin: 0;
+                padding: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+                background: #1a1a1a;
+            }
+
+            #loading {
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                color: #fff;
+                font-family: Arial, sans-serif;
+                text-align: center;
+            }
+
+            .spinner {
+                border: 4px solid rgba(255, 255, 255, 0.1);
+                border-top: 4px solid #fff;
+                border-radius: 50%;
+                width: 40px;
+                height: 40px;
+                animation: spin 1s linear infinite;
+                margin: 20px auto;
+            }
+
+            @keyframes spin {
+                0% {
+                    transform: rotate(0deg);
+                }
+
+                100% {
+                    transform: rotate(360deg);
+                }
+            }
+
+            canvas {
+                width: 100%;
+                height: 100%;
+            }
+        </style>
+    <link rel="modulepreload" href="/zcb3-166caa14d09a4be3.js" crossorigin="anonymous" integrity="sha384-tPmMRbUb/FngwPfbOevR4dz/eaQItamcsuC13HDtLvHeKayIT3wElcvgzTPnuXVl"><link rel="preload" href="/zcb3-166caa14d09a4be3_bg.wasm" crossorigin="anonymous" integrity="sha384-3CTLwUhFFavYsxdfgSAXqwcngTGTlQFpD/ju3h5DY5XEa3nViU/Z+tYlDTwyqHvH" as="fetch" type="application/wasm"></head>
+
+    <body>
+        <div id="loading">
+            <div class="spinner"></div>
+            <p>Loading ZCB3...</p>
+        </div>
+
+        <canvas id="main_canvas"></canvas>
+
+        <script>
+            // Hide loading screen once WASM is loaded
+            window.addEventListener("load", function () {
+                setTimeout(function () {
+                    const loading = document.getElementById("loading");
+                    if (loading) {
+                        loading.style.display = "none";
+                    }
+                }, 100);
+            });
+        </script>
+    
+<script type="module">
+import init, * as bindings from '/zcb3-166caa14d09a4be3.js';
+const wasm = await init({ module_or_path: '/zcb3-166caa14d09a4be3_bg.wasm' });
+
+
+window.wasmBindings = bindings;
+
+
+dispatchEvent(new CustomEvent("TrunkApplicationStarted", {detail: {wasm}}));
+
+</script></body>
+</html>
