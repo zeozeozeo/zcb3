@@ -22,7 +22,7 @@ jobs:
 
       - name: Build with Trunk
         run: |
-          rustup target add wasm32-unknown-unknown --toolchain $(rustc --version | cut -d' ' -f2)
+          rustup target add wasm32-unknown-unknown
           trunk build --release
 
       - name: Deploy to GitHub Pages 🚀
