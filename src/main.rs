@@ -1,16 +1,15 @@
 mod gui;
+mod utils;
 
-use bot::*;
+#[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, ValueEnum};
-use std::{
-    io::BufReader,
-    path::{Path, PathBuf},
-};
 
-#[cfg(not(target_env = "musl"))]
+
+#[cfg(all(not(target_env = "musl"), not(target_arch = "wasm32")))]
+// Added this cfg for BEMalloc
 use malloc_best_effort::BEMalloc;
 
-#[cfg(not(target_env = "musl"))]
+#[cfg(all(not(target_env = "musl"), not(target_arch = "wasm32")))]
 #[global_allocator]
 static GLOBAL: BEMalloc = BEMalloc::new(); // tcmalloc on linux/mac, mimalloc on winders
 
@@ -19,6 +18,7 @@ pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(ValueEnum, Debug, Clone)]
 enum ArgExprVariable {
     None,
@@ -27,6 +27,7 @@ enum ArgExprVariable {
     TimeOffset,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(ValueEnum, Debug, Clone, PartialEq)]
 pub enum ArgRenderPostprocessType {
     /// Save the audio file as-is (ZCB).
@@ -37,6 +38,7 @@ pub enum ArgRenderPostprocessType {
     Clamp,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Run without any arguments to launch GUI.", long_about = None)]
 struct Args {
@@ -157,36 +159,60 @@ fn hide_console_window() {
 }
 
 fn main() {
-    #[cfg(not(target_env = "musl"))]
+    #[cfg(all(not(target_env = "musl"), not(target_arch = "wasm32")))]
     {
         BEMalloc::init();
     }
 
-    env_logger::builder()
-        .filter_level(log::LevelFilter::Debug)
-        .init();
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        env_logger::builder()
+            .filter_level(log::LevelFilter::Debug)
+            .init();
+    }
 
-    if std::env::args().len() > 1 {
-        // we have arguments, probably need to run in cli mode
-        let args = Args::parse();
-        log::info!("passed args: {args:?} (running in cli mode)");
-        run_cli(args);
-    } else {
-        log::info!("no args, running gui. pass -h or --help to see help");
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        if std::env::args().len() > 1 {
+            // we have arguments, probably need to run in cli mode
+            let args = Args::parse();
+            log::info!("passed args: {args:?} (running in cli mode)");
+            run_cli(args);
+        } else {
+            log::info!("no args, running gui. pass -h or --help to see help");
 
-        // hide console window if running gui
-        #[cfg(windows)]
-        {
-            hide_console_window();
+            // hide console window if running gui
+            #[cfg(windows)]
+            {
+                hide_console_window();
+            }
+
+            gui::run_gui().unwrap();
+            egui_clickpack_db::cleanup();
         }
+    }
 
-        gui::run_gui().unwrap();
-        egui_clickpack_db::cleanup();
+    #[cfg(target_arch = "wasm32")]
+    {
+        // Set up WASM-specific initialization
+        utils::setup_wasm();
+
+        // Run GUI in WASM mode
+        wasm_bindgen_futures::spawn_local(async {
+            gui::run_gui_wasm("main_canvas")
+                .await
+                .expect("failed to start eframe");
+        });
     }
 }
 
 /// Run command line interface
+#[cfg(not(target_arch = "wasm32"))]
 fn run_cli(mut args: Args) {
+    use bot::*;
+    use std::io::BufReader;
+    use std::path::{Path, PathBuf};
+
     // open replay
     let f = std::fs::File::open(args.replay.clone()).expect("failed to open replay file");
 
@@ -273,6 +299,11 @@ fn run_cli(mut args: Args) {
         },
         args.pitch_enabled,
         args.cut_sounds,
+        |p| {
+            if ((p * 100.0) as u32).is_multiple_of(10) {
+                log::info!("Rendering progress: {}%", (p * 100.0) as u32);
+            }
+        },
     );
 
     // save

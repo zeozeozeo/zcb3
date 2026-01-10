@@ -6,7 +6,7 @@ use std::{
     collections::BTreeMap,
     ops::{Deref, DerefMut, Index, IndexMut},
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -59,6 +59,22 @@ impl Index<usize> for PlayerClicks {
             5 => &self.softreleases,
             6 => &self.microclicks,
             7 => &self.microreleases,
+            _ => panic!("invalid index"),
+        }
+    }
+}
+
+impl IndexMut<usize> for PlayerClicks {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        match index {
+            0 => &mut self.hardclicks,
+            1 => &mut self.hardreleases,
+            2 => &mut self.clicks,
+            3 => &mut self.releases,
+            4 => &mut self.softclicks,
+            5 => &mut self.softreleases,
+            6 => &mut self.microclicks,
+            7 => &mut self.microreleases,
             _ => panic!("invalid index"),
         }
     }
@@ -148,6 +164,62 @@ impl PlayerClicks {
             player
                 .clicks
                 .extend(read_clicks_in_directory(&path, pitch, sample_rate));
+        }
+
+        player
+    }
+
+    pub fn from_bytes(files: &[(String, Vec<u8>)], _pitch: Pitch, sample_rate: u32) -> Self {
+        let mut player = PlayerClicks::default();
+        let patterns = [
+            (["hardclick", "hardclicks"], 0),
+            (["hardrelease", "hardreleases"], 1),
+            (["click", "clicks"], 2),
+            (["release", "releases"], 3),
+            (["softclick", "softclicks"], 4),
+            (["softrelease", "softreleases"], 5),
+            (["microclick", "microclicks"], 6),
+            (["microrelease", "microreleases"], 7),
+        ];
+
+        for (filename, bytes) in files {
+            // filename here is relative to the player directory
+            let path = Path::new(filename);
+            let dir = path
+                .parent()
+                .and_then(|p| p.file_name())
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let dir_normalized: String = dir
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .flat_map(|c| c.to_lowercase())
+                .collect();
+
+            for (pats, idx) in patterns {
+                if pats.iter().any(|pat| *pat == dir_normalized) {
+                    if let Ok(mut segment) = AudioSegment::from_media_source(Box::new(
+                        std::io::Cursor::new(bytes.clone()),
+                    )) {
+                        segment.resample(sample_rate);
+                        player[idx].push(AudioFile::new(segment, filename.clone()));
+                    }
+                }
+            }
+        }
+
+        if !player.has_clicks() {
+            log::warn!("no clicks found in subdirectories, loading all files as clicks");
+            for (filename, bytes) in files {
+                if let Ok(mut segment) =
+                    AudioSegment::from_media_source(Box::new(std::io::Cursor::new(bytes.clone())))
+                {
+                    segment.resample(sample_rate);
+                    player
+                        .clicks
+                        .push(AudioFile::new(segment, filename.clone()));
+                }
+            }
         }
 
         player
@@ -536,6 +608,30 @@ impl Clickpack {
             + self.left2.num_sounds()
             + self.right2.num_sounds()
     }
+
+    pub fn load_from_bytes(files: &[(String, Vec<u8>)], pitch: Pitch, sample_rate: u32) -> Self {
+        let mut clickpack = Clickpack::default();
+        for (i, dirname) in CLICKPACK_DIRNAMES.iter().enumerate() {
+            // filter files that are in this directory
+            let sub_files: Vec<_> = files
+                .iter()
+                .filter(|(name, _)| name.starts_with(dirname))
+                .map(|(name, bytes)| {
+                    (
+                        name.strip_prefix(dirname)
+                            .unwrap()
+                            .trim_start_matches(|c| c == '/' || c == '\\')
+                            .to_string(),
+                        bytes.clone(),
+                    )
+                })
+                .collect();
+            if !sub_files.is_empty() {
+                clickpack[i] = PlayerClicks::from_bytes(&sub_files, pitch, sample_rate);
+            }
+        }
+        clickpack
+    }
 }
 
 const CLICKPACK_DIRNAMES: [&str; 6] = ["player1", "player2", "left1", "left2", "right1", "right2"];
@@ -647,6 +743,55 @@ impl Bot {
             Err(anyhow::anyhow!(
                 "no clicks found in clickpack, did you select the correct folder?"
             ))
+        }
+    }
+
+    pub fn load_clickpack_from_bytes(
+        &mut self,
+        files: &[(String, Vec<u8>)],
+        pitch: Pitch,
+    ) -> Result<()> {
+        assert!(self.sample_rate > 0);
+        self.clickpack = Clickpack::load_from_bytes(files, pitch, self.sample_rate);
+
+        // try to load noise
+        if !self.has_noise() {
+            self.load_noise_bytes(files);
+        }
+
+        self.longest_click = self.clickpack.longest_click();
+        if self.has_clicks() {
+            Ok(())
+        } else {
+            Err(anyhow::anyhow!("no clicks found in clickpack"))
+        }
+    }
+
+    fn load_noise_bytes(&mut self, files: &[(String, Vec<u8>)]) {
+        for (filename, bytes) in files {
+            let name_only = Path::new(filename)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            let lower_filename: String = name_only
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .flat_map(|c| c.to_lowercase())
+                .collect();
+            if lower_filename.starts_with("noise")
+                || lower_filename.starts_with("whitenoise")
+                || lower_filename.starts_with("pcnoise")
+                || lower_filename.starts_with("background")
+                || lower_filename.starts_with("silent")
+            {
+                if let Ok(mut noise) =
+                    AudioSegment::from_media_source(Box::new(std::io::Cursor::new(bytes.clone())))
+                {
+                    noise.resample(self.sample_rate);
+                    self.noise = Some(noise);
+                    return;
+                }
+            }
         }
     }
 
@@ -780,7 +925,7 @@ impl Bot {
     }
 
     #[allow(clippy::too_many_arguments)] // TODO
-    pub fn render_replay(
+    pub fn render_replay<F>(
         &mut self,
         replay: &Replay,
         noise: bool,
@@ -789,7 +934,11 @@ impl Bot {
         expr_var: ExprVariable,
         enable_pitch: bool,
         cut_sounds: bool,
-    ) -> AudioSegment {
+        mut progress_cb: F,
+    ) -> AudioSegment
+    where
+        F: FnMut(f32),
+    {
         log::info!(
             "starting render, {} actions, noise: {noise}",
             replay.actions.len()
@@ -805,10 +954,15 @@ impl Bot {
             self.sample_rate,
             replay.duration + self.longest_click + longest_time_offset,
         );
-        let start = Instant::now();
+        #[cfg(not(target_arch = "wasm32"))]
+        let start = std::time::Instant::now();
         let mut prev_frame = 0u32;
 
+        let num_actions = replay.actions.len();
         for (i, action) in replay.actions.iter().enumerate() {
+            if i % 100 == 0 {
+                progress_cb(i as f32 / num_actions as f32);
+            }
             // calculate the volume from the expression if needed
             let (expr_vol, time_offset) = if expr_var != ExprVariable::None {
                 // get extended action
@@ -881,8 +1035,10 @@ impl Bot {
         if noise && self.has_noise() {
             let mut noise_duration = Duration::from_secs(0);
             let noise_segment = self.noise.as_ref().unwrap();
+            let total_dur = segment.duration().as_secs_f64();
 
             while noise_duration < segment.duration() {
+                progress_cb(noise_duration.as_secs_f64() as f32 / total_dur as f32);
                 segment.overlay_at_vol(
                     noise_duration.as_secs_f64(),
                     noise_segment,
@@ -897,7 +1053,153 @@ impl Bot {
             segment.normalize();
         }
 
+        progress_cb(1.0);
+        progress_cb(1.0);
+        #[cfg(not(target_arch = "wasm32"))]
         log::info!("rendered in {:?}", start.elapsed());
+        segment
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn render_replay_async<F, Y, Fut>(
+        &mut self,
+        replay: &Replay,
+        noise: bool,
+        noise_volume: f32,
+        normalize: bool,
+        expr_var: ExprVariable,
+        enable_pitch: bool,
+        cut_sounds: bool,
+        mut progress_cb: F,
+        yield_fn: Y,
+    ) -> AudioSegment
+    where
+        F: FnMut(f32),
+        Y: Fn() -> Fut,
+        Fut: std::future::Future<Output = ()>,
+    {
+        log::info!(
+            "starting render (async), {} actions, noise: {noise}",
+            replay.actions.len()
+        );
+
+        let longest_time_offset = if expr_var == ExprVariable::TimeOffset {
+            self.expr_range(replay).1
+        } else {
+            0.0
+        };
+
+        let mut segment = AudioSegment::silent(
+            self.sample_rate,
+            replay.duration + self.longest_click + longest_time_offset,
+        );
+        #[cfg(not(target_arch = "wasm32"))]
+        let start = std::time::Instant::now();
+        let mut prev_frame = 0u32;
+
+        let num_actions = replay.actions.len();
+        for (i, action) in replay.actions.iter().enumerate() {
+            if i % 100 == 0 {
+                progress_cb(i as f32 / num_actions as f32);
+                yield_fn().await;
+            }
+            // calculate the volume from the expression if needed
+            let (expr_vol, time_offset) = if expr_var != ExprVariable::None {
+                // get extended action
+                // FIXME: this is very wasteful, currently we binary search the entire
+                //        actions array each time
+                let extended = replay
+                    .extended
+                    .binary_search_by(|a| a.frame.cmp(&action.frame))
+                    .unwrap_or(usize::MAX);
+                let extended = replay
+                    .extended
+                    .get(extended)
+                    .copied()
+                    .unwrap_or(ExtendedAction::default());
+
+                // compute expression
+                self.update_namespace(
+                    &extended,
+                    prev_frame,
+                    replay.last_frame(),
+                    replay.fps.into(),
+                );
+                prev_frame = extended.frame;
+
+                let value = self.eval_expr().unwrap_or(0.0) as f32;
+                match expr_var {
+                    ExprVariable::Value => (value, 0.0),
+                    ExprVariable::Variation { negative } => {
+                        if value == 0.0 {
+                            (0.0, 0.0)
+                        } else if negative {
+                            (f32_range((-value).min(value)..=value.max(-value)), 0.0)
+                        } else {
+                            (f32_range(value.min(0.0)..=value.max(0.0)), 0.0)
+                        }
+                    }
+                    ExprVariable::TimeOffset => (0.0, value),
+                    _ => unreachable!(),
+                }
+            } else {
+                (0.0, 0.0)
+            };
+
+            let mut click = self.get_random_click(action.player, action.click);
+            if enable_pitch {
+                click = click.random_pitch(); // if no pitch table is generated, returns self
+            }
+
+            let mut until_next = f64::INFINITY;
+            if cut_sounds {
+                // find the time until the next action, so we know when to cut
+                // off this sound
+                for next in replay.actions.iter().skip(i + 1) {
+                    if action.player == next.player && next.click.is_click() {
+                        until_next = next.time - action.time;
+                        break;
+                    }
+                }
+            }
+
+            // overlay
+            segment.overlay_at_vol(
+                action.time + time_offset as f64,
+                click,
+                1.0 + action.vol_offset + expr_vol,
+                until_next,
+            );
+        }
+
+        if noise && self.has_noise() {
+            let mut noise_duration = Duration::from_secs(0);
+            let noise_segment = self.noise.as_ref().unwrap();
+            let total_dur = segment.duration().as_secs_f64();
+
+            while noise_duration < segment.duration() {
+                progress_cb(noise_duration.as_secs_f64() as f32 / total_dur as f32);
+                yield_fn().await;
+
+                segment.overlay_at_vol(
+                    noise_duration.as_secs_f64(),
+                    noise_segment,
+                    noise_volume,
+                    f64::INFINITY, // don't cut off
+                );
+                noise_duration += noise_segment.duration();
+            }
+        }
+
+        if normalize {
+            segment.normalize();
+        }
+
+        progress_cb(1.0);
+        #[cfg(not(target_arch = "wasm32"))]
+        log::info!("rendered in {:?}", start.elapsed());
+        #[cfg(target_arch = "wasm32")]
+        log::info!("rendered (async)");
         segment
     }
 

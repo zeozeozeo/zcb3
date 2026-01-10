@@ -19,7 +19,10 @@ members = [".", "bot", "bot/ybot_fmt", "bot/gdr", "bot/gdr2"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-eframe = "0.33"
+eframe = { version = "0.33", default-features = false, features = [
+    "default_fonts",
+    "glow",
+] }
 egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.33" }
 env_logger = "0.11.8"
 image = { version = "0.25.6", default-features = false, features = [
@@ -36,15 +39,42 @@ egui_extras = { version = "0.33", features = ["image"] }
 rustmatica = "0.2.0"
 egui_plot = "0.34"
 serde = "1"
-ureq = "3.1.4"
 fastrand = "2.3.0"
-egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git" }
+zip = { version = "7.0.0", default-features = false, features = ["deflate"] }
+egui_clickpack_db = { path = "egui_clickpack_db" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ureq = "3.1.4"
 chrono = "0.4"
 timeago = "0.5.0"
 tempfile = "3.24.0"
+poll-promise = { version = "0.3", features = ["tokio"] }
+
+# WASM-specific dependencies
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+poll-promise = { version = "0.3", features = [
+    "wasm-bindgen",
+    "wasm-bindgen-futures",
+] }
+gloo-timers = { version = "0.3", features = ["futures"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+    "Headers",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Window",
+    "console",
+] }
+console_error_panic_hook = "0.1"
+console_log = "1"
+getrandom = { version = "0.2", features = ["js"] }
 
 # getting annoying musl-g++ errors in CI, so fuck custom allocators on musl altogether
-[target.'cfg(not(target_env = "musl"))'.dependencies]
+# also disable for WASM since it requires pthread
+[target.'cfg(all(not(target_env = "musl"), not(target_arch = "wasm32")))'.dependencies]
 malloc-best-effort = "0.1.4"
 
 # needed to hide console window on windows

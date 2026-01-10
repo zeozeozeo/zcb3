@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use audioadapter_buffers::direct::InterleavedSlice;
+#[cfg(feature = "rayon")]
 use rayon::prelude::*;
 use rubato::{
     Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
@@ -7,7 +8,7 @@ use rubato::{
 };
 use std::io::{BufWriter, Cursor};
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Signal};
 use symphonia::core::codecs::DecoderOptions;
 use symphonia::core::conv::{FromSample, IntoSample};
@@ -17,6 +18,9 @@ use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Hint;
 use symphonia::core::sample::Sample;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::time::Instant;
 
 /// Represents an audio sample. Stores a left and right channel.
 #[derive(Debug, Copy, Clone, PartialEq, Default)]
@@ -271,6 +275,12 @@ impl AudioSegment {
         }
     }
 
+    pub fn export_wav_bytes(&self, clamp: bool) -> Result<Vec<u8>> {
+        let mut data = std::io::Cursor::new(Vec::new());
+        self.export_wav(&mut data, clamp)?;
+        Ok(data.into_inner())
+    }
+
     pub fn export_wav<W: std::io::Write + std::io::Seek>(
         &self,
         writer: W,
@@ -283,6 +293,7 @@ impl AudioSegment {
             sample_format: hound::SampleFormat::Float,
         };
         log::info!("writing wav file");
+        #[cfg(not(target_arch = "wasm32"))]
         let start = Instant::now();
 
         // create buffered writer with 16mb buffer size
@@ -301,7 +312,10 @@ impl AudioSegment {
         }
         wav.finalize()?; // flush writer
 
+        #[cfg(not(target_arch = "wasm32"))]
         log::info!("finished writing wav file in {:?}", start.elapsed());
+        #[cfg(target_arch = "wasm32")]
+        log::info!("finished writing wav file");
         Ok(())
     }
 
@@ -319,13 +333,15 @@ impl AudioSegment {
         let end = (start + other.frames.len().min(self.time_to_frame(dur)))
             .min(self.frames.len().saturating_sub(1));
 
-        self.frames[start..end]
-            .par_iter_mut()
-            .zip(&other.frames)
-            .for_each(|(s, o)| {
-                s.left += o.left;
-                s.right += o.right;
-            });
+        #[cfg(feature = "rayon")]
+        let iter = self.frames[start..end].par_iter_mut();
+        #[cfg(not(feature = "rayon"))]
+        let iter = self.frames[start..end].iter_mut();
+
+        iter.zip(&other.frames).for_each(|(s, o)| {
+            s.left += o.left;
+            s.right += o.right;
+        });
     }
 
     #[inline]
@@ -342,13 +358,15 @@ impl AudioSegment {
         let end = (start + other.frames.len().min(self.time_to_frame(dur)))
             .min(self.frames.len().saturating_sub(1));
 
-        self.frames[start..end] // resampler delay
-            .par_iter_mut() // run in parallel
-            .zip(&other.frames)
-            .for_each(|(s, o)| {
-                s.left += o.left * volume;
-                s.right += o.right * volume;
-            });
+        #[cfg(feature = "rayon")]
+        let iter = self.frames[start..end].par_iter_mut();
+        #[cfg(not(feature = "rayon"))]
+        let iter = self.frames[start..end].iter_mut();
+
+        iter.zip(&other.frames).for_each(|(s, o)| {
+            s.left += o.left * volume;
+            s.right += o.right * volume;
+        });
     }
 
     /// Returns the duration of the audio segment.
@@ -468,14 +486,16 @@ impl AudioSegment {
     pub fn make_pitch_table(&mut self, from: f32, to: f32, step: f32) {
         let old_seg = self.clone();
         self.pitch_table = vec![old_seg; ((to - from) / step) as usize];
-        self.pitch_table
-            .par_iter_mut()
-            .enumerate()
-            .for_each(|(i, seg)| {
-                let cur = from + (i as f32 * step);
-                seg.resample((self.sample_rate as f32 * cur) as u32);
-                seg.sample_rate = self.sample_rate; // keep same sample rate
-            });
+        #[cfg(feature = "rayon")]
+        let iter = self.pitch_table.par_iter_mut();
+        #[cfg(not(feature = "rayon"))]
+        let iter = self.pitch_table.iter_mut();
+
+        iter.enumerate().for_each(|(i, seg)| {
+            let cur = from + (i as f32 * step);
+            seg.resample((self.sample_rate as f32 * cur) as u32);
+            seg.sample_rate = self.sample_rate; // keep same sample rate
+        });
     }
 
     /// Does not clear the pitch table, only clears data
@@ -485,7 +505,7 @@ impl AudioSegment {
     }
 
     /// Chooses random pitch from the pitch table. If pitch table is not generated,
-    /// returns [`self`]    
+    /// returns [`self`]
     #[inline]
     pub fn random_pitch(&self) -> &AudioSegment {
         if self.pitch_table.is_empty() {

@@ -1,63 +1,120 @@
 use crate::built_info;
-use anyhow::{Context, Result};
+#[allow(unused_imports)]
+use anyhow::{Context as _, Result};
 use bot::{
     Action, Bot, ChangeVolumeFor, ClickpackConversionSettings, ExprVariable, ExtendedAction, Pitch,
     RemoveSilenceFrom, Replay, ReplayType, Timings, VolumeSettings,
 };
 use eframe::{
-    egui::{self, DragValue, IconData, Key, RichText},
+    egui::{self, DragValue, Key, RichText},
     emath,
     epaint::Color32,
 };
 use egui_clickpack_db::ClickpackDb;
 use egui_modal::{Icon, Modal};
 use egui_plot::PlotPoint;
-use image::ImageReader;
+use poll_promise::Promise;
+#[cfg(not(target_arch = "wasm32"))]
 use rfd::FileDialog;
+#[cfg(target_arch = "wasm32")]
+use rfd::FileHandle;
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use serde_json::Value;
 use std::{
     cell::RefCell,
-    fs::File,
-    io::{BufWriter, Cursor, Write},
+    io::Write,
     ops::RangeInclusive,
-    path::Path,
+    path::{Path, PathBuf},
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
-use std::{io::BufReader, path::PathBuf};
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::fs::File;
+
+#[cfg(not(target_arch = "wasm32"))]
+use std::io::BufWriter;
+
+#[cfg(target_arch = "wasm32")]
+use std::io::Read;
 
 const MAX_PLOT_POINTS: usize = 4096;
 
-pub fn run_gui() -> Result<(), eframe::Error> {
-    let img = ImageReader::new(Cursor::new(include_bytes!("assets/icon.ico")))
-        .with_guessed_format()
-        .unwrap()
-        .decode()
-        .unwrap();
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Clone)]
+struct SendWrapper<T>(T);
+#[cfg(target_arch = "wasm32")]
+unsafe impl<T> Send for SendWrapper<T> {}
+#[cfg(target_arch = "wasm32")]
+unsafe impl<T> Sync for SendWrapper<T> {}
+#[cfg(target_arch = "wasm32")]
+impl<T> std::ops::Deref for SendWrapper<T> {
+    type Target = T;
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([460.0, 440.0])
-            .with_icon(IconData {
-                rgba: img.to_rgba8().to_vec(),
-                width: img.width(),
-                height: img.height(),
-            }),
-        ..Default::default()
-    };
-    eframe::run_native(
-        "ZCB",
-        options,
-        Box::new(|cc| {
-            egui_extras::install_image_loaders(&cc.egui_ctx);
-            cc.egui_ctx.style_mut(|s| {
-                s.interaction.tooltip_delay = 0.0;
-                s.url_in_tooltip = true;
-            });
-            Ok(Box::<App>::default())
-        }),
-    )
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FileDialogType {
+    SaveConfig,
+    LoadConfig,
+    SelectReplay,
+    SelectClickpack,
+    SelectClickpackConvert,
+    SelectOutput,
+    ExportMidi,
+}
+
+#[derive(Debug, Clone)]
+enum FileDialogResult {
+    #[cfg(not(target_arch = "wasm32"))]
+    File(PathBuf),
+    #[cfg(target_arch = "wasm32")]
+    Data(String, Vec<u8>), // filename, bytes
+    #[cfg(target_arch = "wasm32")]
+    DataList(Vec<(String, Vec<u8>)>),
+    #[cfg(target_arch = "wasm32")]
+    Handle(SendWrapper<FileHandle>),
+    #[cfg(not(target_arch = "wasm32"))]
+    Folder(PathBuf),
+    Cancelled,
+}
+
+enum RenderResult {
+    Success(bot::AudioSegment, Duration, PathBuf, bot::Bot),
+    Error(String, bot::Bot),
+    ReplayLoaded(Replay, bot::Bot),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RenderStage {
+    LoadingClickpack,
+    RenderingReplay,
+    #[cfg(not(target_arch = "wasm32"))]
+    ConvertingClickpack,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn spawn_promise<T>(future: impl std::future::Future<Output = T> + Send + 'static) -> Promise<T>
+where
+    T: Send + 'static,
+{
+    Promise::spawn_async(future)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn spawn_promise<T>(future: impl std::future::Future<Output = T> + 'static) -> Promise<T>
+where
+    T: Send + 'static,
+{
+    let (sender, promise) = Promise::new();
+    wasm_bindgen_futures::spawn_local(async move {
+        let result = future.await;
+        sender.send(result);
+    });
+    promise
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -129,16 +186,29 @@ struct Config {
 }
 
 impl Config {
+    #[cfg(not(target_arch = "wasm32"))]
     fn save(&self, path: &PathBuf) -> Result<()> {
         let json = serde_json::to_string_pretty(self)?;
         std::fs::write(path, json)?;
         Ok(())
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn load(&mut self, path: &PathBuf) -> Result<()> {
         let f = std::fs::File::open(path)?;
         *self = serde_json::from_reader(f)?;
         Ok(())
+    }
+    #[cfg(target_arch = "wasm32")]
+    fn load_from_bytes(&mut self, bytes: &[u8]) -> Result<()> {
+        *self = serde_json::from_slice(bytes)?;
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_to_bytes(&self) -> Result<Vec<u8>> {
+        let json = serde_json::to_string_pretty(self)?;
+        Ok(json.into_bytes())
     }
 
     fn replay_changed(&self, other: &Self) -> bool {
@@ -181,18 +251,22 @@ struct App {
     replay: Replay,
     bot: RefCell<Bot>,
     output: Option<PathBuf>,
+    #[cfg(target_arch = "wasm32")]
+    output_handle: Option<SendWrapper<FileHandle>>,
     // autocutter: AutoCutter,
     last_chars: [Key; 9],
     char_idx: u8,
     expr_error: String,
     plot_points: Rc<Vec<PlotPoint>>,
+    #[cfg(not(target_arch = "wasm32"))]
     update_to_tag: Option<Rc<String>>,
     update_expr: bool,
     clickpack_path: Option<PathBuf>,
     conf_after_replay_selected: Option<Config>,
     replay_path: Option<PathBuf>,
-    clickpack_num_sounds: Option<usize>,
     clickpack_has_noise: bool,
+    #[cfg(target_arch = "wasm32")]
+    clickpack_files: Option<Vec<(String, Vec<u8>)>>,
     expr_variable_variation_negative: bool,
     override_fps_enabled: bool,
     override_fps: f64,
@@ -200,12 +274,21 @@ struct App {
     show_clickpack_db: bool,
     clickpack_db_title: String,
     show_suitable_step_notice: bool,
+    pending_file_dialog: Option<(FileDialogType, Promise<FileDialogResult>)>,
+    render_progress: f32,
+    render_stage: Option<RenderStage>,
+    render_promise: Option<Promise<RenderResult>>,
+    progress_receiver: Option<std::sync::mpsc::Receiver<f32>>,
+    #[cfg(target_arch = "wasm32")]
+    error_dialog: egui_modal::Modal,
 }
 
 impl Default for App {
     fn default() -> Self {
         Self {
             conf: Config::default(),
+            #[cfg(target_arch = "wasm32")]
+            error_dialog: egui_modal::Modal::new(&egui::Context::default(), "error_dialog"),
             stage: Stage::default(),
             replay: Replay::default(),
             bot: RefCell::new(Bot::default()),
@@ -215,12 +298,12 @@ impl Default for App {
             char_idx: 0,
             expr_error: String::new(),
             plot_points: Rc::new(vec![]),
+            #[cfg(not(target_arch = "wasm32"))]
             update_to_tag: None,
             update_expr: false,
             clickpack_path: None,
             conf_after_replay_selected: None,
             replay_path: None,
-            clickpack_num_sounds: None,
             clickpack_has_noise: false,
             expr_variable_variation_negative: true,
             override_fps_enabled: false,
@@ -229,6 +312,15 @@ impl Default for App {
             show_clickpack_db: false,
             clickpack_db_title: String::new(),
             show_suitable_step_notice: false,
+            pending_file_dialog: None,
+            render_progress: 0.0,
+            render_stage: None,
+            render_promise: None,
+            progress_receiver: None,
+            #[cfg(target_arch = "wasm32")]
+            output_handle: None,
+            #[cfg(target_arch = "wasm32")]
+            clickpack_files: None,
         }
     }
 }
@@ -280,6 +372,17 @@ fn drag_value<Num: emath::Numeric>(
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(rx) = &self.progress_receiver {
+            while let Ok(progress) = rx.try_recv() {
+                self.render_progress = progress;
+            }
+        }
+        // poll pending file dialogs
+        let mut dialog = Modal::new(ctx, "file_dialog_modal");
+        self.poll_file_dialog(ctx, &dialog);
+        self.poll_render_result(ctx, &dialog);
+        dialog.show_dialog();
+
         ctx.input(|i| {
             use Key::*;
             const BOYKISSER: [Key; 9] = [B, O, Y, K, I, S, S, E, R];
@@ -329,6 +432,7 @@ impl eframe::App for App {
                     {
                         self.stage = self.stage.previous();
                     }
+                    #[cfg(not(target_arch = "wasm32"))]
                     if ui
                         .button("Check for updates")
                         .on_hover_text("Check if your ZCB version is up-to-date")
@@ -354,14 +458,7 @@ impl eframe::App for App {
                             .on_hover_text("Load a configuration file")
                             .clicked()
                         {
-                            self.load_config(&dialog);
-
-                            // reload replay if it was loaded
-                            if let Some(replay_path) = &self.replay_path.clone() {
-                                let _ = self
-                                    .load_replay(&dialog, replay_path)
-                                    .map_err(|e| log::error!("failed to reload replay: {e}"));
-                            }
+                            self.load_config();
                         }
                         ui.style_mut().spacing.item_spacing.x = 5.;
                         if ui
@@ -369,7 +466,7 @@ impl eframe::App for App {
                             .on_hover_text("Save the current configuration")
                             .clicked()
                         {
-                            self.save_config(&dialog);
+                            self.save_config();
                         }
                     });
                 });
@@ -379,6 +476,7 @@ impl eframe::App for App {
             update_dialog.show_dialog();
             modal.show_dialog();
 
+            #[cfg(not(target_arch = "wasm32"))]
             self.show_update_check_modal(&modal);
         });
 
@@ -397,53 +495,70 @@ impl eframe::App for App {
 
         if self.show_clickpack_db {
             if self.clickpack_db_title.is_empty() {
-                let updated_at = self.clickpack_db.db.read().unwrap().updated_at_unix;
-                if updated_at != 0 {
-                    use chrono::{TimeZone, Utc};
-                    use timeago::Formatter;
-                    let formatter = Formatter::new();
-                    let datetime = Utc.timestamp_opt(updated_at, 0).unwrap();
-                    let now = Utc::now();
-                    self.clickpack_db_title = format!(
-                        "ClickpackDB - updated {}, {} clickpacks",
-                        formatter.convert_chrono(datetime, now),
-                        self.clickpack_db.db.read().unwrap().entries.len()
-                    );
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let updated_at = self.clickpack_db.db.read().unwrap().updated_at_unix;
+                    if updated_at != 0 {
+                        use chrono::{TimeZone, Utc};
+                        use timeago::Formatter;
+                        let formatter = Formatter::new();
+                        let datetime = Utc.timestamp_opt(updated_at, 0).unwrap();
+                        let now = Utc::now();
+                        self.clickpack_db_title = format!(
+                            "ClickpackDB - updated {}, {} clickpacks",
+                            formatter.convert_chrono(datetime, now),
+                            self.clickpack_db.db.read().unwrap().entries.len()
+                        );
+                    }
+                }
+                #[cfg(target_arch = "wasm32")]
+                {
+                    self.clickpack_db_title = "ClickpackDB".to_string();
                 }
             }
-            let builder = egui::ViewportBuilder::default()
-                .with_title(if self.clickpack_db_title.is_empty() {
-                    "ClickpackDB"
-                } else {
-                    &self.clickpack_db_title
-                })
-                .with_inner_size([410.0, 510.0])
-                .with_resizable(false);
-            ctx.show_viewport_immediate(
-                egui::ViewportId::from_hash_of("immediate_clickpack_db_viewport"),
-                builder,
-                |ctx, class| {
-                    assert!(
-                        class == egui::ViewportClass::Immediate,
-                        "This egui backend doesn't support multiple viewports",
-                    );
 
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        self.show_clickpack_db(ctx, ui);
-                    });
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let builder = egui::ViewportBuilder::default()
+                    .with_title(if self.clickpack_db_title.is_empty() {
+                        "ClickpackDB"
+                    } else {
+                        &self.clickpack_db_title
+                    })
+                    .with_inner_size([410.0, 510.0])
+                    .with_resizable(false);
+                ctx.show_viewport_immediate(
+                    egui::ViewportId::from_hash_of("immediate_clickpack_db_viewport"),
+                    builder,
+                    |ctx, class| {
+                        assert!(
+                            class == egui::ViewportClass::Immediate,
+                            "This egui backend doesn't support multiple viewports",
+                        );
 
-                    if ctx.input(|i| i.viewport().close_requested()) {
-                        // tell parent viewport that we should not show next frame:
-                        self.show_clickpack_db = false;
-                    }
-                },
-            );
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            self.show_clickpack_db(ctx, ui);
+                        });
+
+                        if ctx.input(|i| i.viewport().close_requested()) {
+                            // tell parent viewport that we should not show next frame:
+                            self.show_clickpack_db = false;
+                        }
+                    },
+                );
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                self.show_clickpack_db(ctx);
+            }
         }
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Ubuntu Chromium/37.0.2062.94 Chrome/37.0.2062.94 Safari/537.36";
 
+#[cfg(not(target_arch = "wasm32"))]
 fn ureq_agent() -> ureq::Agent {
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(15)))
@@ -452,6 +567,7 @@ fn ureq_agent() -> ureq::Agent {
     ureq::Agent::new_with_config(config)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn ureq_fn(url: &str, post: bool) -> Result<Vec<u8>, String> {
     log::debug!("request url: '{url}', POST={post}");
     if post {
@@ -472,6 +588,7 @@ fn ureq_fn(url: &str, post: bool) -> Result<Vec<u8>, String> {
         .map_err(|_| "failed to read body".to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn get_latest_tag() -> Result<String> {
     let body = ureq_agent()
         .get("https://api.github.com/repos/zeozeozeo/zcb3/tags")
@@ -489,6 +606,7 @@ fn get_latest_tag() -> Result<String> {
     Ok(tagname.to_string())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn is_older_version(current: &str, latest: &str) -> bool {
     current
         .split('.')
@@ -497,6 +615,7 @@ fn is_older_version(current: &str, latest: &str) -> bool {
         .any(|(c, l)| c < l)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn capitalize_first_letter(s: &str) -> String {
     let mut c = s.chars();
     match c.next() {
@@ -506,6 +625,726 @@ fn capitalize_first_letter(s: &str) -> String {
 }
 
 impl App {
+    /// Start an async file dialog
+    fn start_file_dialog(&mut self, dialog_type: FileDialogType) {
+        if self.pending_file_dialog.is_some() {
+            return; // already have a pending dialog
+        }
+
+        let promise = spawn_promise(async move {
+            match dialog_type {
+                FileDialogType::SaveConfig => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("Config file", &["json"])
+                            .save_file()
+                        {
+                            return FileDialogResult::File(path);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("Config file", &["json"])
+                            .save_file()
+                            .await
+                        {
+                            return FileDialogResult::Handle(SendWrapper(handle));
+                        }
+                    }
+                    FileDialogResult::Cancelled
+                }
+                FileDialogType::LoadConfig => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("Config file", &["json"])
+                            .pick_file()
+                        {
+                            return FileDialogResult::File(path);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("Config file", &["json"])
+                            .pick_file()
+                            .await
+                        {
+                            let data = handle.read().await;
+                            return FileDialogResult::Data(handle.file_name(), data);
+                        }
+                    }
+                    FileDialogResult::Cancelled
+                }
+                FileDialogType::SelectReplay => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("Replay file", bot::Replay::SUPPORTED_EXTENSIONS)
+                            .pick_file()
+                        {
+                            return FileDialogResult::File(path);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("Replay file", bot::Replay::SUPPORTED_EXTENSIONS)
+                            .pick_file()
+                            .await
+                        {
+                            let data = handle.read().await;
+                            return FileDialogResult::Data(handle.file_name(), data);
+                        }
+                    }
+                    FileDialogResult::Cancelled
+                }
+                FileDialogType::SelectClickpack | FileDialogType::SelectClickpackConvert => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Some(path) = FileDialog::new().pick_folder() {
+                            return FileDialogResult::Folder(path);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(handles) = rfd::AsyncFileDialog::new()
+                            .add_filter("Supported archive types", &["zip"])
+                            .pick_files()
+                            .await
+                        {
+                            let mut list = Vec::new();
+                            if handles.len() == 1 && handles[0].file_name().ends_with(".zip") {
+                                let handle = &handles[0];
+                                let data = handle.read().await;
+                                if let Ok(list) = Self::unzip_clickpack(&data) {
+                                    return FileDialogResult::DataList(list);
+                                }
+                            } else {
+                                for handle in handles {
+                                    let data = handle.read().await;
+                                    list.push((handle.file_name(), data));
+                                }
+                            }
+                            return FileDialogResult::DataList(list);
+                        }
+                    }
+                    FileDialogResult::Cancelled
+                }
+                FileDialogType::SelectOutput => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("Supported audio files", &["wav"])
+                            .save_file()
+                        {
+                            return FileDialogResult::File(path);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("Supported audio files", &["wav"])
+                            .save_file()
+                            .await
+                        {
+                            return FileDialogResult::Handle(SendWrapper(handle));
+                        }
+                    }
+                    FileDialogResult::Cancelled
+                }
+                FileDialogType::ExportMidi => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("MIDI file", &["mid"])
+                            .save_file()
+                        {
+                            return FileDialogResult::File(path);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("MIDI file", &["mid"])
+                            .save_file()
+                            .await
+                        {
+                            return FileDialogResult::Handle(SendWrapper(handle));
+                        }
+                    }
+                    FileDialogResult::Cancelled
+                }
+            }
+        });
+
+        self.pending_file_dialog = Some((dialog_type, promise));
+    }
+
+    /// Poll pending file dialog and handle result
+    fn poll_file_dialog(&mut self, ctx: &egui::Context, dialog: &Modal) {
+        if let Some((dialog_type, promise)) = &self.pending_file_dialog {
+            if let Some(result) = promise.ready() {
+                let result = result.clone();
+                let dialog_type = *dialog_type;
+                self.pending_file_dialog = None;
+
+                match dialog_type {
+                    FileDialogType::SaveConfig => match result {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        FileDialogResult::File(path) =>
+                        {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            if let Err(e) = self.conf.save(&path) {
+                                dialog
+                                    .dialog()
+                                    .with_title("Failed to save config")
+                                    .with_body(e)
+                                    .with_icon(Icon::Error)
+                                    .open();
+                            }
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        FileDialogResult::Handle(handle) => {
+                            let handle = handle.0;
+                            if let Ok(data) = self.conf.save_to_bytes() {
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    let _ = handle.write(&data).await;
+                                });
+                            }
+                        }
+                        _ => {
+                            dialog
+                                .dialog()
+                                .with_title("No file was selected")
+                                .with_body("Please select a file")
+                                .with_icon(Icon::Error)
+                                .open();
+                        }
+                    },
+                    FileDialogType::LoadConfig => {
+                        let load_res = match result {
+                            #[cfg(not(target_arch = "wasm32"))]
+                            FileDialogResult::File(path) => self.conf.load(&path),
+                            #[cfg(target_arch = "wasm32")]
+                            FileDialogResult::Data(_, bytes) => self.conf.load_from_bytes(&bytes),
+                            _ => Err(anyhow::anyhow!("No file selected")),
+                        };
+
+                        if let Err(e) = load_res {
+                            dialog
+                                .dialog()
+                                .with_title("Failed to load config")
+                                .with_body(e)
+                                .with_icon(Icon::Error)
+                                .open();
+                        } else {
+                            self.update_expr = true;
+                            // reload replay if it was loaded
+                            if let Some(replay_path) = &self.replay_path.clone() {
+                                let _ = self
+                                    .load_replay(dialog, replay_path)
+                                    .map_err(|e| log::error!("failed to reload replay: {e}"));
+                            }
+                        }
+                    }
+                    FileDialogType::SelectReplay => match result {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        FileDialogResult::File(path) => {
+                            self.replay_path = Some(path.clone());
+                            if self.load_replay(dialog, &path).is_ok() {
+                                self.stage = Stage::SelectClickpack;
+                            }
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        FileDialogResult::Data(name, bytes) => {
+                            self.replay_path = None;
+                            self.start_load_replay_from_bytes(name, bytes);
+                            self.stage = Stage::SelectClickpack;
+                        }
+                        _ => {
+                            dialog
+                                .dialog()
+                                .with_title("No file was selected")
+                                .with_body("Please select a file")
+                                .with_icon(Icon::Error)
+                                .open();
+                        }
+                    },
+                    FileDialogType::SelectClickpack => match result {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        FileDialogResult::Folder(path) => {
+                            self.select_clickpack(&path);
+                            self.stage = if self.replay.has_actions() {
+                                Stage::Render
+                            } else {
+                                Stage::SelectReplay
+                            };
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        FileDialogResult::DataList(files) => {
+                            self.select_clickpack_from_bytes(&files);
+                            self.stage = if self.replay.has_actions() {
+                                Stage::Render
+                            } else {
+                                Stage::SelectReplay
+                            };
+                        }
+                        _ => {
+                            dialog
+                                .dialog()
+                                .with_title(if cfg!(target_arch = "wasm32") {
+                                    "No file was selected"
+                                } else {
+                                    "No directory was selected"
+                                })
+                                .with_body(if cfg!(target_arch = "wasm32") {
+                                    "Please select a file"
+                                } else {
+                                    "Please select a directory"
+                                })
+                                .with_icon(Icon::Error)
+                                .open();
+                        }
+                    },
+                    FileDialogType::SelectClickpackConvert => match result {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        FileDialogResult::Folder(path) => {
+                            self.convert_clickpack(&path, dialog);
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        FileDialogResult::DataList(files) => {
+                            self.convert_clickpack_from_bytes(&files, dialog);
+                        }
+                        _ => {
+                            dialog
+                                .dialog()
+                                .with_title("No directory was selected")
+                                .with_body("Please select a directory")
+                                .with_icon(Icon::Error)
+                                .open();
+                        }
+                    },
+                    FileDialogType::SelectOutput => match result {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        FileDialogResult::File(path) => {
+                            log::info!("selected output file: {path:?}");
+                            self.output = Some(path);
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        FileDialogResult::Handle(handle) => {
+                            log::info!("selected output file (handle): {}", handle.0.file_name());
+                            self.output = Some(PathBuf::from(handle.0.file_name()));
+                            self.output_handle = Some(handle);
+                        }
+                        _ => {
+                            dialog
+                                .dialog()
+                                .with_title("No output file was selected")
+                                .with_body("Please select an output file")
+                                .with_icon(Icon::Error)
+                                .open();
+                        }
+                    },
+                    FileDialogType::ExportMidi => match result {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        FileDialogResult::File(path) => {
+                            if let Err(e) = self.do_export_midi(&path) {
+                                dialog
+                                    .dialog()
+                                    .with_title("Failed to export MIDI")
+                                    .with_body(capitalize_first_letter(&e.to_string()))
+                                    .with_icon(Icon::Error)
+                                    .open();
+                            }
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        FileDialogResult::Handle(handle) => {
+                            if let Ok(data) = self.do_export_midi_bytes() {
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    let _ = handle.0.write(&data).await;
+                                });
+                            }
+                        }
+                        _ => {
+                            dialog
+                                .dialog()
+                                .with_title("No file was selected")
+                                .with_body("Please select a file")
+                                .with_icon(Icon::Error)
+                                .open();
+                        }
+                    },
+                }
+
+                ctx.request_repaint(); // request repaint after handling dialog result
+            } else {
+                ctx.request_repaint(); // keep repainting while waiting for dialog
+            }
+        }
+    }
+
+    fn start_render(&mut self) {
+        if self.render_promise.is_some() {
+            return;
+        }
+
+        let mut bot = self.bot.replace(bot::Bot::new(self.conf.sample_rate));
+        let replay = self.replay.clone();
+        let config = self.conf.clone();
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let output_path = self.output.clone().expect("no output path");
+        #[cfg(target_arch = "wasm32")]
+        let output_path = std::path::PathBuf::from("output.wav");
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let clickpack_path = self.clickpack_path.clone().expect("no clickpack path");
+
+        #[cfg(target_arch = "wasm32")]
+        let clickpack_files = self.clickpack_files.clone().expect("no clickpack files");
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        self.progress_receiver = Some(rx);
+        self.render_stage = Some(RenderStage::RenderingReplay);
+
+        self.render_promise = Some(spawn_promise(async move {
+            let timer = crate::utils::Timer::new();
+
+            // load clickpack
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Err(e) = bot.load_clickpack(&clickpack_path, config.pitch) {
+                return RenderResult::Error(format!("Failed to load clickpack: {e}"), bot);
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            if let Err(e) = bot.load_clickpack_from_bytes(&clickpack_files, config.pitch) {
+                return RenderResult::Error(format!("Failed to load clickpack: {e}"), bot);
+            }
+
+            let expr_valid = !config.expr_text.is_empty();
+            let expr_var = if expr_valid {
+                config.expr_variable
+            } else {
+                ExprVariable::None
+            };
+
+            #[cfg(not(target_arch = "wasm32"))]
+            let segment = bot.render_replay(
+                &replay,
+                config.noise,
+                config.noise_volume,
+                config.postprocess_type == RenderPostprocessType::Normalize,
+                expr_var,
+                config.pitch_enabled,
+                config.cut_sounds,
+                |p| {
+                    let _ = tx.send(p);
+                },
+            );
+
+            #[cfg(target_arch = "wasm32")]
+            let segment = bot
+                .render_replay_async(
+                    &replay,
+                    config.noise,
+                    config.noise_volume,
+                    config.postprocess_type == RenderPostprocessType::Normalize,
+                    expr_var,
+                    config.pitch_enabled,
+                    config.cut_sounds,
+                    |p| {
+                        let _ = tx.send(p);
+                    },
+                    || gloo_timers::future::TimeoutFuture::new(0),
+                )
+                .await;
+
+            RenderResult::Success(segment, timer.elapsed(), output_path, bot)
+        }));
+    }
+
+    fn poll_render_result(&mut self, ctx: &egui::Context, dialog: &Modal) {
+        // poll progress if any
+        if let Some(rx) = &self.progress_receiver {
+            while let Ok(p) = rx.try_recv() {
+                self.render_progress = p;
+            }
+            ctx.request_repaint();
+        }
+
+        // poll promise
+        if let Some(promise) = self.render_promise.as_ref() {
+            if let Some(_result) = promise.ready() {
+                self.render_stage = None;
+                self.render_progress = 0.0;
+                self.progress_receiver = None;
+
+                let promise_result = self.render_promise.take().unwrap().block_and_take();
+                match promise_result {
+                    #[allow(unused_variables)] // wasm
+                    RenderResult::Success(segment, duration, path, bot) => {
+                        self.bot.replace(bot);
+                        if segment.frames.is_empty() {
+                            // this was a conversion task
+                            dialog
+                                .dialog()
+                                .with_title("Success!")
+                                .with_body(format!(
+                                    "Successfully converted clickpack in {:?}",
+                                    duration
+                                ))
+                                .with_icon(Icon::Success)
+                                .open();
+                        } else {
+                            // this was a rendering task
+                            #[cfg(not(target_arch = "wasm32"))]
+                            {
+                                let f = match std::fs::File::create(&path) {
+                                    Ok(f) => f,
+                                    Err(e) => {
+                                        dialog
+                                            .dialog()
+                                            .with_title("Failed to create file")
+                                            .with_body(e)
+                                            .with_icon(Icon::Error)
+                                            .open();
+                                        return;
+                                    }
+                                };
+                                if let Err(e) = segment.export_wav(
+                                    f,
+                                    self.conf.postprocess_type == RenderPostprocessType::Clamp,
+                                ) {
+                                    dialog
+                                        .dialog()
+                                        .with_title("Failed to export WAV")
+                                        .with_body(e)
+                                        .with_icon(Icon::Error)
+                                        .open();
+                                } else {
+                                    dialog
+                                        .dialog()
+                                        .with_title("Success!")
+                                        .with_body(format!(
+                                            "Successfully rendered and saved to {:?} in {:?}",
+                                            path, duration
+                                        ))
+                                        .with_icon(Icon::Success)
+                                        .open();
+                                }
+                            }
+                            #[cfg(target_arch = "wasm32")]
+                            {
+                                if let Ok(data) = segment.export_wav_bytes(
+                                    self.conf.postprocess_type == RenderPostprocessType::Clamp,
+                                ) {
+                                    wasm_bindgen_futures::spawn_local(async move {
+                                        if let Some(handle) = rfd::AsyncFileDialog::new()
+                                            .set_file_name("output.wav")
+                                            .save_file()
+                                            .await
+                                        {
+                                            let _ = handle.write(&data).await;
+                                        }
+                                    });
+                                    dialog
+                                        .dialog()
+                                        .with_title("Success!")
+                                        .with_body(format!(
+                                            "Successfully rendered in {:?}. Please save the file in the dialog.",
+                                            duration
+                                        ))
+                                        .with_icon(Icon::Success)
+                                        .open();
+                                } else {
+                                    dialog
+                                        .dialog()
+                                        .with_title("Failed to export WAV")
+                                        .with_body("Could not encode WAV bytes")
+                                        .with_icon(Icon::Error)
+                                        .open();
+                                }
+                            }
+                        }
+                    }
+                    RenderResult::ReplayLoaded(replay, bot) => {
+                        self.bot.replace(bot);
+                        self.replay = replay;
+                        self.update_expr = true;
+                        self.conf_after_replay_selected = Some(self.conf.clone());
+                    }
+                    RenderResult::Error(e, bot) => {
+                        self.bot.replace(bot);
+                        dialog
+                            .dialog()
+                            .with_title("Failed")
+                            .with_body(e)
+                            .with_icon(Icon::Error)
+                            .open();
+                    }
+                }
+            }
+        }
+    }
+
+    fn start_load_replay(&mut self, path: PathBuf) {
+        if self.render_promise.is_some() {
+            return;
+        }
+
+        let bot = self.bot.replace(bot::Bot::new(self.conf.sample_rate));
+        let config = self.conf.clone();
+        let override_fps_enabled = self.override_fps_enabled;
+        let override_fps = self.override_fps;
+
+        self.render_stage = Some(RenderStage::LoadingClickpack);
+        self.render_promise = Some(spawn_promise(async move {
+            let filename = path.file_name().unwrap_or_default().to_string_lossy();
+            let replay_type = match ReplayType::guess_format(&filename) {
+                Ok(t) => t,
+                Err(e) => {
+                    return RenderResult::Error(
+                        format!("Failed to guess replay format: {}", e),
+                        bot,
+                    )
+                }
+            };
+
+            let f = match std::fs::File::open(&path) {
+                Ok(f) => f,
+                Err(e) => {
+                    return RenderResult::Error(format!("Failed to open replay file: {}", e), bot)
+                }
+            };
+
+            let replay = Replay::build()
+                .with_timings(config.timings)
+                .with_vol_settings(config.vol_settings)
+                .with_extended(true)
+                .with_sort_actions(config.sort_actions)
+                .with_discard_deaths(config.discard_deaths)
+                .with_swap_players(config.swap_players)
+                .with_override_fps(if override_fps_enabled {
+                    Some(override_fps)
+                } else {
+                    None
+                })
+                .parse(replay_type, std::io::BufReader::new(f));
+
+            match replay {
+                Ok(r) => RenderResult::ReplayLoaded(r, bot),
+                Err(e) => RenderResult::Error(format!("Failed to parse replay file: {}", e), bot),
+            }
+        }));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn start_load_replay_from_bytes(&mut self, filename: String, bytes: Vec<u8>) {
+        if self.render_promise.is_some() {
+            return;
+        }
+
+        let bot = self.bot.replace(bot::Bot::new(self.conf.sample_rate));
+        let config = self.conf.clone();
+        let override_fps_enabled = self.override_fps_enabled;
+        let override_fps = self.override_fps;
+
+        self.render_stage = Some(RenderStage::LoadingClickpack);
+        self.render_promise = Some(spawn_promise(async move {
+            let replay_type = match ReplayType::guess_format(&filename) {
+                Ok(t) => t,
+                Err(e) => {
+                    return RenderResult::Error(
+                        format!("Failed to guess replay format: {}", e),
+                        bot,
+                    )
+                }
+            };
+
+            let replay = Replay::build()
+                .with_timings(config.timings)
+                .with_vol_settings(config.vol_settings)
+                .with_extended(true)
+                .with_sort_actions(config.sort_actions)
+                .with_discard_deaths(config.discard_deaths)
+                .with_swap_players(config.swap_players)
+                .with_override_fps(if override_fps_enabled {
+                    Some(override_fps)
+                } else {
+                    None
+                })
+                .parse(replay_type, std::io::Cursor::new(bytes));
+
+            match replay {
+                Ok(r) => RenderResult::ReplayLoaded(r, bot),
+                Err(e) => RenderResult::Error(format!("Failed to parse replay file: {}", e), bot),
+            }
+        }));
+    }
+
+    fn load_replay(&mut self, _dialog: &Modal, path: &Path) -> Result<()> {
+        self.start_load_replay(path.to_path_buf());
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn start_convert_clickpack(&mut self, dir: PathBuf) {
+        if self.render_promise.is_some() {
+            return;
+        }
+
+        let mut bot = self.bot.replace(bot::Bot::new(self.conf.sample_rate));
+        let config = self.conf.clone();
+        let clickpack_path = self.clickpack_path.clone();
+
+        let (_tx, rx) = std::sync::mpsc::channel();
+        self.progress_receiver = Some(rx);
+        self.render_stage = Some(RenderStage::ConvertingClickpack);
+
+        self.render_promise = Some(spawn_promise(async move {
+            let timer = crate::utils::Timer::new();
+
+            // check if clickpack is loaded
+            if !bot.has_clicks() {
+                if let Some(cp_path) = &clickpack_path {
+                    if let Err(e) = bot.load_clickpack(cp_path, bot::Pitch::NO_PITCH) {
+                        return RenderResult::Error(
+                            format!("Failed to load clickpack: {}", e),
+                            bot,
+                        );
+                    }
+                } else {
+                    return RenderResult::Error("No clickpack path selected".to_string(), bot);
+                }
+            }
+
+            if let Err(e) = bot.convert_clickpack(&dir, &config.conversion_settings) {
+                RenderResult::Error(format!("Failed to convert clickpack: {}", e), bot)
+            } else {
+                RenderResult::Success(bot::AudioSegment::default(), timer.elapsed(), dir, bot)
+            }
+        }));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn convert_clickpack(&mut self, dir: &Path, _dialog: &Modal) {
+        self.start_convert_clickpack(dir.to_path_buf());
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn convert_clickpack_from_bytes(&mut self, _files: &[(String, Vec<u8>)], dialog: &Modal) {
+        dialog
+            .dialog()
+            .with_title("Not supported")
+            .with_body("Clickpack conversion is not yet supported on WASM")
+            .with_icon(Icon::Error)
+            .open();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn show_update_check_modal(&mut self, modal: &Modal) {
         let Some(update_to_tag) = self.update_to_tag.clone() else {
             return;
@@ -534,6 +1373,7 @@ impl App {
         });
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn do_update_check(&mut self, modal: &Modal, dialog: &Modal) {
         let latest_tag = get_latest_tag();
 
@@ -655,23 +1495,30 @@ impl App {
 
     // Function written by forteus19
     // I am not a rust dev so my code is probably trash LOL
-    fn export_midi(&self) -> Result<()> {
+    fn export_midi(&mut self) {
         // Check if fps is at most 32767
         if self.replay.fps as u32 > 32767 {
             log::error!("MIDI format only supports up to 32767 PPQN (framerate)");
-            return Err(anyhow::anyhow!(
-                "MIDI format only supports up to 32767 PPQN (framerate)"
-            ));
+            return;
         }
 
-        let Some(path) = FileDialog::new()
-            .add_filter("MIDI file", &["mid"])
-            .save_file()
-        else {
-            log::error!("no file was selected");
-            return Err(anyhow::anyhow!("no file was selected"));
-        };
+        self.start_file_dialog(FileDialogType::ExportMidi);
+    }
 
+    #[cfg(not(target_arch = "wasm32"))]
+    fn do_export_midi(&self, path: &Path) -> Result<()> {
+        let f = File::create(path)?;
+        self.do_export_midi_to(BufWriter::new(f))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn do_export_midi_bytes(&self) -> Result<Vec<u8>> {
+        let mut data = std::io::Cursor::new(Vec::new());
+        self.do_export_midi_to(&mut data)?;
+        Ok(data.into_inner())
+    }
+
+    fn do_export_midi_to<W: Write>(&self, writer: W) -> Result<()> {
         // Separate the click types into their own vectors
         let mut separated_actions: [Vec<Action>; 8] = Default::default();
         for action in &self.replay.actions {
@@ -690,7 +1537,7 @@ impl App {
 
         // Create bufwriter for midi data
         // NOTE: all values are big endian!!!
-        let mut midi_data = BufWriter::new(File::create(path)?);
+        let mut midi_data = writer;
         midi_data.write_all(b"MThd")?; // MThd header
         midi_data.write_all(&u32::to_be_bytes(6))?; // MThd length
         midi_data.write_all(&u16::to_be_bytes(1))?; // SMF format
@@ -816,52 +1663,12 @@ impl App {
         }
     }
 
-    fn save_config(&self, dialog: &Modal) {
-        if let Some(file) = FileDialog::new()
-            .add_filter("Config file", &["json"])
-            .save_file()
-        {
-            if let Err(e) = self.conf.save(&file) {
-                dialog
-                    .dialog()
-                    .with_title("Failed to save config")
-                    .with_body(e)
-                    .with_icon(Icon::Error)
-                    .open();
-            }
-        } else {
-            dialog
-                .dialog()
-                .with_title("No file was selected")
-                .with_body("Please select a file")
-                .with_icon(Icon::Error)
-                .open();
-        }
+    fn save_config(&mut self) {
+        self.start_file_dialog(FileDialogType::SaveConfig);
     }
 
-    fn load_config(&mut self, dialog: &Modal) {
-        if let Some(file) = FileDialog::new()
-            .add_filter("Config file", &["json"])
-            .pick_file()
-        {
-            if let Err(e) = self.conf.load(&file) {
-                dialog
-                    .dialog()
-                    .with_title("Failed to load config")
-                    .with_body(e)
-                    .with_icon(Icon::Error)
-                    .open();
-            } else {
-                self.update_expr = true;
-            }
-        } else {
-            dialog
-                .dialog()
-                .with_title("No file was selected")
-                .with_body("Please select a file")
-                .with_icon(Icon::Error)
-                .open();
-        }
+    fn load_config(&mut self) {
+        self.start_file_dialog(FileDialogType::LoadConfig);
     }
 
     fn show_secret_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -886,15 +1693,7 @@ impl App {
                     .on_disabled_hover_text("You have to load a replay first")
                     .clicked()
                 {
-                    if let Err(e) = self.export_midi() {
-                        log::error!("failed to export MIDI: {e}");
-                        secret_modal
-                            .dialog()
-                            .with_title("Failed to export MIDI")
-                            .with_body(capitalize_first_letter(&e.to_string()))
-                            .with_icon(Icon::Error)
-                            .open();
-                    }
+                    self.export_midi();
                 }
 
                 ui.add(egui::Slider::new(&mut self.conf.midi_key, 0..=127));
@@ -979,58 +1778,6 @@ impl App {
                 ui.hyperlink_to("Join the Guilded server", "https://guilded.gg/clickbot");
                 ui.end_row();
             });
-    }
-
-    fn load_replay(&mut self, dialog: &Modal, file: &Path) -> Result<()> {
-        let filename = file.file_name().unwrap().to_str().unwrap();
-
-        // open replay file
-        let f = std::fs::File::open(file).unwrap();
-
-        let replay_type = ReplayType::guess_format(filename);
-
-        if let Ok(replay_type) = replay_type {
-            // parse replay
-            let replay = Replay::build()
-                .with_timings(self.conf.timings)
-                .with_vol_settings(self.conf.vol_settings)
-                .with_extended(true)
-                .with_sort_actions(self.conf.sort_actions)
-                .with_discard_deaths(self.conf.discard_deaths)
-                .with_swap_players(self.conf.swap_players)
-                .with_override_fps(if self.override_fps_enabled {
-                    Some(self.override_fps)
-                } else {
-                    None
-                })
-                .parse(replay_type, BufReader::new(f));
-
-            if let Ok(replay) = replay {
-                self.replay = replay;
-                self.update_expr = true;
-                self.conf_after_replay_selected = Some(self.conf.clone());
-            } else if let Err(e) = replay {
-                dialog
-                    .dialog()
-                    .with_title("Failed to parse replay file")
-                    .with_body(format!(
-                        "{}. Is the format supported?",
-                        capitalize_first_letter(&e.to_string()),
-                    ))
-                    .with_icon(Icon::Error)
-                    .open();
-                return Err(e);
-            }
-        } else if let Err(e) = replay_type {
-            dialog
-                .dialog()
-                .with_title("Failed to guess replay format")
-                .with_body(format!("Failed to guess replay format: {e}"))
-                .with_icon(Icon::Error)
-                .open();
-            return Err(e);
-        }
-        Ok(())
     }
 
     fn show_replay_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -1174,23 +1921,7 @@ impl App {
 
         ui.horizontal(|ui| {
             if ui.button("Select replay").clicked() {
-                // FIXME: for some reason when selecting files there's a ~2 second freeze in debug mode
-                if let Some(file) = FileDialog::new()
-                    .add_filter("Replay file", Replay::SUPPORTED_EXTENSIONS)
-                    .pick_file()
-                {
-                    self.replay_path = Some(file.clone());
-                    if self.load_replay(&dialog, &file).is_ok() {
-                        self.stage = Stage::SelectClickpack;
-                    }
-                } else {
-                    dialog
-                        .dialog()
-                        .with_title("No file was selected")
-                        .with_body("Please select a file")
-                        .with_icon(Icon::Error)
-                        .open();
-                }
+                self.start_file_dialog(FileDialogType::SelectReplay);
             }
 
             let num_extended = self.replay.extended.len();
@@ -1247,20 +1978,7 @@ impl App {
         dialog.show_dialog();
     }
 
-    fn load_clickpack_no_pitch(&self, dialog: &Modal, bot: &mut Bot) {
-        if let Err(e) = bot.load_clickpack(
-            &self.clickpack_path.clone().unwrap(),
-            Pitch::NO_PITCH, // don't generate pitch table
-        ) {
-            dialog
-                .dialog()
-                .with_title("Failed to load clickpack")
-                .with_body(e)
-                .with_icon(Icon::Error)
-                .open();
-        }
-    }
-
+    #[cfg(not(target_arch = "wasm32"))]
     fn select_clickpack(&mut self, path: &Path) {
         log::info!("selected clickpack path: {path:?}");
         self.clickpack_has_noise = bot::dir_has_noise(path);
@@ -1268,10 +1986,63 @@ impl App {
         self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
     }
 
+    #[cfg(target_arch = "wasm32")]
+    fn select_clickpack_from_bytes(&mut self, files: &[(String, Vec<u8>)]) {
+        log::info!("selected clickpack from bytes: {} files", files.len());
+        self.clickpack_files = Some(files.to_vec());
+        self.clickpack_path = Some(PathBuf::from("web_clickpack"));
+        self.bot = RefCell::new(Bot::new(self.conf.sample_rate));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn unzip_clickpack(data: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
+        let cursor = std::io::Cursor::new(data);
+        let mut archive = zip::ZipArchive::new(cursor)?;
+        let mut list = Vec::new();
+        for i in 0..archive.len() {
+            if let Ok(mut file) = archive.by_index(i) {
+                if file.is_file() {
+                    let mut bytes = Vec::new();
+                    if file.read_to_end(&mut bytes).is_ok() {
+                        list.push((file.name().to_string(), bytes));
+                    }
+                }
+            }
+        }
+        Ok(list)
+    }
+
     fn show_select_clickpack_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.heading("Select clickpack");
 
-        let mut dialog = Modal::new(ctx, "clickpack_stage_dialog");
+        let _dialog = Modal::new(ctx, "clickpack_stage_dialog");
+
+        ui.horizontal(|ui| {
+            if ui.button("Select clickpack").clicked() {
+                self.start_file_dialog(FileDialogType::SelectClickpack);
+            }
+            if ui
+                .button(if self.show_clickpack_db {
+                    "Close ClickpackDB"
+                } else {
+                    "Open ClickpackDB…"
+                })
+                .on_hover_text("Easily download clickpacks from within ZCB")
+                .clicked()
+            {
+                self.show_clickpack_db = !self.show_clickpack_db;
+            }
+            if let Some(path) = &self.clickpack_path {
+                if cfg!(target_arch = "wasm32") {
+                    ui.label("Clickpack loaded");
+                } else {
+                    ui.label(format!("Selected: {}", path.display()));
+                }
+            } else {
+                ui.label("No clickpack selected");
+            }
+        });
+        ui.separator();
 
         // pitch settings
         ui.collapsing("Pitch variation", |ui| {
@@ -1323,347 +2094,99 @@ impl App {
             });
         });
 
-        let is_convert_tab_open = ui
-            .collapsing("Convert", |ui| {
-                let conv_settings = &mut self.conf.conversion_settings;
+        ui.collapsing("Convert", |ui| {
+            let conv_settings = &mut self.conf.conversion_settings;
 
-                ui.label("Clickpack conversion. Can be used to modify sounds in batch.");
-                ui.separator();
+            ui.label("Clickpack conversion. Can be used to modify sounds in batch.");
+            ui.separator();
 
-                drag_value(
-                    ui,
-                    &mut conv_settings.volume,
-                    "Volume multiplier",
-                    0.0..=f32::INFINITY,
-                    "Change the volume of each audio file",
-                );
+            drag_value(
+                ui,
+                &mut conv_settings.volume,
+                "Volume multiplier",
+                0.0..=f32::INFINITY,
+                "Change the volume of each audio file",
+            );
 
-                if conv_settings.volume != 1. {
-                    help_text(ui, "Only change volume for this click type", |ui| {
-                        egui::ComboBox::from_label("Change volume for")
-                            .selected_text(conv_settings.change_volume_for.to_string())
-                            .show_ui(ui, |ui| {
-                                use ChangeVolumeFor::*;
-                                for typ in [All, Clicks, Releases] {
-                                    ui.selectable_value(
-                                        &mut conv_settings.change_volume_for,
-                                        typ,
-                                        typ.to_string(),
-                                    );
-                                }
-                            });
-                    });
-                }
-
-                help_text(ui, "Reverse all audio files", |ui| {
-                    ui.checkbox(&mut conv_settings.reverse, "Reverse audio")
-                });
-
-                help_text(ui, "Rename all audio files to 1.wav, 2.wav, etc.", |ui| {
-                    ui.checkbox(&mut conv_settings.rename_files, "Rename files")
-                });
-
-                help_text(
-                    ui,
-                    "Remove silence from beginning or end of all audio files",
-                    |ui| {
-                        egui::ComboBox::from_label("Remove silence")
-                            .selected_text(conv_settings.remove_silence.to_string())
-                            .show_ui(ui, |ui| {
-                                use RemoveSilenceFrom::*;
-                                for typ in [None, Start, End] {
-                                    ui.selectable_value(
-                                        &mut conv_settings.remove_silence,
-                                        typ,
-                                        typ.to_string(),
-                                    );
-                                }
-                            });
-                    },
-                );
-
-                if conv_settings.remove_silence != RemoveSilenceFrom::None {
-                    help_text(
-                        ui,
-                        "The volume value at which the sound should start (beta)",
-                        |ui| {
-                            ui.horizontal(|ui| {
-                                ui.add(egui::Slider::new(
-                                    &mut conv_settings.silence_threshold,
-                                    0.0..=1.0,
-                                ));
-                                ui.label("Silence threshold (volume)");
-                                if ui
-                                    .button("Reset")
-                                    .on_hover_text("Reset the silence threshold")
-                                    .clicked()
-                                {
-                                    conv_settings.silence_threshold = 0.05;
-                                }
-                            });
-                        },
-                    );
-                }
-                ui.horizontal(|ui| {
-                    if ui
-                        .button("Convert")
-                        .on_hover_text(
-                            "Convert the clickpack.\n\
-                                Note that all files will be exported as .wav",
-                        )
-                        .clicked()
-                    {
-                        if let Some(dir) = FileDialog::new().pick_folder() {
-                            let start = Instant::now();
-
-                            // check if the clickpack is loaded, load it if not
-                            if !self.bot.borrow().has_clicks() {
-                                if let Err(e) = self.bot.borrow_mut().load_clickpack(
-                                    &self.clickpack_path.clone().unwrap(),
-                                    Pitch::NO_PITCH, // don't generate pitch table
-                                ) {
-                                    dialog
-                                        .dialog()
-                                        .with_title("Failed to load clickpack")
-                                        .with_body(e)
-                                        .with_icon(Icon::Error)
-                                        .open();
-                                }
-                            }
-
-                            // convert
-                            if let Err(e) = self.bot.borrow().convert_clickpack(&dir, conv_settings)
-                            {
-                                dialog
-                                    .dialog()
-                                    .with_title("Failed to convert clickpack")
-                                    .with_body(e)
-                                    .with_icon(Icon::Error)
-                                    .open();
-                            } else {
-                                dialog
-                                    .dialog()
-                                    .with_title("Success!")
-                                    .with_body(format!(
-                                        "Successfully converted clickpack in {:?}.",
-                                        start.elapsed()
-                                    ))
-                                    .with_icon(Icon::Success)
-                                    .open();
-                            }
-
-                            // finished, unload clickpack
-                            *self.bot.borrow_mut() = Bot::new(self.conf.sample_rate);
-                        } else {
-                            dialog
-                                .dialog()
-                                .with_title("No directory was selected")
-                                .with_body("Please select a directory")
-                                .with_icon(Icon::Error)
-                                .open();
-                        }
-                    }
-                });
-            })
-            .fully_open(); // let is_convert_tab_open = ...
-
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.style_mut().spacing.item_spacing.x = 5.0;
-            if ui.button("Select clickpack").clicked() {
-                if let Some(dir) = FileDialog::new().pick_folder() {
-                    self.select_clickpack(&dir);
-                    if !is_convert_tab_open {
-                        self.stage = if self.replay.has_actions() {
-                            Stage::Render
-                        } else {
-                            Stage::SelectReplay
-                        };
-                    }
-                } else {
-                    dialog
-                        .dialog()
-                        .with_title("No directory was selected")
-                        .with_body("Please select a directory")
-                        .with_icon(Icon::Error)
-                        .open();
-                }
-            }
-            if ui
-                .button("Open ClickpackDB…")
-                .on_hover_text("Easily download clickpacks from within ZCB")
-                .clicked()
-            {
-                self.show_clickpack_db = true;
-            }
-        });
-        if let Some(clickpack_path) = &self.clickpack_path {
-            let filename = clickpack_path.file_name().unwrap();
-
-            // clickpack_num_sounds only gets set after rendering where the
-            // clickpack gets loaded
-            if let Some(num_sounds) = self.clickpack_num_sounds {
-                ui.label(format!(
-                    "Selected clickpack: {filename:?}, {num_sounds} sounds"
-                ));
-            } else {
-                ui.label(format!("Selected clickpack: {filename:?}"));
-            }
-        }
-
-        if let Some(clickpack_path) = &self.clickpack_path {
-            ui.collapsing("Overview", |ui| {
-                let bot = &mut self.bot.borrow_mut();
-                let has_clicks = bot.has_clicks();
-                ui.label("General overview of how your clickpack is stored internally");
-                ui.horizontal(|ui| {
-                    ui.label("Path:");
-                    let path_str = clickpack_path.to_str().unwrap_or("invalid Path");
-                    ui.label(RichText::new(path_str.replace('\\', "/")).code());
-                });
-                ui.collapsing("Structure", |ui| {
-                    if has_clicks {
-                        egui::Grid::new("clickpack_structure_grid")
-                            .num_columns(2)
-                            .spacing([40.0, 4.0])
-                            .striped(true)
-                            .show(ui, |ui| {
-                                for clicks in [
-                                    (&bot.clickpack.player1, "player1"),
-                                    (&bot.clickpack.player2, "player2"),
-                                    (&bot.clickpack.left1, "left1"),
-                                    (&bot.clickpack.right1, "right1"),
-                                    (&bot.clickpack.left2, "left2"),
-                                    (&bot.clickpack.right2, "right2"),
-                                ] {
-                                    ui.label(clicks.1);
-                                    ui.label(format!("{} sounds", clicks.0.num_sounds()));
-                                    ui.end_row();
-                                }
-                            });
-                    } else {
-                        ui.label("Structure cannot be displayed since the clickpack is not loaded");
-                        ui.horizontal(|ui| {
-                            ui.label("Load the clickpack to see it:");
-                            if ui.button("Load").clicked() {
-                                self.load_clickpack_no_pitch(&dialog, bot)
+            if conv_settings.volume != 1. {
+                help_text(ui, "Only change volume for this click type", |ui| {
+                    egui::ComboBox::from_label("Change volume for")
+                        .selected_text(conv_settings.change_volume_for.to_string())
+                        .show_ui(ui, |ui| {
+                            use ChangeVolumeFor::*;
+                            for typ in [All, Clicks, Releases] {
+                                ui.selectable_value(
+                                    &mut conv_settings.change_volume_for,
+                                    typ,
+                                    typ.to_string(),
+                                );
                             }
                         });
-                    }
                 });
-            });
-            ui.separator();
-        }
-
-        ui.collapsing("Info", |ui| {
-            ui.label("The clickpack should either have player1, player2, left1, right1, left2 and right2 \
-                    folders inside it, \
-                    or just audio files. You can add hardclicks, clicks, softclicks, microclicks, \
-                    hardreleases, releases, softreleases and microreleases as directories.");
-            ui.label("Optionally you can put a noise.* or whitenoise.* file inside the clickpack \
-                    folder to have an option to overlay background noise.");
-            ui.label("All audio files will be resampled to the selected sample rate.");
-            ui.label("Pitch step is the step between pitch changes in the pitch table. The lower it is, \
-                    the more random the pitch is. A pitch value of 1.0 means no pitch.");
-        });
-        ui.collapsing("Supported audio formats", |ui| {
-            ui.label(
-                "AAC, ADPCM, AIFF, ALAC, CAF, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, \
-                and WebM audio files.",
-            );
-        });
-
-        dialog.show_dialog();
-    }
-
-    fn render_replay(&mut self, dialog: &Modal) {
-        let Some(clickpack_path) = &self.clickpack_path else {
-            return;
-        };
-
-        // load clickpack
-        if let Err(e) = self.bot.borrow_mut().load_clickpack(
-            clickpack_path,
-            if self.conf.pitch_enabled {
-                self.conf.pitch
-            } else {
-                Pitch::NO_PITCH
-            },
-        ) {
-            dialog
-                .dialog()
-                .with_title("Failed to load clickpack")
-                .with_body(e)
-                .with_icon(Icon::Error)
-                .open();
-            return;
-        }
-
-        self.clickpack_num_sounds = Some(self.bot.borrow().clickpack.num_sounds());
-
-        let start = Instant::now();
-        let segment = self.bot.borrow_mut().render_replay(
-            &self.replay,
-            self.conf.noise,
-            self.conf.noise_volume,
-            self.conf.postprocess_type == RenderPostprocessType::Normalize,
-            if !self.conf.expr_text.is_empty() && self.expr_error.is_empty() {
-                self.conf.expr_variable
-            } else {
-                ExprVariable::None
-            },
-            self.conf.pitch_enabled,
-            self.conf.cut_sounds,
-        );
-        let end = start.elapsed();
-        log::info!("rendered in {end:?}");
-
-        let output = self
-            .output
-            .clone()
-            .unwrap_or(PathBuf::from("you_shouldnt_see_this.wav"));
-        let f = std::fs::File::create(output.clone());
-
-        if let Ok(f) = f {
-            if let Err(e) = segment.export_wav(
-                f,
-                self.conf.postprocess_type == RenderPostprocessType::Clamp,
-            ) {
-                dialog
-                    .dialog()
-                    .with_title("Failed to write output file!")
-                    .with_body(format!(
-                        "{e}. Try running the program as administrator \
-                        or selecting a different directory."
-                    ))
-                    .with_icon(Icon::Error)
-                    .open();
             }
-        } else if let Err(e) = f {
-            dialog
-                .dialog()
-                .with_title("Failed to open output file!")
-                .with_body(format!(
-                    "{e}. Try running the program as administrator \
-                    or selecting a different directory."
-                ))
-                .with_icon(Icon::Error)
-                .open();
-        }
 
-        let num_actions = self.replay.actions.len();
-        let filename = output.file_name().unwrap().to_str().unwrap();
+            help_text(ui, "Reverse all audio files", |ui| {
+                ui.checkbox(&mut conv_settings.reverse, "Reverse audio")
+            });
 
-        dialog
-            .dialog()
-            .with_title("Done!")
-            .with_body(format!(
-                "Successfully exported '{filename}' in {end:?} (~{} actions/second)",
-                num_actions as f32 / end.as_secs_f32()
-            ))
-            .with_icon(Icon::Success)
-            .open();
+            help_text(ui, "Rename all audio files to 1.wav, 2.wav, etc.", |ui| {
+                ui.checkbox(&mut conv_settings.rename_files, "Rename files")
+            });
+
+            help_text(
+                ui,
+                "Remove silence from beginning or end of all audio files",
+                |ui| {
+                    egui::ComboBox::from_label("Remove silence")
+                        .selected_text(conv_settings.remove_silence.to_string())
+                        .show_ui(ui, |ui| {
+                            use RemoveSilenceFrom::*;
+                            for typ in [None, Start, End] {
+                                ui.selectable_value(
+                                    &mut conv_settings.remove_silence,
+                                    typ,
+                                    typ.to_string(),
+                                );
+                            }
+                        });
+                },
+            );
+
+            if conv_settings.remove_silence != RemoveSilenceFrom::None {
+                help_text(
+                    ui,
+                    "The volume value at which the sound should start (beta)",
+                    |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Slider::new(
+                                &mut conv_settings.silence_threshold,
+                                0.0..=1.0,
+                            ));
+                            ui.label("Silence threshold (volume)");
+                            if ui
+                                .button("Reset")
+                                .on_hover_text("Reset the silence threshold")
+                                .clicked()
+                            {
+                                conv_settings.silence_threshold = 0.05;
+                            }
+                        });
+                    },
+                );
+            }
+            ui.horizontal(|ui| {
+                if ui
+                    .button("Convert")
+                    .on_hover_text(
+                        "Convert the clickpack.\n\
+                                Note that all files will be exported as .wav",
+                    )
+                    .clicked()
+                {
+                    self.start_file_dialog(FileDialogType::SelectClickpackConvert);
+                }
+            });
+        });
     }
 
     fn show_plot(&mut self, ui: &mut egui::Ui) {
@@ -1875,38 +2398,36 @@ impl App {
     fn show_render_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
         ui.heading("Render");
 
-        ui.label("Select the output audio file. In the dialog, choose an arbitrary name for the new file and click 'Save'.");
+        ui.label("Select the output audio file. In the dialog, choose a name for the new file and click 'Save'.");
 
         let mut dialog = Modal::new(ctx, "render_stage_dialog");
 
         ui.horizontal(|ui| {
             help_text(
                 ui,
-                "Select the output .wav file.\nYou have to click 'Render' to render the output",
+                if cfg!(target_arch = "wasm32") {
+                    "Click 'Render' to generate the audio. You will be prompted to save the file afterwards."
+                } else {
+                    "Select the output .wav file.\nYou have to click 'Render' to render the output"
+                },
                 |ui| {
-                    if ui.button("Select output file").clicked() {
-                        if let Some(path) = FileDialog::new()
-                            .add_filter("Supported audio files", &["wav"])
-                            .save_file()
-                        {
-                            log::info!("selected output file: {path:?}");
-                            self.output = Some(path);
-                        } else {
-                            dialog
-                                .dialog()
-                                .with_title("No output file was selected")
-                                .with_body("Please select an output file")
-                                .with_icon(Icon::Error)
-                                .open();
+                    if cfg!(not(target_arch = "wasm32")) {
+                        if ui.button("Select output file").clicked() {
+                            self.start_file_dialog(FileDialogType::SelectOutput);
                         }
                     }
                 },
             );
-            if let Some(output) = &self.output {
-                ui.label(format!(
-                    "Selected output file: {}",
-                    output.file_name().unwrap().to_str().unwrap()
-                ));
+            if cfg!(not(target_arch = "wasm32")) {
+                if let Some(output) = &self.output {
+                    ui.label(format!(
+                        "Selected output file: {}",
+                        output
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .unwrap_or("Unknown")
+                    ));
+                }
             }
         });
 
@@ -1990,7 +2511,7 @@ impl App {
 
         ui.separator();
 
-        let has_output = self.output.is_some();
+        let has_output = self.output.is_some() || cfg!(target_arch = "wasm32");
         let has_clicks = self.clickpack_path.is_some();
         let has_actions = self.replay.has_actions();
         let is_enabled = has_output && has_clicks && has_actions;
@@ -2001,18 +2522,30 @@ impl App {
         } else {
             "Please load a replay"
         };
+        if let Some(stage) = self.render_stage {
+            ui.horizontal(|ui| {
+                ui.label(format!("{:?}:", stage));
+                ui.add(egui::ProgressBar::new(self.render_progress).show_percentage());
+            });
+        }
+
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(is_enabled, |ui| {
+            ui.add_enabled_ui(is_enabled && self.render_stage.is_none(), |ui| {
+                let button_text = if self.render_stage.is_some() {
+                    "Rendering..."
+                } else {
+                    "Render!"
+                };
                 if ui
-                    .button("Render!")
+                    .button(button_text)
                     .on_disabled_hover_text(error_text)
                     .on_hover_text("Start rendering the replay.\nThis might take some time!")
                     .clicked()
                 {
-                    self.render_replay(&dialog); // TODO: run this on a separate thread
+                    self.start_render();
                 }
             });
-            if !is_enabled {
+            if !is_enabled && self.render_stage.is_none() {
                 ui.label(error_text);
             }
         });
@@ -2020,13 +2553,133 @@ impl App {
         dialog.show_dialog();
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn show_clickpack_db(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
-        self.clickpack_db
-            .show(ui, &ureq_fn, &|| FileDialog::new().pick_folder());
+        self.clickpack_db.show(ui, &ureq_fn, &|| {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                FileDialog::new().pick_folder()
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                None
+            }
+        });
 
         if let Some(select_path) = self.clickpack_db.select_clickpack.take() {
             self.select_clickpack(&select_path);
             // self.show_clickpack_db = false; // close this viewport
         }
     }
+
+    #[cfg(target_arch = "wasm32")]
+    fn show_clickpack_db(&mut self, ctx: &egui::Context) {
+        let mut open = self.show_clickpack_db;
+        egui::Window::new("ClickpackDB")
+            .open(&mut open)
+            .default_size([460.0, 500.0])
+            .show(ctx, |ui| {
+                // we handles it internally on wasm
+                fn dummy_wasm_req(_: &str, _: bool) -> Result<Vec<u8>, String> {
+                    Err("unsupported".to_string())
+                }
+                self.clickpack_db.show(ui, &dummy_wasm_req, &|| None);
+            });
+        self.show_clickpack_db = open;
+
+        if let Some(select_path) = self.clickpack_db.select_clickpack.take() {
+            // find data in DB
+            let mut found_data = None;
+            {
+                let db = self.clickpack_db.db.read().unwrap();
+                for entry in db.entries.values() {
+                    if let egui_clickpack_db::DownloadStatus::Downloaded { path, data, .. } =
+                        &entry.dwn_status
+                    {
+                        if *path == select_path {
+                            found_data = data.clone();
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if let Some(zip_data) = found_data {
+                let load_res = (|| -> Result<()> {
+                    let files = Self::unzip_clickpack(&zip_data)?;
+                    self.select_clickpack_from_bytes(&files);
+                    self.bot
+                        .borrow_mut()
+                        .load_clickpack_from_bytes(&files, self.conf.pitch)?;
+                    Ok(())
+                })();
+
+                if let Err(e) = load_res {
+                    self.error_dialog
+                        .dialog()
+                        .with_title("Failed to load clickpack")
+                        .with_body(e.to_string())
+                        .with_icon(egui_modal::Icon::Error)
+                        .open();
+                } else {
+                    self.clickpack_path = Some(select_path);
+                    self.show_clickpack_db = false;
+                }
+            } else {
+                log::error!(
+                    "Selected clickpack path {:?} not found in in-memory DB or has no data",
+                    select_path
+                );
+            }
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_gui() -> Result<(), eframe::Error> {
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([460.0, 500.0])
+            .with_resizable(false),
+        ..Default::default()
+    };
+    eframe::run_native(
+        "ZCB3",
+        options,
+        Box::new(|_cc| {
+            egui_extras::install_image_loaders(&_cc.egui_ctx);
+            Ok(Box::new(App::default()))
+        }),
+    )
+}
+
+#[cfg(target_arch = "wasm32")]
+pub async fn run_gui_wasm(canvas_id: &str) -> Result<(), eframe::Error> {
+    use wasm_bindgen::JsCast;
+    let document = web_sys::window().unwrap().document().unwrap();
+    let canvas = document.get_element_by_id(canvas_id).unwrap();
+    let canvas = canvas
+        .dyn_into::<web_sys::HtmlCanvasElement>()
+        .map_err(|_| {
+            eframe::Error::AppCreation(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Failed into dyn_into",
+            )))
+        })?;
+    eframe::WebRunner::new()
+        .start(
+            canvas,
+            eframe::WebOptions::default(),
+            Box::new(|_cc| {
+                egui_extras::install_image_loaders(&_cc.egui_ctx);
+                Ok(Box::new(App::default()))
+            }),
+        )
+        .await
+        .map_err(|e| {
+            eframe::Error::AppCreation(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("{:?}", e),
+            )))
+        })
 }
