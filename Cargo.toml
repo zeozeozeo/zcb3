@@ -26,7 +26,7 @@ image = { version = "0.25.6", default-features = false, features = [
     "ico",
     "png",
 ] }
-rfd = "0.15.4"
+rfd = "0.17.1"
 bot = { path = "bot" }
 serde_json = "1"
 log = "0.4"
@@ -36,12 +36,12 @@ egui_extras = { version = "0.33", features = ["image"] }
 rustmatica = "0.2.0"
 egui_plot = "0.34"
 serde = "1"
-ureq = "3.1.0"
+ureq = "3.1.4"
 fastrand = "2.3.0"
 egui_clickpack_db = { git = "https://github.com/zeozeozeo/egui_clickpack_db.git" }
 chrono = "0.4"
 timeago = "0.5.0"
-tempfile = "3.21.0"
+tempfile = "3.24.0"
 
 # getting annoying musl-g++ errors in CI, so fuck custom allocators on musl altogether
 [target.'cfg(not(target_env = "musl"))'.dependencies]

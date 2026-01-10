@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use audioadapter::direct::InterleavedSlice;
+use audioadapter_buffers::direct::InterleavedSlice;
 use rayon::prelude::*;
 use rubato::{
     Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
@@ -382,7 +382,7 @@ impl AudioSegment {
         let mut resampler = Async::<f32>::new_sinc(
             f_ratio,
             1.1, // max_resample_ratio_relative
-            params,
+            &params,
             1024,
             Self::NUM_CHANNELS,
             FixedAsync::Input,

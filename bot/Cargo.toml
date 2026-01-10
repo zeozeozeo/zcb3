@@ -28,8 +28,9 @@ gdr = { path = "gdr" }
 gdr2 = { path = "gdr2" }
 fastrand = "2.3.0"
 flate2 = "1.1.2"
-slc_oxide = "0.1.0"
-rubato = { git = "https://github.com/HEnquist/rubato", branch = "adapter_v2" }
-audioadapter = "0.4.0"
+slc_oxide = "0.2.0"
+rubato = "1.0.0"
+audioadapter = "2.0.0"
 indexmap = "2.10.0"
 tcm = "0.1.0"
+audioadapter-buffers = "2.0.0"
