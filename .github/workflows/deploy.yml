@@ -12,6 +12,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Install Trunk
@@ -20,7 +21,9 @@ jobs:
           version: "latest"
 
       - name: Build with Trunk
-        run: trunk build --release
+        run: |
+          rustup target add wasm32-unknown-unknown --toolchain $(rustc --version | cut -d' ' -f2)
+          trunk build --release
 
       - name: Deploy to GitHub Pages 🚀
         uses: JamesIves/github-pages-deploy-action@v4

@@ -424,7 +424,19 @@ impl ClickpackDb {
 
         #[cfg(target_arch = "wasm32")]
         wasm_bindgen_futures::spawn_local(async move {
-            match reqwest::get(&entry.url).await {
+            // cors hack
+            let url = if entry
+                .url
+                .starts_with("https://github.com/zeozeozeo/clickpack-db/raw/main/out/")
+            {
+                format!(
+                    "https://db.zeo.lol/out/{}",
+                    &entry.url["https://github.com/zeozeozeo/clickpack-db/raw/main/out/".len()..]
+                )
+            } else {
+                entry.url.clone()
+            };
+            match reqwest::get(&url).await {
                 Ok(resp) => match resp.bytes().await {
                     Ok(body) => Self::handle_download_entry(
                         entry.clone(),
