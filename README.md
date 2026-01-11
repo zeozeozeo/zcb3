@@ -2,11 +2,11 @@
 
 Free and easy to use Geometry Dash clickbot.
 
-![ZCB 3](https://github.com/zeozeozeo/zcb3/blob/master/screenshots/0.png?raw=true)
+![ZCB 3](https://github.com/zeozeozeo/zcb3/blob/main/screenshots/0.png?raw=true)
 
-![Volume expressions](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/1.png?raw=true)
+![Volume expressions](https://github.com/zeozeozeo/zcb3/raw/main/screenshots/1.png?raw=true)
 
-![ClickpackDB](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/2.png?raw=true)
+![ClickpackDB](https://github.com/zeozeozeo/zcb3/raw/main/screenshots/2.png?raw=true)
 
 # [Join the discord server (click me)](https://discord.gg/b4kBQyXYZT)
 
@@ -61,7 +61,7 @@ Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
 A collection of 400+ clickpacks sourced from the [ZCB Discord](https://discord.com/invite/b4kBQyXYZT), accessible from within ZCB.
 
-![ClickpackDB window](https://github.com/zeozeozeo/zcb3/raw/master/screenshots/3.png?raw=true)
+![ClickpackDB window](https://github.com/zeozeozeo/zcb3/raw/main/screenshots/3.png?raw=true)
 
 - To access ClickpackDB, navigate to:
 
