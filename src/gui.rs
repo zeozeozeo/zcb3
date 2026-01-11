@@ -433,6 +433,17 @@ impl eframe::App for App {
                 ui.add_space(2.0);
                 ui.horizontal(|ui| {
                     ui.style_mut().spacing.item_spacing.x = 5.;
+                    #[cfg(target_arch = "wasm32")]
+                    if ui
+                        .button("Download HTML")
+                        .on_hover_text("Download ZCB3 as a single offline HTML file")
+                        .clicked()
+                    {
+                        let _ = spawn_promise(async {
+                            let _ = crate::bundler::bundle_and_download().await;
+                        });
+                    }
+
                     if self.stage != self.stage.previous()
                         && ui
                             .button("Back")

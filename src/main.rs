@@ -1,9 +1,11 @@
 mod gui;
 mod utils;
 
+#[cfg(target_arch = "wasm32")]
+mod bundler;
+
 #[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, ValueEnum};
-
 
 #[cfg(all(not(target_env = "musl"), not(target_arch = "wasm32")))]
 // Added this cfg for BEMalloc
