@@ -3,11 +3,45 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <meta
-            name="description"
-            content="The most feature-complete Geometry Dash clickbot"
-        />
         <title>ZCB3</title>
+        <meta content="ZCB3" property="og:title" />
+        <meta
+            content="The most feature-complete Geometry Dash clickbot"
+            property="og:description"
+        />
+        <meta content="https://zcb3.zeo.lol/" property="og:url" />
+        <meta content="#2596BE" data-react-helmet="true" name="theme-color" />
+
+        
+
+        <link
+            rel="icon"
+            type="image/png"
+            href="/media/favicon-96x96.png"
+            sizes="96x96"
+        />
+        <link rel="icon" type="image/svg+xml" href="/media/favicon.svg" />
+        <link rel="shortcut icon" href="/media/favicon.ico" />
+        <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href="/media/apple-touch-icon.png"
+        />
+        <link
+            rel="icon"
+            type="image/png"
+            href="/media/favicon-96x96.png"
+            sizes="96x96"
+        />
+        <link rel="icon" type="image/svg+xml" href="/media/favicon.svg" />
+        <link rel="shortcut icon" href="/media/favicon.ico" />
+        <link
+            rel="apple-touch-icon"
+            sizes="180x180"
+            href="/media/apple-touch-icon.png"
+        />
+        <meta name="apple-mobile-web-app-title" content="ZCB3" />
+        <link rel="manifest" href="/media/site.webmanifest" />
 
         <style>
             html,
@@ -55,7 +89,7 @@
                 height: 100%;
             }
         </style>
-    <link rel="modulepreload" href="/zcb3-166caa14d09a4be3.js" crossorigin="anonymous" integrity="sha384-tPmMRbUb/FngwPfbOevR4dz/eaQItamcsuC13HDtLvHeKayIT3wElcvgzTPnuXVl"><link rel="preload" href="/zcb3-166caa14d09a4be3_bg.wasm" crossorigin="anonymous" integrity="sha384-3CTLwUhFFavYsxdfgSAXqwcngTGTlQFpD/ju3h5DY5XEa3nViU/Z+tYlDTwyqHvH" as="fetch" type="application/wasm"></head>
+    <link rel="modulepreload" href="/zcb3-7d356019f061ed15.js" crossorigin="anonymous" integrity="sha384-eiRIe7fyuMYNNBoP5cVChrxKn1N9Hc67A5aPuTZfgbJu4Ha7ZR8qgNi0TeR64o+x"><link rel="preload" href="/zcb3-7d356019f061ed15_bg.wasm" crossorigin="anonymous" integrity="sha384-1PDZaL5FzKJWmEO9hscePagLvwiykRB0MiscaNpTlydLAnrUXN7mHdvkfozoqFVa" as="fetch" type="application/wasm"></head>
 
     <body>
         <div id="loading">
@@ -64,22 +98,10 @@
         </div>
 
         <canvas id="main_canvas"></canvas>
-
-        <script>
-            // Hide loading screen once WASM is loaded
-            window.addEventListener("load", function () {
-                setTimeout(function () {
-                    const loading = document.getElementById("loading");
-                    if (loading) {
-                        loading.style.display = "none";
-                    }
-                }, 100);
-            });
-        </script>
     
 <script type="module">
-import init, * as bindings from '/zcb3-166caa14d09a4be3.js';
-const wasm = await init({ module_or_path: '/zcb3-166caa14d09a4be3_bg.wasm' });
+import init, * as bindings from '/zcb3-7d356019f061ed15.js';
+const wasm = await init({ module_or_path: '/zcb3-7d356019f061ed15_bg.wasm' });
 
 
 window.wasmBindings = bindings;
