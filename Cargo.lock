@@ -634,6 +634,7 @@ dependencies = [
  "symphonia",
  "tcm",
  "ybot_fmt",
+ "zip",
 ]
 
 [[package]]

@@ -611,6 +611,47 @@ impl Clickpack {
 
     pub fn load_from_bytes(files: &[(String, Vec<u8>)], pitch: Pitch, sample_rate: u32) -> Self {
         let mut clickpack = Clickpack::default();
+
+        // if all files start with the same directory, strip it
+        let mut common_prefix = None;
+        for (name, _) in files {
+            let path = Path::new(name);
+            let mut components = path.components();
+            if let Some(std::path::Component::Normal(first)) = components.next() {
+                let first = first.to_string_lossy().to_string();
+                if let Some(prefix) = &common_prefix {
+                    if *prefix != first {
+                        common_prefix = None;
+                        break;
+                    }
+                } else {
+                    common_prefix = Some(first);
+                }
+            } else {
+                common_prefix = None;
+                break;
+            }
+        }
+
+        let files: Vec<(String, Vec<u8>)> = if let Some(prefix) = common_prefix {
+            log::debug!("stripping common prefix {prefix:?} from files");
+            files
+                .iter()
+                .map(|(name, bytes)| {
+                    (
+                        Path::new(name)
+                            .strip_prefix(&prefix)
+                            .unwrap()
+                            .to_string_lossy()
+                            .to_string(),
+                        bytes.clone(),
+                    )
+                })
+                .collect()
+        } else {
+            files.to_vec()
+        };
+
         for (i, dirname) in CLICKPACK_DIRNAMES.iter().enumerate() {
             // filter files that are in this directory
             let sub_files: Vec<_> = files
@@ -630,6 +671,12 @@ impl Clickpack {
                 clickpack[i] = PlayerClicks::from_bytes(&sub_files, pitch, sample_rate);
             }
         }
+
+        if !clickpack.has_clicks() {
+            log::warn!("no player directories found, assuming single player");
+            clickpack[0] = PlayerClicks::from_bytes(&files, pitch, sample_rate);
+        }
+
         clickpack
     }
 }
@@ -1315,5 +1362,108 @@ impl Bot {
         }
 
         Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn convert_clickpack_to_bytes(
+        &self,
+        settings: &ClickpackConversionSettings,
+    ) -> Result<Vec<u8>> {
+        if !self.has_clicks() {
+            anyhow::bail!("no clickpack is loaded");
+        }
+
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let options = zip::write::SimpleFileOptions::default()
+                .compression_method(zip::CompressionMethod::Deflated);
+
+            // helper to convert a player
+            let convert_player = |zip: &mut zip::ZipWriter<_>,
+                                  player: &PlayerClicks,
+                                  base_path: &str|
+             -> Result<()> {
+                for (dir, clicks, is_clicks) in [
+                    ("hardclicks", &player.hardclicks, true),
+                    ("hardreleases", &player.hardreleases, false),
+                    ("clicks", &player.clicks, true),
+                    ("releases", &player.releases, false),
+                    ("softclicks", &player.softclicks, true),
+                    ("softreleases", &player.softreleases, false),
+                    ("microclicks", &player.microclicks, true),
+                    ("microreleases", &player.microreleases, false),
+                ] {
+                    if clicks.is_empty() {
+                        continue;
+                    }
+
+                    let dir_path = format!("{base_path}/{dir}");
+                    zip.add_directory(&dir_path, options)?;
+
+                    for (i, click) in clicks.iter().enumerate() {
+                        let mut click = click.clone();
+
+                        let change_volume = match settings.change_volume_for {
+                            ChangeVolumeFor::All => true,
+                            ChangeVolumeFor::Clicks => is_clicks,
+                            ChangeVolumeFor::Releases => !is_clicks,
+                        };
+                        if change_volume && settings.volume != 1. {
+                            click.set_volume(settings.volume);
+                        }
+
+                        if settings.reverse {
+                            click.reverse();
+                        }
+
+                        if settings.silence_threshold != 0. {
+                            match settings.remove_silence {
+                                RemoveSilenceFrom::Start => {
+                                    click.remove_silence_from_start(settings.silence_threshold)
+                                }
+                                RemoveSilenceFrom::End => {
+                                    click.remove_silence_from_end(settings.silence_threshold)
+                                }
+                                _ => {}
+                            }
+                        }
+
+                        let filename = if settings.rename_files {
+                            format!("{}.wav", i + 1)
+                        } else {
+                            format!(
+                                "{}.wav",
+                                if let Some(stem) = Path::new(&click.filename).file_stem() {
+                                    stem.to_string_lossy().to_string()
+                                } else {
+                                    click.filename.clone()
+                                }
+                            )
+                        };
+                        let full_path = format!("{dir_path}/{filename}");
+                        zip.start_file(full_path, options)?;
+
+                        use std::io::Write;
+                        let mut wav_buf = std::io::Cursor::new(Vec::new());
+                        click.export_wav(&mut wav_buf, false)?;
+                        zip.write_all(wav_buf.get_ref())?;
+                    }
+                }
+                Ok(())
+            };
+
+            for (i, dirname) in CLICKPACK_DIRNAMES.iter().enumerate() {
+                let sounds = &self.clickpack[i];
+                if !sounds.has_clicks() {
+                    continue;
+                }
+                zip.add_directory(*dirname, options)?;
+                convert_player(&mut zip, sounds, dirname)?;
+            }
+
+            zip.finish()?;
+        }
+        Ok(buf)
     }
 }

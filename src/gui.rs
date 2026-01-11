@@ -372,6 +372,15 @@ fn drag_value<Num: emath::Numeric>(
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(window) = web_sys::window() {
+            if let Some(document) = window.document() {
+                if let Some(element) = document.get_element_by_id("loading") {
+                    element.remove();
+                }
+            }
+        }
+
         if let Some(rx) = &self.progress_receiver {
             while let Ok(progress) = rx.try_recv() {
                 self.render_progress = progress;
@@ -647,6 +656,7 @@ impl App {
                     {
                         if let Some(handle) = rfd::AsyncFileDialog::new()
                             .add_filter("Config file", &["json"])
+                            .set_file_name("config.json")
                             .save_file()
                             .await
                         {
@@ -916,7 +926,7 @@ impl App {
                         }
                         #[cfg(target_arch = "wasm32")]
                         FileDialogResult::DataList(files) => {
-                            self.convert_clickpack_from_bytes(&files, dialog);
+                            self.convert_clickpack_from_bytes(&files);
                         }
                         _ => {
                             dialog
@@ -1335,13 +1345,51 @@ impl App {
     }
 
     #[cfg(target_arch = "wasm32")]
-    fn convert_clickpack_from_bytes(&mut self, _files: &[(String, Vec<u8>)], dialog: &Modal) {
-        dialog
-            .dialog()
-            .with_title("Not supported")
-            .with_body("Clickpack conversion is not yet supported on WASM")
-            .with_icon(Icon::Error)
-            .open();
+    fn convert_clickpack_from_bytes(&mut self, files: &[(String, Vec<u8>)]) {
+        log::info!("converting clickpack from bytes, {} files", files.len());
+        if self.render_promise.is_some() {
+            log::warn!("render promise already exists, ignoring conversion request");
+            return;
+        }
+
+        let mut bot = bot::Bot::new(self.conf.sample_rate);
+        let config = self.conf.clone();
+        let files = files.to_vec();
+
+        let (_tx, rx) = std::sync::mpsc::channel();
+        self.progress_receiver = Some(rx);
+        self.render_stage = Some(RenderStage::RenderingReplay);
+
+        self.render_promise = Some(spawn_promise(async move {
+            let timer = crate::utils::Timer::new();
+
+            if let Err(e) = bot.load_clickpack_from_bytes(&files, bot::Pitch::NO_PITCH) {
+                return RenderResult::Error(format!("Failed to load clickpack: {}", e), bot);
+            }
+
+            match bot.convert_clickpack_to_bytes(&config.conversion_settings) {
+                Ok(bytes) => {
+                    let file_name = "converted_clickpack.zip";
+                    if let Some(handle) = rfd::AsyncFileDialog::new()
+                        .set_file_name(file_name)
+                        .save_file()
+                        .await
+                    {
+                        if let Err(e) = handle.write(&bytes).await {
+                            return RenderResult::Error(format!("Failed to save file: {}", e), bot);
+                        }
+                    }
+
+                    RenderResult::Success(
+                        bot::AudioSegment::default(),
+                        timer.elapsed(),
+                        PathBuf::new(),
+                        bot,
+                    )
+                }
+                Err(e) => RenderResult::Error(format!("Failed to convert clickpack: {}", e), bot),
+            }
+        }));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1996,9 +2044,14 @@ impl App {
 
     #[cfg(target_arch = "wasm32")]
     fn unzip_clickpack(data: &[u8]) -> Result<Vec<(String, Vec<u8>)>> {
+        log::info!("unzipping clickpack, size: {} bytes", data.len());
         let cursor = std::io::Cursor::new(data);
-        let mut archive = zip::ZipArchive::new(cursor)?;
+        let mut archive = zip::ZipArchive::new(cursor).map_err(|e| {
+            log::error!("failed to open zip archive: {e}");
+            e
+        })?;
         let mut list = Vec::new();
+        log::info!("zip archive has {} entries", archive.len());
         for i in 0..archive.len() {
             if let Ok(mut file) = archive.by_index(i) {
                 if file.is_file() {
