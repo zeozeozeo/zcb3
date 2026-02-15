@@ -65,6 +65,8 @@ enum FileDialogType {
     SelectClickpackConvert,
     SelectOutput,
     ExportMidi,
+    SelectConvertInput,
+    SelectConvertOutput(&'static str), // extension
 }
 
 #[derive(Debug, Clone)]
@@ -123,6 +125,7 @@ enum Stage {
     SelectReplay,
     SelectClickpack,
     Render,
+    Convert,
     // AutoCutter,
     Donate,
     Secret,
@@ -133,6 +136,7 @@ impl Stage {
         match self {
             Self::SelectClickpack => Self::SelectReplay,
             Self::Render => Self::SelectClickpack,
+            Self::Convert => Self::SelectReplay,
             _ => self,
         }
     }
@@ -281,6 +285,10 @@ struct App {
     progress_receiver: Option<std::sync::mpsc::Receiver<f32>>,
     #[cfg(target_arch = "wasm32")]
     error_dialog: egui_modal::Modal,
+    // Convert tab fields
+    convert_to_format: ReplayType,
+    convert_replay_data: Option<Vec<u8>>,
+    convert_replay_name: String,
 }
 
 impl Default for App {
@@ -321,6 +329,9 @@ impl Default for App {
             output_handle: None,
             #[cfg(target_arch = "wasm32")]
             clickpack_files: None,
+            convert_to_format: ReplayType::Silicate2,
+            convert_replay_data: None,
+            convert_replay_name: String::new(),
         }
     }
 }
@@ -415,6 +426,7 @@ impl eframe::App for App {
                 ui.selectable_value(&mut self.stage, Stage::SelectReplay, "Replay");
                 ui.selectable_value(&mut self.stage, Stage::SelectClickpack, "Clickpack");
                 ui.selectable_value(&mut self.stage, Stage::Render, "Render");
+                ui.selectable_value(&mut self.stage, Stage::Convert, "Convert");
                 // ui.selectable_value(&mut self.stage, Stage::AutoCutter, "AutoCutter");
                 ui.selectable_value(&mut self.stage, Stage::Donate, "Donate");
                 if self.stage == Stage::Secret {
@@ -506,6 +518,7 @@ impl eframe::App for App {
                     Stage::SelectReplay => self.show_replay_stage(ctx, ui),
                     Stage::SelectClickpack => self.show_select_clickpack_stage(ctx, ui),
                     Stage::Render => self.show_render_stage(ctx, ui),
+                    Stage::Convert => self.show_convert_stage(ctx, ui),
                     // Stage::AutoCutter => self.autocutter.show_ui(ctx, ui),
                     Stage::Donate => self.show_pwease_donate_stage(ctx, ui),
                     Stage::Secret => self.show_secret_stage(ctx, ui),
@@ -798,6 +811,51 @@ impl App {
                     }
                     FileDialogResult::Cancelled
                 }
+                FileDialogType::SelectConvertInput => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("Macro file", bot::Replay::SUPPORTED_EXTENSIONS)
+                            .pick_file()
+                        {
+                            return FileDialogResult::File(path);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("Macro file", bot::Replay::SUPPORTED_EXTENSIONS)
+                            .pick_file()
+                            .await
+                        {
+                            let data = handle.read().await;
+                            return FileDialogResult::Data(handle.file_name(), data);
+                        }
+                    }
+                    FileDialogResult::Cancelled
+                }
+                FileDialogType::SelectConvertOutput(extension) => {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        if let Some(path) = FileDialog::new()
+                            .add_filter("Macro file", &[extension])
+                            .save_file()
+                        {
+                            return FileDialogResult::File(path);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        if let Some(handle) = rfd::AsyncFileDialog::new()
+                            .add_filter("Macro file", &[extension])
+                            .save_file()
+                            .await
+                        {
+                            return FileDialogResult::Handle(SendWrapper(handle));
+                        }
+                    }
+                    FileDialogResult::Cancelled
+                }
             }
         });
 
@@ -987,6 +1045,68 @@ impl App {
                                 wasm_bindgen_futures::spawn_local(async move {
                                     let _ = handle.0.write(&data).await;
                                 });
+                            }
+                        }
+                        _ => {
+                            dialog
+                                .dialog()
+                                .with_title("No file was selected")
+                                .with_body("Please select a file")
+                                .with_icon(Icon::Error)
+                                .open();
+                        }
+                    },
+                    FileDialogType::SelectConvertInput => match result {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        FileDialogResult::File(path) => {
+                            if let Err(e) = self.load_convert_input(&path) {
+                                dialog
+                                    .dialog()
+                                    .with_title("Failed to load macro")
+                                    .with_body(e.to_string())
+                                    .with_icon(Icon::Error)
+                                    .open();
+                            }
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        FileDialogResult::Data(name, bytes) => {
+                            self.convert_replay_name = name;
+                            self.convert_replay_data = Some(bytes);
+                        }
+                        _ => {
+                            dialog
+                                .dialog()
+                                .with_title("No file was selected")
+                                .with_body("Please select a file")
+                                .with_icon(Icon::Error)
+                                .open();
+                        }
+                    },
+                    FileDialogType::SelectConvertOutput(_) => match result {
+                        #[cfg(not(target_arch = "wasm32"))]
+                        FileDialogResult::File(path) => {
+                            if let Err(e) = self.do_convert_macro(&path, dialog) {
+                                dialog
+                                    .dialog()
+                                    .with_title("Failed to convert macro")
+                                    .with_body(e.to_string())
+                                    .with_icon(Icon::Error)
+                                    .open();
+                            }
+                        }
+                        #[cfg(target_arch = "wasm32")]
+                        FileDialogResult::Handle(handle) => {
+                            if let Ok(data) = self.do_convert_macro_bytes() {
+                                wasm_bindgen_futures::spawn_local(async move {
+                                    let _ = handle.0.write(&data).await;
+                                });
+                            } else {
+                                dialog
+                                    .dialog()
+                                    .with_title("Failed to convert macro")
+                                    .with_body("Error converting macro")
+                                    .with_icon(Icon::Error)
+                                    .open();
                             }
                         }
                         _ => {
@@ -1728,6 +1848,166 @@ impl App {
 
     fn load_config(&mut self) {
         self.start_file_dialog(FileDialogType::LoadConfig);
+    }
+
+    fn show_convert_stage(&mut self, _ctx: &egui::Context, ui: &mut egui::Ui) {
+        ui.heading("Convert macro");
+        ui.label("Select an input replay file and choose the output format to convert it.");
+
+        ui.horizontal(|ui| {
+            if ui.button("Select input").clicked() {
+                self.start_file_dialog(FileDialogType::SelectConvertInput);
+            }
+
+            if let Some(name) = self
+                .convert_replay_data
+                .as_ref()
+                .map(|_| &self.convert_replay_name)
+            {
+                ui.horizontal(|ui| {
+                    ui.label("Loaded file:");
+                    ui.label(RichText::new(name).code());
+                });
+            }
+        });
+
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt("convert_output_format")
+                .selected_text(self.convert_to_format.display_name())
+                .show_ui(ui, |ui| {
+                    let variants = [
+                        ReplayType::TasBot,
+                        ReplayType::Silicate,
+                        ReplayType::Silicate2,
+                        ReplayType::Silicate3,
+                        ReplayType::ReplayBot,
+                        ReplayType::Ddhor,
+                        ReplayType::Txt,
+                        ReplayType::Ybot2,
+                        ReplayType::Zbot,
+                        ReplayType::Kdbot,
+                        ReplayType::Mhr,
+                        ReplayType::MhrBin,
+                        ReplayType::Echo,
+                        ReplayType::Amethyst,
+                        ReplayType::Gdmo,
+                        ReplayType::Rush,
+                        ReplayType::ReplayEngine,
+                        ReplayType::Xbot,
+                        ReplayType::XdBot,
+                        ReplayType::Gdr,
+                        ReplayType::Qbot,
+                        ReplayType::Rbot,
+                        ReplayType::Zephyrus,
+                        ReplayType::ReplayEngine2,
+                        ReplayType::ReplayEngine3,
+                        ReplayType::Gdr2,
+                        ReplayType::UvBot,
+                        ReplayType::TcBot,
+                        ReplayType::Ybotf,
+                        ReplayType::Obot,
+                    ];
+
+                    for variant in variants {
+                        ui.selectable_value(
+                            &mut self.convert_to_format,
+                            variant,
+                            variant.display_name(),
+                        );
+                    }
+                });
+
+            ui.add_enabled_ui(self.convert_replay_data.is_some(), |ui| {
+                if ui
+                    .button("Convert")
+                    .on_hover_text(
+                        "In the dialog, input a name for the converted replay and press \"Save\"",
+                    )
+                    .on_disabled_hover_text("Please load a replay first")
+                    .clicked()
+                {
+                    self.start_file_dialog(FileDialogType::SelectConvertOutput(
+                        self.convert_to_format.extension(),
+                    ));
+                }
+            });
+        });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_convert_input(&mut self, path: &PathBuf) -> Result<()> {
+        self.convert_replay_data = Some(std::fs::read(path)?);
+        self.convert_replay_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string();
+        Ok(())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn do_convert_macro(&mut self, output_path: &PathBuf, dialog: &Modal) -> Result<()> {
+        use bot::Writer;
+
+        let data = self
+            .convert_replay_data
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No input file loaded"))?;
+
+        // Parse the input replay
+        let replay = Replay::build()
+            .with_timings(self.conf.timings)
+            .with_vol_settings(self.conf.vol_settings)
+            .parse(
+                ReplayType::guess_format(&self.convert_replay_name)?,
+                std::io::Cursor::new(data),
+            )?;
+
+        // Create writer and write to output format
+        let writer = Writer::new(replay);
+        let file = File::create(output_path)?;
+        let buf_writer = BufWriter::new(file);
+
+        writer.write(self.convert_to_format, buf_writer)?;
+
+        dialog
+            .dialog()
+            .with_title("Success!")
+            .with_body(format!(
+                "Successfully converted macro to {:?}",
+                self.convert_to_format
+            ))
+            .with_icon(Icon::Success)
+            .open();
+
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn do_convert_macro_bytes(&mut self) -> Result<Vec<u8>> {
+        use bot::Writer;
+        use std::io::Cursor;
+
+        let data = self
+            .convert_replay_data
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No input file loaded"))?;
+
+        // Parse the input replay
+        let replay = Replay::build()
+            .with_timings(self.conf.timings)
+            .with_vol_settings(self.conf.vol_settings)
+            .parse(
+                ReplayType::guess_format(&self.convert_replay_name)?,
+                Cursor::new(data),
+            )?;
+
+        // Create writer and write to output format
+        let writer = Writer::new(replay);
+        let cursor = Cursor::new(Vec::new());
+
+        let cursor = writer.write(self.convert_to_format, cursor)?;
+        Ok(cursor.into_inner())
     }
 
     fn show_secret_stage(&mut self, ctx: &egui::Context, ui: &mut egui::Ui) {
@@ -2475,11 +2755,10 @@ impl App {
                     "Select the output .wav file.\nYou have to click 'Render' to render the output"
                 },
                 |ui| {
-                    if cfg!(not(target_arch = "wasm32")) {
-                        if ui.button("Select output file").clicked() {
+                    if cfg!(not(target_arch = "wasm32"))
+                        && ui.button("Select output file").clicked() {
                             self.start_file_dialog(FileDialogType::SelectOutput);
                         }
-                    }
                 },
             );
             if cfg!(not(target_arch = "wasm32")) {

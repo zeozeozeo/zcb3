@@ -1,11 +1,13 @@
 mod audio;
 mod bot;
 mod parser;
+mod writer;
 
 pub use audio::*;
 pub use bot::*;
 pub use fasteval2;
 pub use parser::*;
+pub use writer::*;
 
 use std::ops::RangeInclusive;
 

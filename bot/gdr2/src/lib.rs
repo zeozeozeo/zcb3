@@ -3,12 +3,12 @@ use std::path::Path;
 
 mod binary;
 mod error;
-mod physics;
+pub mod physics;
 mod tests;
 
 pub use binary::{BinaryReader, BinaryWriter};
 pub use error::{Error, Result};
-use physics::PhysicsData;
+pub use physics::PhysicsData;
 
 const GDR_MAGIC: &[u8; 3] = b"GDR";
 const GDR_VERSION: i32 = 2;

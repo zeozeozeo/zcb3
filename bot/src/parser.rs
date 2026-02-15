@@ -1,4 +1,4 @@
-use crate::{f32_range, Timings, VolumeSettings};
+use crate::{f32_range, Timings, VolumeSettings, Writer};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use ijson::IValue;
@@ -348,7 +348,7 @@ pub struct Replay {
     swap_players: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ReplayType {
     /// .mhr.json files
     Mhr,
@@ -414,6 +414,80 @@ pub enum ReplayType {
     UvBot,
     // TCBot .tcm files
     TcBot,
+}
+
+impl ReplayType {
+    pub fn extension(self) -> &'static str {
+        match self {
+            ReplayType::Mhr => "mhr.json",
+            ReplayType::TasBot => "json",
+            ReplayType::Zbot => "zbf",
+            ReplayType::Obot => "replay",
+            ReplayType::Ybotf => "ybf",
+            ReplayType::MhrBin => "mhr",
+            ReplayType::Echo => "echo",
+            ReplayType::Amethyst => "thyst",
+            ReplayType::OsuReplay => "osr",
+            ReplayType::Gdmo => "macro",
+            ReplayType::ReplayBot => "replay",
+            ReplayType::Rush => "rsh",
+            ReplayType::Kdbot => "kd",
+            ReplayType::Txt => "txt",
+            ReplayType::ReplayEngine => "re",
+            ReplayType::Ddhor => "ddhor",
+            ReplayType::Xbot => "xbot",
+            ReplayType::Ybot2 => "ybot",
+            ReplayType::XdBot => "xd",
+            ReplayType::Gdr => "gdr",
+            ReplayType::Qbot => "qb",
+            ReplayType::Rbot => "rbot",
+            ReplayType::Zephyrus => "zr",
+            ReplayType::ReplayEngine2 => "re2",
+            ReplayType::ReplayEngine3 => "re3",
+            ReplayType::Silicate => "slc",
+            ReplayType::Silicate2 => "slc2",
+            ReplayType::Silicate3 => "slc3",
+            ReplayType::Gdr2 => "gdr2",
+            ReplayType::UvBot => "uv",
+            ReplayType::TcBot => "tcm",
+        }
+    }
+
+    pub fn display_name(self) -> &'static str {
+        match self {
+            ReplayType::Mhr => "Mhr (.mhr.json)",
+            ReplayType::TasBot => "TasBot (.json)",
+            ReplayType::Zbot => "Zbot (.zbf)",
+            ReplayType::Obot => "Obot (.replay)",
+            ReplayType::Ybotf => "yBot Frame (.ybf)",
+            ReplayType::MhrBin => "Mhr (Binary) (.mhr)",
+            ReplayType::Echo => "Echo (.echo)",
+            ReplayType::Amethyst => "Amethyst (.thyst)",
+            ReplayType::OsuReplay => "Osu! (.osr)",
+            ReplayType::Gdmo => "Gdmo (.macro)",
+            ReplayType::ReplayBot => "ReplayBot (.replay)",
+            ReplayType::Rush => "Rush (.rsh)",
+            ReplayType::Kdbot => "Kdbot (.kd)",
+            ReplayType::Txt => "Txt (.txt)",
+            ReplayType::ReplayEngine => "ReplayEngine (.re)",
+            ReplayType::Ddhor => "Ddhor (.ddhor)",
+            ReplayType::Xbot => "Xbot (.xbot)",
+            ReplayType::Ybot2 => "Ybot2 (.ybot)",
+            ReplayType::XdBot => "XdBot (.xd)",
+            ReplayType::Gdr => "Gdr (.gdr)",
+            ReplayType::Qbot => "Qbot (.qb)",
+            ReplayType::Rbot => "Rbot (.rbot)",
+            ReplayType::Zephyrus => "Zephyrus (.zr)",
+            ReplayType::ReplayEngine2 => "ReplayEngine2 (.re2)",
+            ReplayType::ReplayEngine3 => "ReplayEngine3 (.re3)",
+            ReplayType::Silicate => "Silicate (.slc)",
+            ReplayType::Silicate2 => "Silicate 2 (.slc2)",
+            ReplayType::Silicate3 => "Silicate 3 (.slc3)",
+            ReplayType::Gdr2 => "Gdr2 (.gdr2)",
+            ReplayType::UvBot => "UvBot (.uv)",
+            ReplayType::TcBot => "TcBot (.tcm)",
+        }
+    }
 }
 
 impl ReplayType {
@@ -558,6 +632,10 @@ impl Replay {
     #[inline]
     pub fn has_actions(&self) -> bool {
         !self.actions.is_empty()
+    }
+
+    pub fn to_writer(&self) -> Writer {
+        Writer::new(self.clone())
     }
 
     pub fn parse<R: Read + Seek>(mut self, typ: ReplayType, reader: R) -> Result<Self> {
@@ -2536,6 +2614,13 @@ impl Replay {
             if header_buf == [0x53, 0x49, 0x4C, 0x4C] {
                 return self.parse_slc2(reader);
             } else if header_buf == *b"SLC3" {
+                let mut full_header = [0u8; 8];
+                if reader.read_exact(&mut full_header[4..]).is_ok() {
+                    if &full_header == b"SLC3RPLY" {
+                        return self.parse_slc3(reader);
+                    }
+                }
+                reader.seek(SeekFrom::Start(0))?;
                 return self.parse_slc3(reader);
             }
         }
@@ -2876,6 +2961,42 @@ impl Replay {
         Ok(())
     }
 
+    fn parse_slc3<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        use slc_oxide::{input::InputData, replay::Replay};
+
+        let replay = Replay::<()>::read(&mut reader).map_err(|e| anyhow::anyhow!("{}", e))?;
+
+        self.fps = self.get_fps(replay.tps);
+        log::info!(
+            "slc3 (oxide): tps: {}, inputs: {}",
+            replay.tps,
+            replay.inputs.len()
+        );
+
+        for input in &replay.inputs {
+            let time = input.frame as f64 / self.fps;
+            match &input.data {
+                InputData::TPS(tps) => {
+                    self.fps = self.get_fps(*tps);
+                    self.fps_change(*tps);
+                }
+                InputData::Player(player) => {
+                    let button = Button::from_button_idx(player.button as _, player.hold);
+                    if player.player_2 {
+                        self.process_action_p2(time, button, input.frame as _);
+                        self.extended_p2(player.hold, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+                    } else {
+                        self.process_action_p1(time, button, input.frame as _);
+                        self.extended_p1(player.hold, input.frame as _, 0.0, 0.0, 0.0, 0.0);
+                    }
+                }
+                _ => (),
+            }
+        }
+
+        Ok(())
+    }
+
     /* gato
     fn parse_gatobot<R: Read>(&mut self, mut reader: R) -> Result<()> {
         use base64::{engine::general_purpose, Engine as _};
@@ -3144,317 +3265,6 @@ impl Replay {
                 _ => (),
             }
         }
-        Ok(())
-    }
-
-    fn parse_slc3<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
-        use byteorder::{LittleEndian, ReadBytesExt};
-
-        // header
-        let mut header = [0u8; 8];
-        reader.read_exact(&mut header)?;
-        if header != *b"SLC3RPLY" {
-            anyhow::bail!("invalid SLC3 header");
-        }
-
-        // metadata
-        let meta_size = reader.read_u16::<LittleEndian>()?;
-        if meta_size != 64 {
-            anyhow::bail!("invalid metadata size, expected 64, got {}", meta_size);
-        }
-
-        let tps = reader.read_f64::<LittleEndian>()?;
-        let seed = reader.read_u64::<LittleEndian>()?;
-        let version = reader.read_u32::<LittleEndian>()?;
-        let build = reader.read_u32::<LittleEndian>()?;
-
-        // 40 byte padding for some reason
-        reader.seek(SeekFrom::Current(40))?;
-
-        self.fps = self.get_fps(tps);
-        log::info!(
-            "SLC3 replay: version {}, build {}, {} TPS, seed {}",
-            version,
-            build,
-            tps,
-            seed
-        );
-
-        // preparation for handling the footer
-        let file_size = reader.seek(SeekFrom::End(0))?;
-        reader.seek(SeekFrom::Start(8 + 2 + 64))?; // header + meta_size + metadata
-
-        let mut actions = Vec::new();
-        let mut current_frame = 0u64;
-
-        // read atoms until we reach the footer position
-        while reader.stream_position()? < file_size - 1 {
-            let atom_id = reader.read_u32::<LittleEndian>()?;
-            let atom_size = reader.read_u64::<LittleEndian>()?;
-
-            match atom_id {
-                1 => {
-                    // action atom
-                    self.parse_slc3_action_atom(
-                        &mut reader,
-                        atom_size,
-                        &mut actions,
-                        &mut current_frame,
-                    )?;
-                }
-                _ => {
-                    // unknown atom
-                    reader.seek(SeekFrom::Current(atom_size as i64))?;
-                }
-            }
-        }
-
-        // verify footer
-        let footer_byte = reader.read_u8()?;
-        if footer_byte != 0xCC {
-            anyhow::bail!("invalid SLC3 footer");
-        }
-
-        // process actions
-        self.process_slc3_actions(actions)?;
-
-        Ok(())
-    }
-
-    fn parse_slc3_action_atom<R: Read + Seek>(
-        &mut self,
-        reader: &mut R,
-        atom_size: u64,
-        actions: &mut Vec<(u64, Button, bool)>, // (frame, button, is_player2)
-        current_frame: &mut u64,
-    ) -> Result<()> {
-        let start_pos = reader.stream_position()?;
-
-        let num_actions = reader.read_u64::<LittleEndian>()?;
-
-        let mut actions_collected = 0;
-        while actions_collected < num_actions {
-            let section_header = reader.read_u16::<LittleEndian>()?;
-            let section_type = section_header >> 14;
-
-            match section_type {
-                0 => {
-                    // input section
-                    let delta_size = ((section_header >> 12) & 0b11) as usize;
-                    let count_exp = (section_header >> 8) & 0b1111;
-                    let count = 1u64 << count_exp;
-
-                    let byte_size = 1 << delta_size;
-
-                    for _ in 0..count {
-                        let mut state_bytes = [0u8; 8];
-                        reader.read_exact(&mut state_bytes[0..byte_size])?;
-                        let state = u64::from_le_bytes(state_bytes);
-
-                        let delta = state >> 4;
-                        let button_val = (state >> 2) & 0b11;
-                        let is_player2 = (state & 0b10) != 0;
-                        let holding = (state & 0b1) != 0;
-
-                        *current_frame += delta;
-
-                        match button_val {
-                            0 => {
-                                // Swift (press + release in one frame)
-                                actions.push((*current_frame, Button::from_down(true), is_player2));
-                                actions.push((
-                                    *current_frame,
-                                    Button::from_down(false),
-                                    is_player2,
-                                ));
-                                actions_collected += 2;
-                            }
-                            1 => {
-                                actions.push((
-                                    *current_frame,
-                                    Button::from_down(holding),
-                                    is_player2,
-                                ));
-                                actions_collected += 1;
-                            }
-                            2 => {
-                                actions.push((
-                                    *current_frame,
-                                    Button::from_left_down(holding),
-                                    is_player2,
-                                ));
-                                actions_collected += 1;
-                            }
-                            3 => {
-                                actions.push((
-                                    *current_frame,
-                                    Button::from_right_down(holding),
-                                    is_player2,
-                                ));
-                                actions_collected += 1;
-                            }
-                            _ => unreachable!(),
-                        }
-                    }
-                }
-                1 => {
-                    // repeat section
-                    let delta_size = ((section_header >> 12) & 0b11) as usize;
-                    let count_exp = (section_header >> 8) & 0b1111;
-                    let repeats_exp = (section_header >> 3) & 0b11111;
-
-                    let count = 1u64 << count_exp;
-                    let repeats = 1u64 << repeats_exp;
-                    let byte_size = 1 << delta_size;
-
-                    // read the pattern
-                    let mut pattern = Vec::with_capacity(count as usize);
-                    for _ in 0..count {
-                        let mut state_bytes = [0u8; 8];
-                        reader.read_exact(&mut state_bytes[0..byte_size])?;
-                        let state = u64::from_le_bytes(state_bytes);
-                        pattern.push(state);
-                    }
-
-                    // apply the pattern repeatedly
-                    for _ in 0..repeats {
-                        for &state in &pattern {
-                            let delta = state >> 4;
-                            let button_val = (state >> 2) & 0b11;
-                            let is_player2 = (state & 0b10) != 0;
-                            let holding = (state & 0b1) != 0;
-
-                            *current_frame += delta;
-
-                            match button_val {
-                                0 => {
-                                    // Swift
-                                    actions.push((
-                                        *current_frame,
-                                        Button::from_down(true),
-                                        is_player2,
-                                    ));
-                                    actions.push((
-                                        *current_frame,
-                                        Button::from_down(false),
-                                        is_player2,
-                                    ));
-                                    actions_collected += 2;
-                                }
-                                1 => {
-                                    actions.push((
-                                        *current_frame,
-                                        Button::from_down(holding),
-                                        is_player2,
-                                    ));
-                                    actions_collected += 1;
-                                }
-                                2 => {
-                                    actions.push((
-                                        *current_frame,
-                                        Button::from_left_down(holding),
-                                        is_player2,
-                                    ));
-                                    actions_collected += 1;
-                                }
-                                3 => {
-                                    actions.push((
-                                        *current_frame,
-                                        Button::from_right_down(holding),
-                                        is_player2,
-                                    ));
-                                    actions_collected += 1;
-                                }
-                                _ => unreachable!(),
-                            }
-                        }
-                    }
-                }
-                2 => {
-                    // special section
-                    let special_type = (section_header >> 10) & 0b1111;
-                    let delta_size = ((section_header >> 8) & 0b11) as usize;
-
-                    let byte_size = 1 << delta_size;
-                    let mut delta_bytes = [0u8; 8];
-                    reader.read_exact(&mut delta_bytes[0..byte_size])?;
-                    let delta = u64::from_le_bytes(delta_bytes);
-
-                    *current_frame += delta;
-
-                    match special_type {
-                        0 => {
-                            // Restart
-                            if self.discard_deaths {
-                                actions.clear();
-                                actions_collected = 0;
-                            }
-                            let _seed = reader.read_u64::<LittleEndian>()?;
-                            actions_collected += 1;
-                        }
-                        1 => {
-                            // RestartFull
-                            if self.discard_deaths {
-                                actions.clear();
-                                actions_collected = 0;
-                            }
-                            let _seed = reader.read_u64::<LittleEndian>()?;
-                            actions_collected += 1;
-                        }
-                        2 => {
-                            // Death
-                            if self.discard_deaths {
-                                actions.clear();
-                                actions_collected = 0;
-                            }
-                            let _seed = reader.read_u64::<LittleEndian>()?;
-                            actions_collected += 1;
-                        }
-                        3 => {
-                            // TPS
-                            let new_tps = reader.read_f64::<LittleEndian>()?;
-                            self.fps = self.get_fps(new_tps);
-                            self.fps_change(new_tps);
-                            actions_collected += 1;
-                        }
-                        _ => {
-                            anyhow::bail!("unknown SLC3 special type: {}", special_type);
-                        }
-                    }
-                }
-                _ => {
-                    anyhow::bail!("unknown SLC3 section type: {}", section_type);
-                }
-            }
-        }
-
-        // verify we read the exact atom size
-        let end_pos = reader.stream_position()?;
-        let bytes_read = end_pos - start_pos;
-        if bytes_read != atom_size {
-            anyhow::bail!(
-                "SLC3 action atom size mismatch: expected {}, read {}",
-                atom_size,
-                bytes_read
-            );
-        }
-
-        Ok(())
-    }
-
-    fn process_slc3_actions(&mut self, actions: Vec<(u64, Button, bool)>) -> Result<()> {
-        for (frame, button, is_player2) in actions {
-            let time = frame as f64 / self.fps;
-
-            if is_player2 {
-                self.process_action_p2(time, button, frame as u32);
-                self.extended_p2(button.is_down(), frame as u32, 0.0, 0.0, 0.0, 0.0);
-            } else {
-                self.process_action_p1(time, button, frame as u32);
-                self.extended_p1(button.is_down(), frame as u32, 0.0, 0.0, 0.0, 0.0);
-            }
-        }
-
         Ok(())
     }
 }

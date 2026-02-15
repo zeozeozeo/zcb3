@@ -1,6 +1,6 @@
 [package]
 name = "zcb3"
-version = "3.6.5"
+version = "3.6.6"
 edition = "2021"
 authors = ["zeozeozeo"]
 build = "build.rs"
@@ -49,6 +49,7 @@ chrono = "0.4"
 timeago = "0.5.0"
 tempfile = "3.24.0"
 poll-promise = { version = "0.3", features = ["tokio"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 
 # WASM-specific dependencies
 [target.'cfg(target_arch = "wasm32")'.dependencies]

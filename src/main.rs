@@ -189,6 +189,10 @@ fn main() {
                 hide_console_window();
             }
 
+            // Create tokio runtime for async file dialogs
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            let _guard = rt.enter();
+
             gui::run_gui().unwrap();
             egui_clickpack_db::cleanup();
         }
