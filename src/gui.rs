@@ -803,6 +803,7 @@ impl App {
                     {
                         if let Some(handle) = rfd::AsyncFileDialog::new()
                             .add_filter("MIDI file", &["mid"])
+                            .set_file_name("converted.mid")
                             .save_file()
                             .await
                         {
@@ -848,6 +849,7 @@ impl App {
                     {
                         if let Some(handle) = rfd::AsyncFileDialog::new()
                             .add_filter("Macro file", &[extension])
+                            .set_file_name(format!("converted.{extension}"))
                             .save_file()
                             .await
                         {
