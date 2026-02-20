@@ -78,7 +78,7 @@ A collection of 700+ clickpacks sourced from the [ZCB Discord](https://discord.c
 
 Or use the web version: [click me](https://zeozeozeo.github.io/clickpack-db)
 
-# Clickpack format
+## Clickpack format
 
 ZCB supports AAC, ADPCM, AIFF, ALAC, CAF, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files. (thanks to [Symphonia](https://github.com/pdeljanov/Symphonia))
 
