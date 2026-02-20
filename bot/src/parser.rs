@@ -301,7 +301,7 @@ impl Action {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Player {
     #[default]
     One,
@@ -1421,6 +1421,7 @@ impl Replay {
     // {action time}...
     // ```
     fn parse_amethyst<R: Read>(&mut self, mut reader: R) -> Result<()> {
+        self.fps = self.get_fps(240.0);
         let mut data = String::new();
         reader.read_to_string(&mut data)?;
         let mut lines = data.split('\n');
@@ -1978,8 +1979,7 @@ impl Replay {
         }
         let is_new = action_data_size == size_of::<ActionDataNew>();
 
-        // hash action datas
-        let mut actions = HashMap::new();
+        let mut actions: HashMap<(u32, bool), ActionDataNew> = HashMap::new();
         for _ in 0..num_actions {
             let action = if is_new {
                 let mut buf = [0; size_of::<ActionDataNew>()];
@@ -1996,15 +1996,16 @@ impl Replay {
                     player2: action.player2,
                 }
             };
-            actions.insert(action.frame, action);
+            actions.insert((action.frame, action.player2), action);
         }
 
         for frame_data in frame_datas {
-            // to get the button we need to lookup the action hashmap
-            let action = actions.get(&frame_data.frame).unwrap_or(&DEFAULT_ACTION);
             let time = frame_data.frame as f64 / self.fps;
+            let action = actions
+                .get(&(frame_data.frame, frame_data.player2))
+                .unwrap_or(&DEFAULT_ACTION);
             let button = Button::from_button_idx(action.button, action.hold);
-            if action.player2 {
+            if frame_data.player2 {
                 self.process_action_p2(time, button, frame_data.frame);
                 self.extended_p2(
                     action.hold,
@@ -2784,22 +2785,21 @@ impl Replay {
 
             let time = frame as f64 / self.fps;
 
-            let down = if let Some(ac) = p1_action {
+            if let Some(ac) = p1_action {
                 let button = Button::from_button_idx(ac.button, ac.down);
                 self.process_action_p1(time, button, frame);
-                ac.down
-            } else if let Some(ac) = p2_action {
+            }
+            if let Some(ac) = p2_action {
                 let button = Button::from_button_idx(ac.button, ac.down);
                 self.process_action_p2(time, button, frame);
-                ac.down
-            } else {
-                false
-            };
+            }
 
-            // add extended
+            let p1_down = p1_action.as_ref().map(|a| a.down).unwrap_or(false);
+            let p2_down = p2_action.as_ref().map(|a| a.down).unwrap_or(false);
+
             if let Some(p1_frame) = p1_frame {
                 self.extended_p1(
-                    down,
+                    p1_down,
                     frame,
                     p1_frame.x,
                     p1_frame.y,
@@ -2809,7 +2809,7 @@ impl Replay {
             }
             if let Some(p2_frame) = p2_frame {
                 self.extended_p2(
-                    down,
+                    p2_down,
                     frame,
                     p2_frame.x,
                     p2_frame.y,
@@ -3064,13 +3064,13 @@ impl Replay {
         }
 
         #[derive(Default)]
-        struct Action {
-            input: Option<InputAction>,
+        struct FrameData {
+            inputs: Vec<InputAction>,
             p1_physics: Option<PhysicsAction>,
             p2_physics: Option<PhysicsAction>,
         }
 
-        let mut actions: IndexMap<u64, Action> = IndexMap::new();
+        let mut frame_data: IndexMap<u64, FrameData> = IndexMap::new();
 
         let input_actions = reader.read_i32::<LittleEndian>()?;
         let physics_p1_actions = reader.read_i32::<LittleEndian>()?;
@@ -3094,17 +3094,11 @@ impl Replay {
                 },
             };
 
-            if let Some(action) = actions.get_mut(&frame) {
-                action.input = Some(input_action);
-            } else {
-                actions.insert(
-                    frame,
-                    Action {
-                        input: Some(input_action),
-                        ..Default::default()
-                    },
-                );
-            }
+            frame_data
+                .entry(frame)
+                .or_default()
+                .inputs
+                .push(input_action);
         }
 
         for _ in 0..physics_p1_actions {
@@ -3121,17 +3115,7 @@ impl Replay {
                 y_velocity: y_velocity,
             };
 
-            if let Some(action) = actions.get_mut(&frame) {
-                action.p1_physics = Some(physics_action);
-            } else {
-                actions.insert(
-                    frame,
-                    Action {
-                        p1_physics: Some(physics_action),
-                        ..Default::default()
-                    },
-                );
-            }
+            frame_data.entry(frame).or_default().p1_physics = Some(physics_action);
         }
 
         for _ in 0..physics_p2_actions {
@@ -3141,24 +3125,14 @@ impl Replay {
             let rotation = reader.read_f32::<LittleEndian>()?;
             let y_velocity = reader.read_f64::<LittleEndian>()?;
 
-            let physic_action = PhysicsAction {
+            let physics_action = PhysicsAction {
                 x: x,
                 y: y,
                 rotation: rotation,
                 y_velocity: y_velocity,
             };
 
-            if let Some(action) = actions.get_mut(&frame) {
-                action.p2_physics = Some(physic_action);
-            } else {
-                actions.insert(
-                    frame,
-                    Action {
-                        p2_physics: Some(physic_action),
-                        ..Default::default()
-                    },
-                );
-            }
+            frame_data.entry(frame).or_default().p2_physics = Some(physics_action);
         }
 
         reader.read_exact(&mut magic)?;
@@ -3168,29 +3142,18 @@ impl Replay {
             ))
         }
 
-        actions.sort_by(|k1, _, k2, _| k1.cmp(&k2));
+        frame_data.sort_by(|k1, _, k2, _| k1.cmp(&k2));
 
-        for (frame, action) in actions {
-            let Action {
-                input,
+        for (frame, data) in frame_data {
+            let FrameData {
+                inputs,
                 p1_physics,
                 p2_physics,
-            } = action;
+            } = data;
 
             let time = frame as f64 / self.fps;
 
-            let down = if let Some(ref input) = input {
-                match input.button {
-                    Button::Push => true,
-                    Button::LeftPush => true,
-                    Button::RightPush => true,
-                    _ => false,
-                }
-            } else {
-                false
-            };
-
-            if let Some(input) = input {
+            for input in inputs {
                 if !input.player_2 {
                     self.process_action_p1(time, input.button, frame as _);
                 } else {
@@ -3198,9 +3161,22 @@ impl Replay {
                 }
             }
 
+            let p1_down = self
+                .actions
+                .iter()
+                .find(|a| a.frame == frame as u32 && a.player == Player::One)
+                .map(|a| a.click.is_click())
+                .unwrap_or(false);
+            let p2_down = self
+                .actions
+                .iter()
+                .find(|a| a.frame == frame as u32 && a.player == Player::Two)
+                .map(|a| a.click.is_click())
+                .unwrap_or(false);
+
             if let Some(p1_physics) = p1_physics {
                 self.extended_p1(
-                    down,
+                    p1_down,
                     frame as _,
                     p1_physics.x,
                     p1_physics.y,
@@ -3211,7 +3187,7 @@ impl Replay {
 
             if let Some(p2_physics) = p2_physics {
                 self.extended_p2(
-                    down,
+                    p2_down,
                     frame as _,
                     p2_physics.x,
                     p2_physics.y,

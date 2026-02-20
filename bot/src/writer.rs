@@ -473,7 +473,7 @@ impl Writer {
         for action in &self.actions {
             writer.write_i32::<LittleEndian>(action.frame as i32)?;
             writer.write_u8(if action.down { 1 } else { 0 })?;
-            writer.write_u8(if action.player == Player::One { 1 } else { 0 })?;
+            writer.write_u8(if action.player == Player::Two { 1 } else { 0 })?;
         }
 
         Ok(writer)
@@ -503,29 +503,25 @@ impl Writer {
 
         writer.write_f32::<LittleEndian>(self.fps as f32)?;
 
-        // Build frame data map
-        let mut frame_data_map: IndexMap<u32, FrameData> = IndexMap::new();
+        let mut frame_data_list: Vec<FrameData> = Vec::new();
         for action in &self.actions {
-            if let Some(ext) = self.get_extended(action.frame, action.player == Player::Two) {
-                frame_data_map.insert(
-                    action.frame,
-                    FrameData {
-                        frame: action.frame,
-                        x: ext.x,
-                        y: ext.y,
-                        rot: ext.rot,
-                        y_accel: ext.y_accel as f64,
-                        player2: action.player == Player::Two,
-                    },
-                );
+            let player2 = action.player == Player::Two;
+            if let Some(ext) = self.get_extended(action.frame, player2) {
+                frame_data_list.push(FrameData {
+                    frame: action.frame,
+                    x: ext.x,
+                    y: ext.y,
+                    rot: ext.rot,
+                    y_accel: ext.y_accel as f64,
+                    player2,
+                });
             }
         }
 
-        writer.write_u32::<LittleEndian>(frame_data_map.len() as u32)?;
+        writer.write_u32::<LittleEndian>(frame_data_list.len() as u32)?;
         writer.write_u32::<LittleEndian>(self.actions.len() as u32)?;
 
-        // Write frame data
-        for (_, fd) in &frame_data_map {
+        for fd in &frame_data_list {
             let bytes = unsafe {
                 std::slice::from_raw_parts(
                     fd as *const FrameData as *const u8,
@@ -535,7 +531,6 @@ impl Writer {
             writer.write_all(bytes)?;
         }
 
-        // Write action data
         #[repr(C)]
         struct ActionDataNew {
             frame: u32,
@@ -725,8 +720,7 @@ impl Writer {
         }
 
         #[derive(Serialize)]
-        #[serde(untagged)]
-
+        #[allow(dead_code)]
         enum Action {
             Button {
                 #[serde(rename = "is_p2")]
@@ -734,7 +728,7 @@ impl Writer {
                 push: bool,
                 button: PlayerButton,
             },
-            //FPS(f32),
+            FPS(f32),
         }
 
         #[derive(Serialize)]
@@ -1093,25 +1087,14 @@ impl Writer {
         writer.write_u8(2)?; // version
         writer.write_f32::<LittleEndian>(self.fps as f32)?;
 
-        // Build action map
-        let mut actions: IndexMap<u64, UvBotAction> = IndexMap::new();
-
-        for action in &self.actions {
-            let frame = action.frame as u64;
-            let flags =
-                (action.down as u8) | ((1u8) << 1) | ((action.player == Player::Two) as u8) << 2;
-
-            actions.insert(
-                frame,
-                UvBotAction {
-                    input: Some((frame, flags)),
-                    p1_physics: None,
-                    p2_physics: None,
-                },
-            );
+        #[derive(Default)]
+        struct FrameData {
+            p1_physics: Option<UvBotPhysics>,
+            p2_physics: Option<UvBotPhysics>,
         }
 
-        // Add physics data
+        let mut frame_data: IndexMap<u64, FrameData> = IndexMap::new();
+
         for action in &self.actions {
             let frame = action.frame as u64;
             let ext = self.get_extended(action.frame, action.player == Player::Two);
@@ -1123,25 +1106,24 @@ impl Writer {
                     y_velocity: e.y_accel as f64,
                 };
 
-                if let Some(act) = actions.get_mut(&frame) {
-                    if action.player == Player::One {
-                        act.p1_physics = Some(physics);
-                    } else {
-                        act.p2_physics = Some(physics);
-                    }
+                let entry = frame_data.entry(frame).or_default();
+                if action.player == Player::One {
+                    entry.p1_physics = Some(physics);
+                } else {
+                    entry.p2_physics = Some(physics);
                 }
             }
         }
 
-        let input_count = actions.len() as i32;
+        let input_count = self.actions.len() as i32;
         let mut p1_phys_count = 0i32;
         let mut p2_phys_count = 0i32;
 
-        for (_, a) in &actions {
-            if a.p1_physics.is_some() {
+        for (_, fd) in &frame_data {
+            if fd.p1_physics.is_some() {
                 p1_phys_count += 1;
             }
-            if a.p2_physics.is_some() {
+            if fd.p2_physics.is_some() {
                 p2_phys_count += 1;
             }
         }
@@ -1150,18 +1132,17 @@ impl Writer {
         writer.write_i32::<LittleEndian>(p1_phys_count)?;
         writer.write_i32::<LittleEndian>(p2_phys_count)?;
 
-        // Write inputs
-        for (_, action) in &actions {
-            if let Some((frame, flags)) = action.input {
-                writer.write_u64::<LittleEndian>(frame)?;
-                writer.write_u8(flags)?;
-            }
+        for action in &self.actions {
+            let frame = action.frame as u64;
+            let flags =
+                (action.down as u8) | ((1u8) << 1) | ((action.player == Player::Two) as u8) << 2;
+            writer.write_u64::<LittleEndian>(frame)?;
+            writer.write_u8(flags)?;
         }
 
-        // Write p1 physics
-        for (_, action) in &actions {
-            if let Some(ref phys) = action.p1_physics {
-                writer.write_u64::<LittleEndian>(action.input.unwrap().0)?;
+        for (frame, fd) in &frame_data {
+            if let Some(ref phys) = fd.p1_physics {
+                writer.write_u64::<LittleEndian>(*frame)?;
                 writer.write_f32::<LittleEndian>(phys.x)?;
                 writer.write_f32::<LittleEndian>(phys.y)?;
                 writer.write_f32::<LittleEndian>(phys.rotation)?;
@@ -1169,10 +1150,9 @@ impl Writer {
             }
         }
 
-        // Write p2 physics
-        for (_, action) in &actions {
-            if let Some(ref phys) = action.p2_physics {
-                writer.write_u64::<LittleEndian>(action.input.unwrap().0)?;
+        for (frame, fd) in &frame_data {
+            if let Some(ref phys) = fd.p2_physics {
+                writer.write_u64::<LittleEndian>(*frame)?;
                 writer.write_f32::<LittleEndian>(phys.x)?;
                 writer.write_f32::<LittleEndian>(phys.y)?;
                 writer.write_f32::<LittleEndian>(phys.rotation)?;
@@ -1198,7 +1178,7 @@ impl Writer {
                 input: Input::Vanilla(VanillaInput {
                     button: PlayerButton::Jump,
                     push: action.down,
-                    player2: action.player == Player::Two,
+                    player2: action.player == Player::One,
                 }),
             })
             .collect();
@@ -1228,12 +1208,6 @@ struct FrameDataRe3 {
     rot: f32,
     y_accel: f64,
     player2: bool,
-}
-
-struct UvBotAction {
-    input: Option<(u64, u8)>,
-    p1_physics: Option<UvBotPhysics>,
-    p2_physics: Option<UvBotPhysics>,
 }
 
 struct UvBotPhysics {
@@ -1375,18 +1349,45 @@ mod tests {
             parsed.fps
         );
 
-        let orig_frames: Vec<u32> = original.actions.iter().map(|a| a.frame).collect();
-        let parsed_frames: Vec<u32> = parsed.actions.iter().map(|a| a.frame).collect();
-
         assert_eq!(
-            orig_frames.len(),
-            parsed_frames.len(),
-            "Action count mismatch for {:?}",
-            typ
+            original.actions.len(),
+            parsed.actions.len(),
+            "Action count mismatch for {:?}: expected {}, got {}",
+            typ,
+            original.actions.len(),
+            parsed.actions.len()
         );
+
+        let mut orig_sorted: Vec<_> = original.actions.iter().collect();
+        let mut parsed_sorted: Vec<_> = parsed.actions.iter().collect();
+        orig_sorted.sort_by_key(|a| (a.frame, a.player));
+        parsed_sorted.sort_by_key(|a| (a.frame, a.player));
+
+        for (i, (orig, parsed_action)) in orig_sorted.iter().zip(parsed_sorted.iter()).enumerate() {
+            if orig.frame != parsed_action.frame
+                && (orig.frame as f32 - parsed_action.frame as f32).abs() >= 1.0
+            {
+                panic!(
+                    "Frame mismatch for {:?} at index {}: expected {}, got {}",
+                    typ, i, orig.frame, parsed_action.frame
+                );
+            }
+            if orig.player != parsed_action.player {
+                panic!(
+                    "Player mismatch for {:?} at index {} frame {}: expected {:?}, got {:?}",
+                    typ, i, orig.frame, orig.player, parsed_action.player
+                );
+            }
+            if orig.click.is_click() != parsed_action.click.is_click() {
+                panic!(
+                    "Click state mismatch for {:?} at index {} frame {}",
+                    typ, i, orig.frame
+                );
+            }
+        }
     }
 
-    fn test_roundtrip_lenient(typ: ReplayType, _ext: &str) {
+    fn test_roundtrip_no_fps(typ: ReplayType, _ext: &str) {
         let original = create_test_replay();
         let writer = original.to_writer();
 
@@ -1396,10 +1397,11 @@ mod tests {
             .expect(&format!("Failed to write {:?}", typ));
 
         let data = buffer.into_inner();
-        println!("{:?} ({} bytes) - lenient", typ, data.len());
+        println!("{:?} ({} bytes)", typ, data.len());
 
         let parsed = Replay::build()
             .with_extended(true)
+            .with_override_fps(Some(original.fps))
             .parse(typ, Cursor::new(&data))
             .expect(&format!("Failed to parse {:?}", typ));
 
@@ -1408,6 +1410,43 @@ mod tests {
             "No actions parsed for {:?}",
             typ
         );
+
+        assert_eq!(
+            original.actions.len(),
+            parsed.actions.len(),
+            "Action count mismatch for {:?}: expected {}, got {}",
+            typ,
+            original.actions.len(),
+            parsed.actions.len()
+        );
+
+        let mut orig_sorted: Vec<_> = original.actions.iter().collect();
+        let mut parsed_sorted: Vec<_> = parsed.actions.iter().collect();
+        orig_sorted.sort_by_key(|a| (a.frame, a.player));
+        parsed_sorted.sort_by_key(|a| (a.frame, a.player));
+
+        for (i, (orig, parsed_action)) in orig_sorted.iter().zip(parsed_sorted.iter()).enumerate() {
+            if orig.frame != parsed_action.frame
+                && (orig.frame as f32 - parsed_action.frame as f32).abs() >= 1.0
+            {
+                panic!(
+                    "Frame mismatch for {:?} at index {}: expected {}, got {}",
+                    typ, i, orig.frame, parsed_action.frame
+                );
+            }
+            if orig.player != parsed_action.player {
+                panic!(
+                    "Player mismatch for {:?} at index {} frame {}: expected {:?}, got {:?}",
+                    typ, i, orig.frame, orig.player, parsed_action.player
+                );
+            }
+            if orig.click.is_click() != parsed_action.click.is_click() {
+                panic!(
+                    "Click state mismatch for {:?} at index {} frame {}",
+                    typ, i, orig.frame
+                );
+            }
+        }
     }
 
     #[test]
@@ -1507,7 +1546,7 @@ mod tests {
 
     #[test]
     fn test_gdmo() {
-        test_roundtrip_lenient(ReplayType::Gdmo, "macro");
+        test_roundtrip(ReplayType::Gdmo, "macro");
     }
 
     #[test]
@@ -1569,46 +1608,46 @@ mod tests {
 
     #[test]
     fn test_mhrbin() {
-        test_roundtrip_lenient(ReplayType::MhrBin, "mhr");
+        test_roundtrip(ReplayType::MhrBin, "mhr");
     }
 
     #[test]
     fn test_amethyst() {
-        test_roundtrip_lenient(ReplayType::Amethyst, "thyst");
+        test_roundtrip_no_fps(ReplayType::Amethyst, "thyst");
     }
 
     #[test]
     fn test_kdbot() {
-        test_roundtrip_lenient(ReplayType::Kdbot, "kd");
+        test_roundtrip(ReplayType::Kdbot, "kd");
     }
 
     #[test]
     fn test_ddhor() {
-        test_roundtrip_lenient(ReplayType::Ddhor, "ddhor");
+        test_roundtrip(ReplayType::Ddhor, "ddhor");
     }
 
     #[test]
     fn test_re() {
-        test_roundtrip_lenient(ReplayType::ReplayEngine, "re");
+        test_roundtrip(ReplayType::ReplayEngine, "re");
     }
 
     #[test]
     fn test_qbot() {
-        test_roundtrip_lenient(ReplayType::Qbot, "qb");
+        test_roundtrip(ReplayType::Qbot, "qb");
     }
 
     #[test]
     fn test_re3() {
-        test_roundtrip_lenient(ReplayType::ReplayEngine3, "re3");
+        test_roundtrip(ReplayType::ReplayEngine3, "re3");
     }
 
     #[test]
     fn test_uvbot() {
-        test_roundtrip_lenient(ReplayType::UvBot, "uv");
+        test_roundtrip(ReplayType::UvBot, "uv");
     }
 
     #[test]
     fn test_tcm() {
-        test_roundtrip_lenient(ReplayType::TcBot, "tcm");
+        test_roundtrip(ReplayType::TcBot, "tcm");
     }
 }
