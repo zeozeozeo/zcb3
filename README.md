@@ -10,17 +10,17 @@ Free and easy to use Geometry Dash clickbot.
 
 ![ClickpackDB](https://github.com/zeozeozeo/zcb3/raw/main/screenshots/2.png?raw=true)
 
-# [Join the discord server (click me)](https://discord.gg/b4kBQyXYZT)
+## [Join the discord server (click me)](https://discord.gg/b4kBQyXYZT)
 
 ZCB is also available on web (both desktop & mobile)! [click me](https://zeozeozeo.github.io/zcb3)
 
-# ZCB Live
+## ZCB Live
 
 ZCB also has an in-game version that can be downloaded from the Geode Index: https://geode-sdk.org/mods/zeozeozeo.zcblive
 
 ![ZCB Live](/screenshots/live.png)
 
-# Supported replay formats
+## Supported replay formats
 
 - Mega Hack Replay JSON (.mhr.json)
 - Mega Hack Replay Binary (.mhr)
@@ -61,7 +61,7 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
-# [ClickpackDB](https://zeozeozeo.github.io/clickpack-db)
+## [ClickpackDB](https://zeozeozeo.github.io/clickpack-db)
 
 A collection of 700+ clickpacks sourced from the [ZCB Discord](https://discord.com/invite/b4kBQyXYZT), accessible from within ZCB.
 
@@ -90,18 +90,18 @@ A clickpack can have `player1`, `player2`, `left1`, `right1`, `left2` and `right
 
 The `noise.*` file can also be named `whitenoise.*` and it can be also be located in the `player1` or `player2` folder. The clickbot prefers the root clickpack directory rather than player1/player2 folders to search for this file.
 
-# Commandline arguments
+### Commandline arguments
 
 To see commandline arguments in your terminal, run `zcb --help`
 
 If you run without any arguments, the GUI will start.
 
-# Building
+## Building
 
 To build, clone the repository (or download zip and extract) and run `cargo build` for debug builds and `cargo build --release` for release builds.
 
 Use `trunk build --release` for web builds.
 
-# License
+## License
 
 Public domain (The Unlicense)
