@@ -1960,6 +1960,7 @@ impl App {
         let replay = Replay::build()
             .with_timings(self.conf.timings)
             .with_vol_settings(self.conf.vol_settings)
+            .with_extended(true)
             .parse(
                 ReplayType::guess_format(&self.convert_replay_name)?,
                 std::io::Cursor::new(data),
@@ -1999,6 +2000,7 @@ impl App {
         let replay = Replay::build()
             .with_timings(self.conf.timings)
             .with_vol_settings(self.conf.vol_settings)
+            .with_extended(true)
             .parse(
                 ReplayType::guess_format(&self.convert_replay_name)?,
                 Cursor::new(data),
