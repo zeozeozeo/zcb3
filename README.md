@@ -61,9 +61,9 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
-# ClickpackDB
+# [ClickpackDB](https://zeozeozeo.github.io/clickpack-db)
 
-A collection of 400+ clickpacks sourced from the [ZCB Discord](https://discord.com/invite/b4kBQyXYZT), accessible from within ZCB.
+A collection of 700+ clickpacks sourced from the [ZCB Discord](https://discord.com/invite/b4kBQyXYZT), accessible from within ZCB.
 
 ![ClickpackDB window](https://github.com/zeozeozeo/zcb3/raw/main/screenshots/3.png?raw=true)
 
@@ -75,6 +75,8 @@ A collection of 400+ clickpacks sourced from the [ZCB Discord](https://discord.c
 - Download and select clickpacks by clicking <kbd>Select</kbd>
 - Use the searchbar and the <kbd>Tags…</kbd> combobox to filter clickpacks
 - Hover on icons next to clickpack names to see their meaning
+
+Or use the web version: [click me](https://zeozeozeo.github.io/clickpack-db)
 
 # Clickpack format
 
@@ -94,25 +96,11 @@ To see commandline arguments in your terminal, run `zcb --help`
 
 If you run without any arguments, the GUI will start.
 
-# TODO
-
-- Translate to other languages
-- Progress bar for rendering audio and loading clickpacks
-
 # Building
 
 To build, clone the repository (or download zip and extract) and run `cargo build` for debug builds and `cargo build --release` for release builds.
 
-# Donations
-
-ZCB is completely free software. Donations are welcome! :D
-
-By donating you'll get a custom role on the Discord server (dm me) and early access to some of my future mods.
-
-- [Ko-fi](https://ko-fi.com/zeozeozeo)
-- [Liberapay](https://liberapay.com/zeo)
-- [DonationAlerts](https://donationalerts.com/r/zeozeozeo)
-- [Boosty](https://boosty.to/zeozeozeo/donate)
+Use `trunk build --release` for web builds.
 
 # License
 
