@@ -80,6 +80,8 @@ Or use the web version: [click me](https://zeozeozeo.github.io/clickpack-db)
 
 ## Clickpack format
 
+Automatic clickpack maker: [packmak](https://zeozeozeo.github.io/clickpack-db/packmak/)
+
 ZCB supports AAC, ADPCM, AIFF, ALAC, CAF, FLAC, MKV, MP1, MP2, MP3, MP4, OGG, Vorbis, WAV, and WebM audio files. (thanks to [Symphonia](https://github.com/pdeljanov/Symphonia))
 
 ### Clickpack folder
@@ -90,7 +92,60 @@ A clickpack can have `player1`, `player2`, `left1`, `right1`, `left2` and `right
 
 The `noise.*` file can also be named `whitenoise.*` and it can be also be located in the `player1` or `player2` folder. The clickbot prefers the root clickpack directory rather than player1/player2 folders to search for this file.
 
-### Commandline arguments
+### Example
+
+Clickpacks can be structured like this:
+```
+.
+└── Clickpack/
+    ├── player1/
+    │   ├── hardclicks
+    │   ├── hardreleases
+    │   ├── clicks/
+    │   │   ├── 1.ogg
+    │   │   └── 2.ogg
+    │   ├── releases/
+    │   │   ├── 1.ogg
+    │   │   └── 2.ogg
+    │   ├── softclicks
+    │   ├── softrelease
+    │   ├── microclicks
+    │   └── microreleases
+    └── player2/
+        ├── hardclicks
+        ├── hardreleases
+        ├── clicks/
+        │   ├── 1.ogg
+        │   └── 2.ogg
+        ├── releases/
+        │   ├── 1.ogg
+        │   └── 2.ogg
+        ├── softclicks
+        ├── softrelease
+        ├── microclicks
+        └── microreleases
+# left1, right1, left2 and right2 folders are also supported
+```
+or like this if you only want one player:
+```
+.
+└── Clickpack/
+    ├── noise.wav
+    ├── hardclicks
+    ├── hardreleases
+    ├── clicks/
+    │   ├── 1.ogg
+    │   └── 2.ogg
+    ├── releases/
+    │   ├── 1.ogg
+    │   └── 2.ogg
+    ├── softclicks
+    ├── softrelease
+    ├── microclicks
+    └── microreleases
+```
+
+## Commandline arguments
 
 To see commandline arguments in your terminal, run `zcb --help`
 
