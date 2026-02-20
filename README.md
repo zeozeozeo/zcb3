@@ -1,6 +1,8 @@
-# ZCB 3
+# [ZCB 3](https://zeozeozeo.github.io/zcb3) | [🚀 Launch](https://zeozeozeo.github.io/zcb3)
 
 Free and easy to use Geometry Dash clickbot.
+
+[🚀 Use in the browser, without downloading](https://zeozeozeo.github.io/zcb3)
 
 ![ZCB 3](https://github.com/zeozeozeo/zcb3/blob/main/screenshots/0.png?raw=true)
 
@@ -10,7 +12,7 @@ Free and easy to use Geometry Dash clickbot.
 
 # [Join the discord server (click me)](https://discord.gg/b4kBQyXYZT)
 
-or the Guilded server: https://guilded.gg/clickbot
+ZCB is also available on web (both desktop & mobile)! [click me](https://zeozeozeo.github.io/zcb3)
 
 # ZCB Live
 
@@ -54,6 +56,8 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 - GDReplayFormat 2 (.gdr2)
 - [uvBot (.uv)](https://github.com/thisisignitedoreo/uvbot), thanks @thisisignitedoreo
 - TCBot (.tcm)
+
+\+ a replay converter from any format to any other supported format (currently only in the [web version](https://zeozeozeo.github.io/zcb3))
 
 Suggest more formats in the [Discord server](https://discord.gg/b4kBQyXYZT)
 
