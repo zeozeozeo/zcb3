@@ -17,6 +17,8 @@ use zip::read::root_dir_common_filter;
 use std::io::Cursor;
 
 const DATABASE_URL: &str = "https://raw.githubusercontent.com/zeozeozeo/clickpack-db/main/db.json";
+#[cfg(target_arch = "wasm32")]
+const WEB_CORS_REP: &str = "https://zeozeozeo.github.io/clickpack-db/out/";
 
 #[cfg(not(feature = "live"))]
 const TEMP_DIRNAME: &str = "zcb-clickpackdb";
@@ -430,7 +432,8 @@ impl ClickpackDb {
                 .starts_with("https://github.com/zeozeozeo/clickpack-db/raw/main/out/")
             {
                 format!(
-                    "https://db.zeo.lol/out/{}",
+                    "{}{}",
+                    WEB_CORS_REP,
                     &entry.url["https://github.com/zeozeozeo/clickpack-db/raw/main/out/".len()..]
                 )
             } else {
