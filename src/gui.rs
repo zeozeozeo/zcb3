@@ -583,7 +583,7 @@ impl eframe::App for App {
             }
             #[cfg(target_arch = "wasm32")]
             {
-                self.show_clickpack_db(ctx);
+                self.show_clickpack_db(&ctx);
             }
         }
     }
