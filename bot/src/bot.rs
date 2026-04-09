@@ -148,14 +148,12 @@ impl PlayerClicks {
             return player;
         };
 
-        for entry in dir {
-            if let Ok(entry) = entry {
-                let entry_path = fix_root_subdir(&entry.path());
-                if entry_path.is_dir() {
-                    player.recognize_dir_and_load_files(&entry_path, pitch, sample_rate);
-                } else {
-                    log::debug!("skipping file {entry_path:?}");
-                }
+        for entry in dir.flatten() {
+            let entry_path = fix_root_subdir(&entry.path());
+            if entry_path.is_dir() {
+                player.recognize_dir_and_load_files(&entry_path, pitch, sample_rate);
+            } else {
+                log::debug!("skipping file {entry_path:?}");
             }
         }
 
@@ -661,7 +659,7 @@ impl Clickpack {
                     (
                         name.strip_prefix(dirname)
                             .unwrap()
-                            .trim_start_matches(|c| c == '/' || c == '\\')
+                            .trim_start_matches(['/', '\\'])
                             .to_string(),
                         bytes.clone(),
                     )
@@ -961,7 +959,7 @@ impl Bot {
         let mut max = f64::MIN;
         let mut prev_frame = 0u32;
         for action in &replay.extended {
-            self.update_namespace(action, prev_frame, replay.last_frame(), replay.fps.into());
+            self.update_namespace(action, prev_frame, replay.last_frame(), replay.fps);
             prev_frame = action.frame;
 
             let val = self.eval_expr().unwrap_or(0.);
@@ -1030,7 +1028,7 @@ impl Bot {
                     &extended,
                     prev_frame,
                     replay.last_frame(),
-                    replay.fps.into(),
+                    replay.fps,
                 );
                 prev_frame = extended.frame;
 
@@ -1170,7 +1168,7 @@ impl Bot {
                     &extended,
                     prev_frame,
                     replay.last_frame(),
-                    replay.fps.into(),
+                    replay.fps,
                 );
                 prev_frame = extended.frame;
 

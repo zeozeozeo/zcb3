@@ -31,19 +31,12 @@ impl Default for Bot {
 
 /// Information about the level that the replay was recorded on
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub struct Level {
     pub id: u32,
     pub name: String,
 }
 
-impl Default for Level {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            name: String::new(),
-        }
-    }
-}
 
 /// Information about a single input in a replay
 #[derive(Debug, Clone, PartialEq)]
@@ -207,7 +200,7 @@ impl Replay {
                 let mut ext_writer = BinaryWriter::new();
                 input.write_extension(&mut ext_writer, "Phys");
                 writer.write_varint(ext_writer.data().len() as i32);
-                writer.write_bytes(&ext_writer.data());
+                writer.write_bytes(ext_writer.data());
             }
 
             prev = input.frame;
@@ -233,7 +226,7 @@ impl Replay {
                 let mut ext_writer = BinaryWriter::new();
                 input.write_extension(&mut ext_writer, "Phys");
                 writer.write_varint(ext_writer.data().len() as i32);
-                writer.write_bytes(&ext_writer.data());
+                writer.write_bytes(ext_writer.data());
             }
 
             prev = input.frame;

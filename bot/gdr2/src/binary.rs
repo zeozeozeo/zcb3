@@ -94,6 +94,12 @@ pub struct BinaryWriter {
     data: Vec<u8>,
 }
 
+impl Default for BinaryWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BinaryWriter {
     pub fn new() -> Self {
         Self { data: Vec::new() }

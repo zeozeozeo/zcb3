@@ -24,7 +24,7 @@ impl TimedAction {
         } else {
             let mut buf = [0; 4];
             r.read_exact(&mut buf)?;
-            Action::FPS(f32::from_le_bytes(buf))
+            Action::Fps(f32::from_le_bytes(buf))
         };
         let delta = val >> 4;
         Ok(Self { delta, action })
@@ -42,7 +42,7 @@ impl TimedAction {
     pub fn write(&self, mut w: impl Write) -> Result<()> {
         let val = self.delta << 4 | action_to_flags(self.action) as u64;
         w.write_u64_varint(val)?;
-        if let Action::FPS(fps) = self.action {
+        if let Action::Fps(fps) = self.action {
             w.write_all(&fps.to_le_bytes())?;
         }
         Ok(())
@@ -65,7 +65,7 @@ fn action_from_flags(flags: u8) -> Option<Action> {
 #[inline]
 fn action_to_flags(action: Action) -> u8 {
     match action {
-        Action::FPS(_) => 0b1111,
+        Action::Fps(_) => 0b1111,
         Action::Button(p1, down, button) => p1 as u8 | ((down as u8) << 1) | ((button as u8) << 2),
     }
 }
@@ -75,5 +75,5 @@ pub enum Action {
     /// Push/release a button. The first `bool` indicates whether the action is for player 1. The second indicates whether the action is a push.
     Button(bool, bool, crate::PlayerButton),
     /// Change FPS to this value.
-    FPS(f32),
+    Fps(f32),
 }

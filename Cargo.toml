@@ -19,11 +19,11 @@ members = [".", "bot", "bot/ybot_fmt", "bot/gdr", "bot/gdr2"]
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-eframe = { version = "0.33", default-features = false, features = [
+eframe = { version = "0.34", default-features = false, features = [
     "default_fonts",
     "glow",
 ] }
-egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.33" }
+egui-modal = { git = "https://github.com/zeozeozeo/egui-modal.git", branch = "egui-0.34" }
 env_logger = "0.11.8"
 image = { version = "0.25.6", default-features = false, features = [
     "ico",
@@ -35,9 +35,9 @@ serde_json = "1"
 log = "0.4"
 anyhow = "1"
 rayon = "1.11.0"
-egui_extras = { version = "0.33", features = ["image"] }
+egui_extras = { version = "0.34", features = ["image"] }
 rustmatica = "0.2.0"
-egui_plot = "0.34"
+egui_plot = "0.35"
 serde = "1"
 fastrand = "2.3.0"
 zip = { version = "7.0.0", default-features = false, features = ["deflate"] }

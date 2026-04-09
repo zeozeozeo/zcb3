@@ -382,7 +382,8 @@ fn drag_value<Num: emath::Numeric>(
 }
 
 impl eframe::App for App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
         #[cfg(target_arch = "wasm32")]
         if let Some(window) = web_sys::window() {
             if let Some(document) = window.document() {
@@ -398,9 +399,9 @@ impl eframe::App for App {
             }
         }
         // poll pending file dialogs
-        let mut dialog = Modal::new(ctx, "file_dialog_modal");
-        self.poll_file_dialog(ctx, &dialog);
-        self.poll_render_result(ctx, &dialog);
+        let mut dialog = Modal::new(&ctx, "file_dialog_modal");
+        self.poll_file_dialog(&ctx, &dialog);
+        self.poll_render_result(&ctx, &dialog);
         dialog.show_dialog();
 
         ctx.input(|i| {
@@ -420,7 +421,7 @@ impl eframe::App for App {
             }
         });
 
-        egui::TopBottomPanel::top("top_panel").show(ctx, |ui| {
+        egui::Panel::top("top_panel").show_inside(ui, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.stage, Stage::SelectReplay, "Replay");
@@ -436,10 +437,10 @@ impl eframe::App for App {
             ui.add_space(2.0);
         });
 
-        egui::TopBottomPanel::bottom("bottom_panel").show(ctx, |ui| {
-            let mut dialog = Modal::new(ctx, "config_dialog");
-            let mut update_dialog = Modal::new(ctx, "update_dialog");
-            let mut modal = Modal::new(ctx, "update_modal");
+        egui::Panel::bottom("bottom_panel").show_inside(ui, |ui| {
+            let mut dialog = Modal::new(&ctx, "config_dialog");
+            let mut update_dialog = Modal::new(&ctx, "update_dialog");
+            let mut modal = Modal::new(&ctx, "update_modal");
 
             egui::ScrollArea::horizontal().show(ui, |ui| {
                 ui.add_space(2.0);
@@ -512,16 +513,16 @@ impl eframe::App for App {
             self.show_update_check_modal(&modal);
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| {
+        egui::CentralPanel::default().show_inside(ui, |ui| {
             egui::ScrollArea::both().show(ui, |ui| {
                 match self.stage {
-                    Stage::SelectReplay => self.show_replay_stage(ctx, ui),
-                    Stage::SelectClickpack => self.show_select_clickpack_stage(ctx, ui),
-                    Stage::Render => self.show_render_stage(ctx, ui),
-                    Stage::Convert => self.show_convert_stage(ctx, ui),
+                    Stage::SelectReplay => self.show_replay_stage(&ctx, ui),
+                    Stage::SelectClickpack => self.show_select_clickpack_stage(&ctx, ui),
+                    Stage::Render => self.show_render_stage(&ctx, ui),
+                    Stage::Convert => self.show_convert_stage(&ctx, ui),
                     // Stage::AutoCutter => self.autocutter.show_ui(ctx, ui),
-                    Stage::Donate => self.show_pwease_donate_stage(ctx, ui),
-                    Stage::Secret => self.show_secret_stage(ctx, ui),
+                    Stage::Donate => self.show_pwease_donate_stage(&ctx, ui),
+                    Stage::Secret => self.show_secret_stage(&ctx, ui),
                 };
             });
         });
@@ -569,7 +570,7 @@ impl eframe::App for App {
                             "This egui backend doesn't support multiple viewports",
                         );
 
-                        egui::CentralPanel::default().show(ctx, |ui| {
+                        egui::CentralPanel::default().show_inside(ui, |ui| {
                             self.show_clickpack_db(ctx, ui);
                         });
 

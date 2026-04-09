@@ -660,7 +660,7 @@ impl Writer {
         for action in &self.actions {
             let ext = self.get_extended(action.frame, action.player == Player::Two);
             let (x_pos, y_pos, y_vel, rotation) = ext
-                .map(|e| (e.x, e.y, e.y_accel as f32, e.rot))
+                .map(|e| (e.x, e.y, e.y_accel, e.rot))
                 .unwrap_or((0.0, 0.0, 0.0, 0.0));
 
             inputs.push(gdr::Input {
@@ -728,7 +728,7 @@ impl Writer {
                 push: bool,
                 button: PlayerButton,
             },
-            FPS(f32),
+            Fps(f32),
         }
 
         #[derive(Serialize)]

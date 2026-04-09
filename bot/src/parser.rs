@@ -495,7 +495,7 @@ impl ReplayType {
         use ReplayType::*;
         let ext = filename
             .split('.')
-            .last()
+            .next_back()
             .context("replay file has no extension")?;
 
         Ok(match ext {
@@ -697,7 +697,7 @@ impl Replay {
     /// Sorts actions by time / frame.
     pub fn sort_actions(&mut self) -> &mut Self {
         self.actions.sort_by(|a, b| a.time.total_cmp(&b.time));
-        self.extended.sort_by(|a, b| a.frame.cmp(&b.frame));
+        self.extended.sort_by_key(|a| a.frame);
         self
     }
 
@@ -1598,7 +1598,7 @@ impl Replay {
             let mut buf = [0; size_of::<GdmoAction>()];
             reader.read_exact(&mut buf)?;
             let action: GdmoAction = unsafe { std::mem::transmute(buf) };
-            let frame = (action.time * self.fps as f64) as u32;
+            let frame = (action.time * self.fps) as u32;
             if action.player1 {
                 self.process_action_p1(action.time, Button::from_down(action.press), frame);
             } else {
@@ -1627,7 +1627,7 @@ impl Replay {
             let mut buf = vec![0; correction_size as usize];
             reader.read_exact(&mut buf)?;
             let correction: Correction = unsafe { *(buf.as_ptr() as *const Correction) };
-            let frame = (correction.time * self.fps as f64) as u32;
+            let frame = (correction.time * self.fps) as u32;
             let push = self
                 .actions
                 .binary_search_by(|a| a.frame.cmp(&frame))
@@ -1964,7 +1964,7 @@ impl Replay {
         for _ in 0..num_frame_actions {
             let mut buf = [0; size_of::<FrameData>()];
             reader.read_exact(&mut buf)?;
-            frame_datas.push(unsafe { std::mem::transmute(buf) });
+            frame_datas.push(unsafe { std::mem::transmute::<[u8; size_of::<FrameData>()], FrameData>(buf) });
         }
 
         // detect action data type (there are actually 2 versions of replayengine v1,
@@ -1984,11 +1984,11 @@ impl Replay {
             let action = if is_new {
                 let mut buf = [0; size_of::<ActionDataNew>()];
                 reader.read_exact(&mut buf)?;
-                unsafe { std::mem::transmute(buf) }
+                unsafe { std::mem::transmute::<[u8; size_of::<ActionDataNew>()], ActionDataNew>(buf) }
             } else {
                 let mut buf = [0; size_of::<ActionData>()];
                 reader.read_exact(&mut buf)?;
-                let action: ActionData = unsafe { std::mem::transmute(buf) };
+                let action: ActionData = unsafe { std::mem::transmute::<[u8; size_of::<ActionData>()], ActionData>(buf) };
                 ActionDataNew {
                     frame: action.frame,
                     hold: action.hold,
@@ -2162,7 +2162,7 @@ impl Replay {
                         self.extended_p2(push, frame as u32, 0.0, 0.0, 0.0, 0.0);
                     }
                 }
-                Action::FPS(fps) => {
+                Action::Fps(fps) => {
                     self.fps = self.get_fps(fps as _);
                     self.fps_change(fps as _);
                 }
@@ -2175,11 +2175,7 @@ impl Replay {
     fn parse_xdbot<R: Read>(&mut self, reader: R) -> Result<()> {
         let reader = BufReader::new(reader);
 
-        self.fps = if let Some(override_fps) = self.override_fps {
-            override_fps
-        } else {
-            240.0
-        };
+        self.fps = self.override_fps.unwrap_or(240.0);
 
         // first line: fps
         // action: frame|holding|button|player1|pos_only|p1_xpos|p1_ypos|p1_upsideDown|p1_rotation|p1_xSpeed|p1_ySpeed|p2_xpos|p2_ypos|p2_upsideDown|p2_rotation|p2_xSpeed|p2_ySpeed
@@ -2237,11 +2233,11 @@ impl Replay {
                 Button::from_down(push)
             };
             if p1 {
-                self.process_action_p1(frame as f64 / self.fps, b, frame as u32);
-                self.extended_p1(push, frame as u32, x, y, 0.0, 0.0);
+                self.process_action_p1(frame as f64 / self.fps, b, frame);
+                self.extended_p1(push, frame, x, y, 0.0, 0.0);
             } else {
-                self.process_action_p2(frame as f64 / self.fps, b, frame as u32);
-                self.extended_p2(push, frame as u32, x, y, 0.0, 0.0);
+                self.process_action_p2(frame as f64 / self.fps, b, frame);
+                self.extended_p2(push, frame, x, y, 0.0, 0.0);
             }
         }
         Ok(())
@@ -2301,7 +2297,7 @@ impl Replay {
                 push: bool,
                 button: PlayerButton,
             },
-            FPS(f32),
+            Fps(f32),
         }
         #[derive(Deserialize, Default)]
         struct Position {
@@ -2354,7 +2350,7 @@ impl Replay {
                         self.extended_p1(push, click.frame, p.x, p.y, click.y_vel as f32, p.rotate);
                     }
                 }
-                Action::FPS(new_fps) => {
+                Action::Fps(new_fps) => {
                     self.fps = self.get_fps(new_fps as _);
                     self.fps_change(new_fps as _);
                 }
@@ -2454,12 +2450,6 @@ impl Replay {
         }
 
         #[derive(Default)]
-        struct Action {
-            frame: u32,
-            flags: u8,
-        }
-
-        #[derive(Default)]
         struct PlayerData {
             x: f32,
             y: f32,
@@ -2476,12 +2466,13 @@ impl Replay {
         }
 
         // read hdr
-        let mut header = Header::default();
-        header.magic = reader.read_u16::<LittleEndian>()?;
-        header.version = reader.read_u8()?;
-        header.fps = reader.read_u32::<LittleEndian>()?;
-        header.num_actions = reader.read_u32::<LittleEndian>()?;
-        header.num_frame_fixes = reader.read_u32::<LittleEndian>()?;
+        let header = Header {
+            magic: reader.read_u16::<LittleEndian>()?,
+            version: reader.read_u8()?,
+            fps: reader.read_u32::<LittleEndian>()?,
+            num_actions: reader.read_u32::<LittleEndian>()?,
+            num_frame_fixes: reader.read_u32::<LittleEndian>()?,
+        };
         log::debug!("zephyrus header: {header:?}");
 
         if header.magic != 0x525a {
@@ -2498,18 +2489,17 @@ impl Replay {
 
         // read actions
         for _ in 0..header.num_actions {
-            let mut action = Action::default();
-            action.frame = reader.read_u32::<LittleEndian>()?;
-            action.flags = reader.read_u8()?;
+            let frame = reader.read_u32::<LittleEndian>()?;
+            let flags = reader.read_u8()?;
 
-            let player2 = (action.flags & 0b10000000) != 0;
-            let push = (action.flags & 0b01000000) != 0;
-            let button = Button::from_button_idx(((action.flags & 0b00110000) >> 4) as i32, push);
-            let time = action.frame as f64 / self.fps;
+            let player2 = (flags & 0b10000000) != 0;
+            let push = (flags & 0b01000000) != 0;
+            let button = Button::from_button_idx(((flags & 0b00110000) >> 4) as i32, push);
+            let time = frame as f64 / self.fps;
             if player2 {
-                self.process_action_p2(time, button, action.frame);
+                self.process_action_p2(time, button, frame);
             } else {
-                self.process_action_p1(time, button, action.frame);
+                self.process_action_p1(time, button, frame);
             }
         }
 
@@ -2526,13 +2516,20 @@ impl Replay {
 
         // read frame fixes
         for _ in 0..header.num_frame_fixes {
-            let mut fix = FrameFix::default();
-            fix.frame = reader.read_u32::<LittleEndian>()?;
-            fix.player1 = read_player_data!();
-            fix.player2_exists = reader.read_u8()? != 0;
-            if fix.player2_exists {
-                fix.player2 = read_player_data!();
-            }
+            let frame = reader.read_u32::<LittleEndian>()?;
+            let player1 = read_player_data!();
+            let player2_exists = reader.read_u8()? != 0;
+            let player2 = if player2_exists {
+                read_player_data!()
+            } else {
+                PlayerData::default()
+            };
+            let fix = FrameFix {
+                frame,
+                player1,
+                player2_exists,
+                player2,
+            };
 
             // find button state
             let push = if let Ok(idx) = self.actions.binary_search_by(|a| a.frame.cmp(&fix.frame)) {
@@ -2616,11 +2613,10 @@ impl Replay {
                 return self.parse_slc2(reader);
             } else if header_buf == *b"SLC3" {
                 let mut full_header = [0u8; 8];
-                if reader.read_exact(&mut full_header[4..]).is_ok() {
-                    if &full_header == b"SLC3RPLY" {
+                if reader.read_exact(&mut full_header[4..]).is_ok()
+                    && &full_header == b"SLC3RPLY" {
                         return self.parse_slc3(reader);
                     }
-                }
                 reader.seek(SeekFrom::Start(0))?;
                 return self.parse_slc3(reader);
             }
@@ -2772,7 +2768,7 @@ impl Replay {
         }
 
         // now sort by frame, since everything is separate in 4 chunks
-        amalgamated_action_datas.sort_by(|k1, _, k2, _| k1.cmp(&k2));
+        amalgamated_action_datas.sort_by(|k1, _, k2, _| k1.cmp(k2));
 
         // now we can process the amalgamation
         for (frame, action_data) in amalgamated_action_datas {
@@ -3085,7 +3081,7 @@ impl Replay {
             let player_2 = (flags >> 1) > 2;
 
             let input_action = InputAction {
-                player_2: player_2,
+                player_2,
                 button: match button {
                     0 => Button::from_down(hold),
                     1 => Button::from_left_down(hold),
@@ -3109,10 +3105,10 @@ impl Replay {
             let y_velocity = reader.read_f64::<LittleEndian>()?;
 
             let physics_action = PhysicsAction {
-                x: x,
-                y: y,
-                rotation: rotation,
-                y_velocity: y_velocity,
+                x,
+                y,
+                rotation,
+                y_velocity,
             };
 
             frame_data.entry(frame).or_default().p1_physics = Some(physics_action);
@@ -3126,10 +3122,10 @@ impl Replay {
             let y_velocity = reader.read_f64::<LittleEndian>()?;
 
             let physics_action = PhysicsAction {
-                x: x,
-                y: y,
-                rotation: rotation,
-                y_velocity: y_velocity,
+                x,
+                y,
+                rotation,
+                y_velocity,
             };
 
             frame_data.entry(frame).or_default().p2_physics = Some(physics_action);
@@ -3142,7 +3138,7 @@ impl Replay {
             ))
         }
 
-        frame_data.sort_by(|k1, _, k2, _| k1.cmp(&k2));
+        frame_data.sort_by(|k1, _, k2, _| k1.cmp(k2));
 
         for (frame, data) in frame_data {
             let FrameData {
@@ -3210,12 +3206,11 @@ impl Replay {
             use tcm::input::{Input::*, TpsInput};
 
             match &input.input {
-                Restart(_) => {
-                    if self.discard_deaths {
+                Restart(_)
+                    if self.discard_deaths => {
                         self.actions.clear();
                         self.extended.clear();
                     }
-                }
                 Tps(TpsInput { tps }) => {
                     let tps = *tps as f64;
                     self.fps = self.get_fps(tps);

@@ -428,7 +428,7 @@ impl AudioSegment {
 
         // create input buffer
         let input_adapter =
-            InterleavedSlice::new(&input_data, Self::NUM_CHANNELS, num_input_frames).unwrap();
+            InterleavedSlice::new(input_data, Self::NUM_CHANNELS, num_input_frames).unwrap();
 
         // allocate output buffer
         // FIXME: currently we overshoot by 1.5x cuz rubato cannot decide how many frames it needs
