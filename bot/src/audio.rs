@@ -131,10 +131,8 @@ impl Neg for Frame {
     }
 }
 
+#[inline(always)]
 fn time_to_frame(sample_rate: u32, time: f64) -> usize {
-    if !time.is_finite() || time <= 0.0 {
-        return 0;
-    }
     (time * sample_rate as f64) as usize
 }
 
@@ -322,34 +320,31 @@ impl AudioSegment {
     }
 
     /// Convert time to samples. Clamps maximum to the segment length.
+    #[inline(always)]
     fn time_to_frame(&self, time: f64) -> usize {
-        time_to_frame(self.sample_rate, time).min(self.frames.len())
+        time_to_frame(self.sample_rate, time).min(self.frames.len().saturating_sub(1))
     }
 
+    #[inline]
     pub fn overlay_at(&mut self, time: f64, other: &AudioSegment, dur: f64) {
         debug_assert!(self.sample_rate == other.sample_rate);
 
         let start = self.time_to_frame(time);
-        if start >= self.frames.len() {
-            return;
-        }
-
-        let max_from_dur = self.time_to_frame(dur);
-        let max_from_other = other.frames.len();
-        let max_from_self = self.frames.len() - start;
-        let len = max_from_dur.min(max_from_other).min(max_from_self);
+        let end = (start + other.frames.len().min(self.time_to_frame(dur)))
+            .min(self.frames.len().saturating_sub(1));
 
         #[cfg(feature = "rayon")]
-        let iter = self.frames[start..start + len].par_iter_mut();
+        let iter = self.frames[start..end].par_iter_mut();
         #[cfg(not(feature = "rayon"))]
-        let iter = self.frames[start..start + len].iter_mut();
+        let iter = self.frames[start..end].iter_mut();
 
-        iter.zip(other.frames[..len].par_iter()).for_each(|(s, o)| {
+        iter.zip(&other.frames).for_each(|(s, o)| {
             s.left += o.left;
             s.right += o.right;
         });
     }
 
+    #[inline]
     pub fn overlay_at_vol(&mut self, time: f64, other: &AudioSegment, volume: f32, dur: f64) {
         debug_assert!(self.sample_rate == other.sample_rate);
         if volume == 0.0 {
@@ -360,27 +355,22 @@ impl AudioSegment {
         }
 
         let start = self.time_to_frame(time);
-        if start >= self.frames.len() {
-            return;
-        }
-
-        let max_from_dur = self.time_to_frame(dur);
-        let max_from_other = other.frames.len();
-        let max_from_self = self.frames.len() - start;
-        let len = max_from_dur.min(max_from_other).min(max_from_self);
+        let end = (start + other.frames.len().min(self.time_to_frame(dur)))
+            .min(self.frames.len().saturating_sub(1));
 
         #[cfg(feature = "rayon")]
-        let iter = self.frames[start..start + len].par_iter_mut();
+        let iter = self.frames[start..end].par_iter_mut();
         #[cfg(not(feature = "rayon"))]
-        let iter = self.frames[start..start + len].iter_mut();
+        let iter = self.frames[start..end].iter_mut();
 
-        iter.zip(other.frames[..len].par_iter()).for_each(|(s, o)| {
+        iter.zip(&other.frames).for_each(|(s, o)| {
             s.left += o.left * volume;
             s.right += o.right * volume;
         });
     }
 
     /// Returns the duration of the audio segment.
+    #[inline]
     pub fn duration(&self) -> Duration {
         Duration::from_secs_f64(self.frames.len() as f64 / self.sample_rate as f64)
     }
@@ -428,7 +418,7 @@ impl AudioSegment {
 
         // create input buffer
         let input_adapter =
-            InterleavedSlice::new(input_data, Self::NUM_CHANNELS, num_input_frames).unwrap();
+            InterleavedSlice::new(&input_data, Self::NUM_CHANNELS, num_input_frames).unwrap();
 
         // allocate output buffer
         // FIXME: currently we overshoot by 1.5x cuz rubato cannot decide how many frames it needs
@@ -506,15 +496,8 @@ impl AudioSegment {
 
     /// Generates a pitch table for an audiosegment (pitch ranges from `from` to `to` with step `step`).
     pub fn make_pitch_table(&mut self, from: f32, to: f32, step: f32) {
-        if !(from.is_finite() && to.is_finite() && step.is_finite()) || step <= 0.0 || to <= from {
-            self.pitch_table.clear();
-            return;
-        }
-
         let old_seg = self.clone();
-        let count = ((to - from) / step).ceil() as usize;
-        self.pitch_table = vec![old_seg; count];
-
+        self.pitch_table = vec![old_seg; ((to - from) / step) as usize];
         #[cfg(feature = "rayon")]
         let iter = self.pitch_table.par_iter_mut();
         #[cfg(not(feature = "rayon"))]
@@ -522,10 +505,8 @@ impl AudioSegment {
 
         iter.enumerate().for_each(|(i, seg)| {
             let cur = from + (i as f32 * step);
-            if cur > 0.0 {
-                seg.resample((self.sample_rate as f32 * cur) as u32);
-                seg.sample_rate = self.sample_rate;
-            }
+            seg.resample((self.sample_rate as f32 * cur) as u32);
+            seg.sample_rate = self.sample_rate; // keep same sample rate
         });
     }
 
@@ -553,59 +534,37 @@ impl AudioSegment {
         self.time_to_frame(time.as_secs_f64())
     }
 
+    #[inline(always)]
     pub fn samples_after_index(&self, idx: usize) -> usize {
-        self.frames.len().saturating_sub(idx)
+        self.frames.len() - idx
     }
 
     pub fn remove_silence_from_start(&mut self, threshold: f32) {
-        let mut idx = self.frames.len();
-        let mut run = 0usize;
-        let min_run = (self.sample_rate as f32 * 0.005) as usize;
-
+        let mut idx = 0;
         for (i, v) in self.frames.iter().enumerate() {
-            let level = v.left.abs().max(v.right.abs());
-            if level > threshold {
-                run += 1;
-                if run >= min_run {
-                    idx = i + 1 - run;
-                    break;
-                }
-            } else {
-                run = 0;
+            let avg = (v.left + v.right) / 2.; // avg of l and r channels
+            if avg.abs() > threshold {
+                idx = i;
+                break;
             }
         }
 
-        if idx >= self.frames.len() {
-            self.frames.clear();
-        } else {
-            self.frames.drain(..idx);
-        }
+        // remove all values upto index
+        self.frames.drain(..idx);
     }
 
     pub fn remove_silence_from_end(&mut self, threshold: f32) {
-        let mut keep = 0usize;
-        let mut run = 0usize;
-        let min_run = (self.sample_rate as f32 * 0.005) as usize;
-
+        let mut idx = 0;
         for (i, v) in self.frames.iter().rev().enumerate() {
-            let level = v.left.abs().max(v.right.abs());
-            if level > threshold {
-                run += 1;
-                if run >= min_run {
-                    let idx = self.frames.len() - i;
-                    keep = idx;
-                    break;
-                }
-            } else {
-                run = 0;
+            let avg = (v.left + v.right) / 2.; // avg of l and r channels
+            if avg.abs() > threshold {
+                idx = i;
+                break;
             }
         }
 
-        if keep == 0 {
-            self.frames.clear();
-        } else {
-            self.frames.truncate(keep);
-        }
+        // remove all values from index
+        self.frames.drain((self.frames.len() - idx)..);
     }
 
     pub fn set_volume(&mut self, volume: f32) -> &mut Self {
