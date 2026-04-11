@@ -56,6 +56,7 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 - GDReplayFormat 2 (.gdr2)
 - [uvBot (.uv)](https://github.com/thisisignitedoreo/uvbot), thanks @thisisignitedoreo
 - TCBot (.tcm)
+- ToastyReplay (.ttr)
 
 \+ a replay converter from any format to any other supported format (currently only in the [web version](https://zeozeozeo.github.io/zcb3))
 
@@ -95,6 +96,7 @@ The `noise.*` file can also be named `whitenoise.*` and it can be also be locate
 ### Example
 
 Clickpacks can be structured like this:
+
 ```
 .
 └── Clickpack/
@@ -126,7 +128,9 @@ Clickpacks can be structured like this:
         └── microreleases
 # left1, right1, left2 and right2 folders are also supported
 ```
+
 or like this if you only want one player:
+
 ```
 .
 └── Clickpack/

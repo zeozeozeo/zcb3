@@ -2314,7 +2314,8 @@ impl App {
 • Silicate 3 (.slc)
 • GDReplayFormat 2 (.gdr2)
 • uvBot (.uv)
-• TCBot (.tcm)",
+• TCBot (.tcm)
+• ToastyReplay (.ttr)",
             );
         });
 
@@ -2985,9 +2986,19 @@ impl App {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_gui() -> Result<(), eframe::Error> {
+    let img = image::ImageReader::new(std::io::Cursor::new(include_bytes!("assets/icon.ico")))
+        .with_guessed_format()
+        .unwrap()
+        .decode()
+        .unwrap();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([460.0, 500.0])
+            .with_icon(egui::IconData {
+                rgba: img.to_rgba8().to_vec(),
+                width: img.width(),
+                height: img.height(),
+            })
             .with_resizable(false),
         ..Default::default()
     };
