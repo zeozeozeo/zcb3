@@ -18,7 +18,7 @@ use std::io::Cursor;
 
 const DATABASE_URL: &str = "https://raw.githubusercontent.com/zeozeozeo/clickpack-db/main/db.json";
 #[cfg(target_arch = "wasm32")]
-const WEB_CORS_REP: &str = "https://zeozeozeo.github.io/clickpack-db/out/";
+const WEB_CORS_REP: &str = "https://db.ruikasa.lol/out/";
 
 #[cfg(not(feature = "live"))]
 const TEMP_DIRNAME: &str = "zcb-clickpackdb";
