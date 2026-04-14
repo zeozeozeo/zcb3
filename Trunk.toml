@@ -2,7 +2,7 @@
 target = "index.html"
 release = true
 dist = "dist"
-public_url = "/zcb3"
+public_url = "/"
 
 [watch]
 ignore = ["./dist"]
