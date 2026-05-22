@@ -3,11 +3,40 @@ use anyhow::Result;
 use fasteval2::Compiler;
 use serde::{Deserialize, Serialize};
 use std::{
+    array,
     collections::BTreeMap,
     ops::{Deref, DerefMut, Index, IndexMut},
     path::{Path, PathBuf},
     time::Duration,
 };
+
+const EXPR_KEYS: [&str; 14] = [
+    "frame",
+    "fps",
+    "time",
+    "x",
+    "y",
+    "p",
+    "player2",
+    "rot",
+    "accel",
+    "down",
+    "frames",
+    "level_time",
+    "rand",
+    "delta",
+];
+
+const CLICK_TYPES: [ClickType; 8] = [
+    ClickType::HardClick,
+    ClickType::HardRelease,
+    ClickType::Click,
+    ClickType::Release,
+    ClickType::SoftClick,
+    ClickType::SoftRelease,
+    ClickType::MicroClick,
+    ClickType::MicroRelease,
+];
 
 #[derive(Debug, Clone, Default)]
 pub struct AudioFile {
@@ -271,6 +300,30 @@ impl PlayerClicks {
             }
         }
         None
+    }
+
+    fn collect_preferred_clicks<'a>(
+        &'a self,
+        click_type: ClickType,
+        out: &mut Vec<&'a AudioSegment>,
+    ) {
+        for typ in click_type.preferred() {
+            let clicks = match typ {
+                ClickType::HardClick => &self.hardclicks,
+                ClickType::HardRelease => &self.hardreleases,
+                ClickType::Click => &self.clicks,
+                ClickType::Release => &self.releases,
+                ClickType::SoftClick => &self.softclicks,
+                ClickType::SoftRelease => &self.softreleases,
+                ClickType::MicroClick => &self.microclicks,
+                ClickType::MicroRelease => &self.microreleases,
+                ClickType::None => continue,
+            };
+            out.extend(clicks.iter().map(|click| &click.segment));
+            if !out.is_empty() {
+                return;
+            }
+        }
     }
 
     /// Finds the longest click amongst all clicks.
@@ -739,6 +792,127 @@ pub fn dir_has_noise(dir: &Path) -> bool {
     false
 }
 
+struct RenderClickPools<'a> {
+    pools: [Vec<&'a AudioSegment>; 48],
+}
+
+impl<'a> RenderClickPools<'a> {
+    fn new(clickpack: &'a Clickpack) -> Self {
+        let mut pools: [Vec<&'a AudioSegment>; 48] = array::from_fn(|_| Vec::new());
+
+        for player in [Player::One, Player::Two] {
+            for button in [
+                crate::ButtonKind::Jump,
+                crate::ButtonKind::Left,
+                crate::ButtonKind::Right,
+            ] {
+                for click_type in CLICK_TYPES {
+                    let idx = render_pool_index(player, button, click_type);
+                    for sounds in ordered_click_sources(clickpack, player, button) {
+                        sounds.collect_preferred_clicks(click_type, &mut pools[idx]);
+                        if !pools[idx].is_empty() {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        Self { pools }
+    }
+
+    fn get(&self, player: Player, click: Click) -> &[&'a AudioSegment] {
+        &self.pools[render_pool_index(player, click.button(), click.click_type())]
+    }
+}
+
+fn button_index(button: crate::ButtonKind) -> usize {
+    match button {
+        crate::ButtonKind::Jump => 0,
+        crate::ButtonKind::Left => 1,
+        crate::ButtonKind::Right => 2,
+    }
+}
+
+fn click_type_index(click_type: ClickType) -> usize {
+    match click_type {
+        ClickType::HardClick => 0,
+        ClickType::HardRelease => 1,
+        ClickType::Click => 2,
+        ClickType::Release => 3,
+        ClickType::SoftClick => 4,
+        ClickType::SoftRelease => 5,
+        ClickType::MicroClick => 6,
+        ClickType::MicroRelease => 7,
+        ClickType::None => 0,
+    }
+}
+
+fn render_pool_index(player: Player, button: crate::ButtonKind, click_type: ClickType) -> usize {
+    let player_idx = match player {
+        Player::One => 0,
+        Player::Two => 1,
+    };
+    player_idx * 24 + button_index(button) * 8 + click_type_index(click_type)
+}
+
+fn ordered_click_sources<'a>(
+    clickpack: &'a Clickpack,
+    player: Player,
+    button: crate::ButtonKind,
+) -> [&'a PlayerClicks; 6] {
+    match (player, button) {
+        (Player::One, crate::ButtonKind::Jump) => [
+            &clickpack.player1,
+            &clickpack.player2,
+            &clickpack.left1,
+            &clickpack.right1,
+            &clickpack.left2,
+            &clickpack.right2,
+        ],
+        (Player::Two, crate::ButtonKind::Jump) => [
+            &clickpack.player2,
+            &clickpack.player1,
+            &clickpack.left2,
+            &clickpack.right2,
+            &clickpack.left1,
+            &clickpack.right1,
+        ],
+        (Player::One, crate::ButtonKind::Left) => [
+            &clickpack.left1,
+            &clickpack.right1,
+            &clickpack.player1,
+            &clickpack.left2,
+            &clickpack.right2,
+            &clickpack.player2,
+        ],
+        (Player::Two, crate::ButtonKind::Left) => [
+            &clickpack.left2,
+            &clickpack.right2,
+            &clickpack.player2,
+            &clickpack.left1,
+            &clickpack.right1,
+            &clickpack.player1,
+        ],
+        (Player::One, crate::ButtonKind::Right) => [
+            &clickpack.right1,
+            &clickpack.left1,
+            &clickpack.player1,
+            &clickpack.right2,
+            &clickpack.left2,
+            &clickpack.player2,
+        ],
+        (Player::Two, crate::ButtonKind::Right) => [
+            &clickpack.right2,
+            &clickpack.left2,
+            &clickpack.player2,
+            &clickpack.right1,
+            &clickpack.left1,
+            &clickpack.player1,
+        ],
+    }
+}
+
 impl Bot {
     #[inline]
     pub fn new(sample_rate: u32) -> Self {
@@ -855,58 +1029,6 @@ impl Bot {
         };
     }
 
-    fn get_random_click(&mut self, player: Player, click: Click) -> &AudioSegment {
-        // try to get a random click/release from the player clicks
-        // if it doesn't exist for the wanted player, use the other one (guaranteed to have atleast
-        // one click)
-        let p1 = &self.clickpack.player1;
-        let p2 = &self.clickpack.player2;
-        let l1 = &self.clickpack.left1;
-        let r1 = &self.clickpack.right1;
-        let l2 = &self.clickpack.left2;
-        let r2 = &self.clickpack.right2;
-
-        // :tired_face:
-        macro_rules! random_click_ord {
-            ($typ:ident, $one:ident, $two:ident, $three:ident, $four:ident, $five:ident, $six: ident) => {
-                $one.random_click($typ).unwrap_or_else(|| {
-                    $two.random_click($typ).unwrap_or_else(|| {
-                        $three.random_click($typ).unwrap_or_else(|| {
-                            $four.random_click($typ).unwrap_or_else(|| {
-                                $five
-                                    .random_click($typ)
-                                    .unwrap_or_else(|| $six.random_click($typ).unwrap())
-                            })
-                        })
-                    })
-                })
-            };
-        }
-        match click {
-            Click::Regular(typ) => {
-                if player == Player::One {
-                    random_click_ord!(typ, p1, p2, l1, r1, l2, r2)
-                } else {
-                    random_click_ord!(typ, p2, p1, l2, r2, l1, r1)
-                }
-            }
-            Click::Left(typ) => {
-                if player == Player::One {
-                    random_click_ord!(typ, l1, r1, p1, l2, r2, p2)
-                } else {
-                    random_click_ord!(typ, l2, r2, p2, l1, r1, p1)
-                }
-            }
-            Click::Right(typ) => {
-                if player == Player::One {
-                    random_click_ord!(typ, r1, l1, p1, r2, l2, p2)
-                } else {
-                    random_click_ord!(typ, r2, l2, p2, r1, l1, p1)
-                }
-            }
-        }
-    }
-
     pub fn compile_expression(&mut self, expr: &str) -> Result<()> {
         let parser = fasteval2::Parser::new();
         self.slab = fasteval2::Slab::new();
@@ -917,7 +1039,23 @@ impl Bot {
             .parse(expr, &mut self.slab.ps)?
             .from(&self.slab.ps)
             .compile(&self.slab.ps, &mut self.slab.cs, &mut self.ns);
+        self.ensure_expr_namespace();
         Ok(())
+    }
+
+    fn ensure_expr_namespace(&mut self) {
+        for key in EXPR_KEYS {
+            self.ns.entry(key.to_owned()).or_insert(0.0);
+        }
+    }
+
+    #[inline]
+    fn set_expr_var(&mut self, key: &'static str, value: f64) {
+        if let Some(slot) = self.ns.get_mut(key) {
+            *slot = value;
+        } else {
+            self.ns.insert(key.to_owned(), value);
+        }
     }
 
     /// Updates the volume variation expressions' namespace.
@@ -928,23 +1066,21 @@ impl Bot {
         total_frames: u32,
         fps: f64,
     ) {
-        self.ns.insert("frame".to_string(), a.frame as _);
-        self.ns.insert("fps".to_string(), fps);
-        self.ns.insert("time".to_string(), a.frame as f64 / fps);
-        self.ns.insert("x".to_string(), a.x as _);
-        self.ns.insert("y".to_string(), a.y as _);
-        self.ns
-            .insert("p".to_string(), a.frame as f64 / total_frames as f64);
-        self.ns.insert("player2".to_string(), a.player2 as u8 as _);
-        self.ns.insert("rot".to_string(), a.rot as _);
-        self.ns.insert("accel".to_string(), a.y_accel as _);
-        self.ns.insert("down".to_string(), a.down as u8 as _);
-        self.ns.insert("frames".to_string(), total_frames as _);
-        self.ns
-            .insert("level_time".to_string(), total_frames as f64 / fps);
-        self.ns.insert("rand".to_string(), fastrand::f64());
-        self.ns
-            .insert("delta".to_string(), (a.frame - prev_frame) as f64);
+        let total_frames = total_frames.max(1);
+        self.set_expr_var("frame", a.frame as _);
+        self.set_expr_var("fps", fps);
+        self.set_expr_var("time", a.frame as f64 / fps);
+        self.set_expr_var("x", a.x as _);
+        self.set_expr_var("y", a.y as _);
+        self.set_expr_var("p", a.frame as f64 / total_frames as f64);
+        self.set_expr_var("player2", a.player2 as u8 as _);
+        self.set_expr_var("rot", a.rot as _);
+        self.set_expr_var("accel", a.y_accel as _);
+        self.set_expr_var("down", a.down as u8 as _);
+        self.set_expr_var("frames", total_frames as _);
+        self.set_expr_var("level_time", total_frames as f64 / fps);
+        self.set_expr_var("rand", fastrand::f64());
+        self.set_expr_var("delta", a.frame.saturating_sub(prev_frame) as f64);
     }
 
     pub fn eval_expr(&mut self) -> Result<f64> {
@@ -967,6 +1103,275 @@ impl Bot {
             max = max.max(val);
         }
         (min, max)
+    }
+
+    fn expression_adjustments(
+        &mut self,
+        replay: &Replay,
+        expr_var: ExprVariable,
+    ) -> Vec<(f32, f32)> {
+        if expr_var == ExprVariable::None {
+            return vec![(0.0, 0.0); replay.actions.len()];
+        }
+
+        let total_frames = replay.last_frame();
+        let mut adjustments = Vec::with_capacity(replay.actions.len());
+        let mut prev_frame = 0u32;
+        let mut action_idx = 0usize;
+        let mut extended_idx = 0usize;
+
+        while action_idx < replay.actions.len() {
+            let frame = replay.actions[action_idx].frame;
+
+            while extended_idx < replay.extended.len()
+                && replay.extended[extended_idx].frame < frame
+            {
+                extended_idx += 1;
+            }
+
+            let same_frame_start = extended_idx;
+            let mut same_frame_end = same_frame_start;
+            while same_frame_end < replay.extended.len()
+                && replay.extended[same_frame_end].frame == frame
+            {
+                same_frame_end += 1;
+            }
+            let same_frame_extended = &replay.extended[same_frame_start..same_frame_end];
+
+            while action_idx < replay.actions.len() && replay.actions[action_idx].frame == frame {
+                let action = replay.actions[action_idx];
+                let player2 = action.player == Player::Two;
+                let extended = same_frame_extended
+                    .iter()
+                    .find(|a| a.player2 == player2)
+                    .copied()
+                    .unwrap_or(ExtendedAction {
+                        frame,
+                        player2,
+                        down: action.click.is_click(),
+                        ..Default::default()
+                    });
+
+                self.update_namespace(&extended, prev_frame, total_frames, replay.fps);
+                prev_frame = extended.frame;
+
+                let value = self.eval_expr().unwrap_or(0.0) as f32;
+                let adjustment = match expr_var {
+                    ExprVariable::Value => (value, 0.0),
+                    ExprVariable::Variation { negative } => {
+                        if value == 0.0 {
+                            (0.0, 0.0)
+                        } else if negative {
+                            (f32_range((-value).min(value)..=value.max(-value)), 0.0)
+                        } else {
+                            (f32_range(value.min(0.0)..=value.max(0.0)), 0.0)
+                        }
+                    }
+                    ExprVariable::TimeOffset => (0.0, value),
+                    ExprVariable::None => (0.0, 0.0),
+                };
+                adjustments.push(adjustment);
+                action_idx += 1;
+            }
+
+            extended_idx = same_frame_end;
+        }
+
+        adjustments
+    }
+
+    fn cut_durations(replay: &Replay, cut_sounds: bool) -> Vec<f64> {
+        if !cut_sounds {
+            return vec![f64::INFINITY; replay.actions.len()];
+        }
+
+        let mut durations = vec![f64::INFINITY; replay.actions.len()];
+        let mut next_click_time = [[f64::INFINITY; 3]; 2];
+
+        for (i, action) in replay.actions.iter().enumerate().rev() {
+            let player_idx = match action.player {
+                Player::One => 0,
+                Player::Two => 1,
+            };
+            let button_idx = button_index(action.click.button());
+            let until_next = next_click_time[player_idx][button_idx] - action.time;
+            durations[i] = if until_next.is_finite() && until_next <= 0.0 {
+                1.0 / replay.fps.max(1.0)
+            } else {
+                until_next
+            };
+            if action.click.is_click() {
+                next_click_time[player_idx][button_idx] = action.time;
+            }
+        }
+
+        durations
+    }
+
+    fn dense_batch_len(
+        replay: &Replay,
+        adjustments: &[(f32, f32)],
+        cut_durations: &[f64],
+        start: usize,
+    ) -> usize {
+        const MIN_BATCH: usize = 1024;
+
+        let Some(action) = replay.actions.get(start).copied() else {
+            return 0;
+        };
+        let adjustment = adjustments[start];
+        let cut_duration = cut_durations[start];
+        let mut end = start + 1;
+
+        while end < replay.actions.len() {
+            let next = replay.actions[end];
+            if next.frame != action.frame
+                || next.player != action.player
+                || next.click != action.click
+                || adjustments[end] != adjustment
+                || cut_durations[end].to_bits() != cut_duration.to_bits()
+            {
+                break;
+            }
+            end += 1;
+        }
+
+        let len = end - start;
+        if len >= MIN_BATCH {
+            len
+        } else {
+            1
+        }
+    }
+
+    fn sample_bucket_len(
+        replay: &Replay,
+        adjustments: &[(f32, f32)],
+        sample_rate: u32,
+        start: usize,
+    ) -> usize {
+        const MIN_SAMPLE_BUCKET: usize = 16;
+
+        let start_action = replay.actions[start];
+        let start_sample = ((start_action.time + adjustments[start].1 as f64).max(0.0)
+            * sample_rate as f64) as usize;
+        let mut end = start + 1;
+
+        while end < replay.actions.len() {
+            let action = replay.actions[end];
+            let sample =
+                ((action.time + adjustments[end].1 as f64).max(0.0) * sample_rate as f64) as usize;
+            if sample != start_sample {
+                break;
+            }
+            end += 1;
+        }
+
+        let len = end - start;
+        if len >= MIN_SAMPLE_BUCKET {
+            len
+        } else {
+            0
+        }
+    }
+
+    fn overlay_sample_bucket(
+        segment: &mut AudioSegment,
+        replay: &Replay,
+        adjustments: &[(f32, f32)],
+        cut_durations: &[f64],
+        click_pools: &RenderClickPools<'_>,
+        start: usize,
+        len: usize,
+        enable_pitch: bool,
+    ) {
+        #[derive(Clone, Copy)]
+        struct Group {
+            player: Player,
+            click: Click,
+            time: f64,
+            volume_sum: f32,
+            dur: f64,
+            count: usize,
+        }
+
+        let mut groups: Vec<Group> = Vec::new();
+        for i in start..start + len {
+            let action = replay.actions[i];
+            let (expr_vol, time_offset) = adjustments[i];
+            let time = action.time + time_offset as f64;
+            let volume = 1.0 + action.vol_offset + expr_vol;
+            let dur = cut_durations[i];
+
+            if let Some(group) = groups.iter_mut().find(|group| {
+                group.player == action.player
+                    && group.click == action.click
+                    && group.time.to_bits() == time.to_bits()
+                    && group.dur.to_bits() == dur.to_bits()
+            }) {
+                group.volume_sum += volume;
+                group.count += 1;
+            } else {
+                groups.push(Group {
+                    player: action.player,
+                    click: action.click,
+                    time,
+                    volume_sum: volume,
+                    dur,
+                    count: 1,
+                });
+            }
+        }
+
+        for group in groups {
+            let pool = click_pools.get(group.player, group.click);
+            Self::overlay_click_batch(
+                segment,
+                pool,
+                group.time,
+                group.volume_sum / group.count as f32,
+                group.dur,
+                enable_pitch,
+                group.count,
+            );
+        }
+    }
+
+    fn overlay_click_batch(
+        segment: &mut AudioSegment,
+        pool: &[&AudioSegment],
+        time: f64,
+        volume: f32,
+        dur: f64,
+        enable_pitch: bool,
+        batch_len: usize,
+    ) {
+        if batch_len <= 1 || pool.len() <= 1 {
+            let mut click = pool[fastrand::usize(..pool.len())];
+            if enable_pitch {
+                click = click.random_pitch();
+            }
+            segment.overlay_at_vol(time, click, volume * batch_len as f32, dur);
+            return;
+        }
+
+        let base = batch_len / pool.len();
+        let remainder = batch_len % pool.len();
+        let offset = fastrand::usize(..pool.len());
+
+        for i in 0..pool.len() {
+            let idx = (offset + i) % pool.len();
+            let count = base + usize::from(i < remainder);
+            if count == 0 {
+                continue;
+            }
+
+            let mut click = pool[idx];
+            if enable_pitch {
+                click = click.random_pitch();
+            }
+            segment.overlay_at_vol(time, click, volume * count as f32, dur);
+        }
     }
 
     #[allow(clippy::too_many_arguments)] // TODO
@@ -1001,80 +1406,49 @@ impl Bot {
         );
         #[cfg(not(target_arch = "wasm32"))]
         let start = std::time::Instant::now();
-        let mut prev_frame = 0u32;
 
         let num_actions = replay.actions.len();
-        for (i, action) in replay.actions.iter().enumerate() {
+        let adjustments = self.expression_adjustments(replay, expr_var);
+        let cut_durations = Self::cut_durations(replay, cut_sounds);
+        let click_pools = RenderClickPools::new(&self.clickpack);
+        let mut i = 0usize;
+        while i < replay.actions.len() {
+            let action = &replay.actions[i];
             if i % 100 == 0 {
                 progress_cb(i as f32 / num_actions as f32);
             }
-            // calculate the volume from the expression if needed
-            let (expr_vol, time_offset) = if expr_var != ExprVariable::None {
-                // get extended action
-                // FIXME: this is very wasteful, currently we binary search the entire
-                //        actions array each time
-                let extended = replay
-                    .extended
-                    .binary_search_by(|a| a.frame.cmp(&action.frame))
-                    .unwrap_or(usize::MAX);
-                let extended = replay
-                    .extended
-                    .get(extended)
-                    .copied()
-                    .unwrap_or(ExtendedAction::default());
-
-                // compute expression
-                self.update_namespace(
-                    &extended,
-                    prev_frame,
-                    replay.last_frame(),
-                    replay.fps,
+            let sample_bucket_len =
+                Self::sample_bucket_len(replay, &adjustments, self.sample_rate, i);
+            if sample_bucket_len != 0 {
+                Self::overlay_sample_bucket(
+                    &mut segment,
+                    replay,
+                    &adjustments,
+                    &cut_durations,
+                    &click_pools,
+                    i,
+                    sample_bucket_len,
+                    enable_pitch,
                 );
-                prev_frame = extended.frame;
-
-                let value = self.eval_expr().unwrap_or(0.0) as f32;
-                match expr_var {
-                    ExprVariable::Value => (value, 0.0),
-                    ExprVariable::Variation { negative } => {
-                        if value == 0.0 {
-                            (0.0, 0.0)
-                        } else if negative {
-                            (f32_range((-value).min(value)..=value.max(-value)), 0.0)
-                        } else {
-                            (f32_range(value.min(0.0)..=value.max(0.0)), 0.0)
-                        }
-                    }
-                    ExprVariable::TimeOffset => (0.0, value),
-                    _ => unreachable!(),
-                }
-            } else {
-                (0.0, 0.0)
-            };
-
-            let mut click = self.get_random_click(action.player, action.click);
-            if enable_pitch {
-                click = click.random_pitch(); // if no pitch table is generated, returns self
+                i += sample_bucket_len;
+                continue;
             }
 
-            let mut until_next = f64::INFINITY;
-            if cut_sounds {
-                // find the time until the next action, so we know when to cut
-                // off this sound
-                for next in replay.actions.iter().skip(i + 1) {
-                    if action.player == next.player && next.click.is_click() {
-                        until_next = next.time - action.time;
-                        break;
-                    }
-                }
-            }
+            let (expr_vol, time_offset) = adjustments[i];
+            let batch_len = Self::dense_batch_len(replay, &adjustments, &cut_durations, i);
+            let pool = click_pools.get(action.player, action.click);
 
             // overlay
-            segment.overlay_at_vol(
+            Self::overlay_click_batch(
+                &mut segment,
+                pool,
                 action.time + time_offset as f64,
-                click,
                 1.0 + action.vol_offset + expr_vol,
-                until_next,
+                cut_durations[i],
+                enable_pitch,
+                batch_len,
             );
+            i += batch_len;
         }
 
         if noise && self.has_noise() {
@@ -1140,81 +1514,50 @@ impl Bot {
         );
         #[cfg(not(target_arch = "wasm32"))]
         let start = std::time::Instant::now();
-        let mut prev_frame = 0u32;
 
         let num_actions = replay.actions.len();
-        for (i, action) in replay.actions.iter().enumerate() {
+        let adjustments = self.expression_adjustments(replay, expr_var);
+        let cut_durations = Self::cut_durations(replay, cut_sounds);
+        let click_pools = RenderClickPools::new(&self.clickpack);
+        let mut i = 0usize;
+        while i < replay.actions.len() {
+            let action = &replay.actions[i];
             if i % 100 == 0 {
                 progress_cb(i as f32 / num_actions as f32);
                 yield_fn().await;
             }
-            // calculate the volume from the expression if needed
-            let (expr_vol, time_offset) = if expr_var != ExprVariable::None {
-                // get extended action
-                // FIXME: this is very wasteful, currently we binary search the entire
-                //        actions array each time
-                let extended = replay
-                    .extended
-                    .binary_search_by(|a| a.frame.cmp(&action.frame))
-                    .unwrap_or(usize::MAX);
-                let extended = replay
-                    .extended
-                    .get(extended)
-                    .copied()
-                    .unwrap_or(ExtendedAction::default());
-
-                // compute expression
-                self.update_namespace(
-                    &extended,
-                    prev_frame,
-                    replay.last_frame(),
-                    replay.fps,
+            let sample_bucket_len =
+                Self::sample_bucket_len(replay, &adjustments, self.sample_rate, i);
+            if sample_bucket_len != 0 {
+                Self::overlay_sample_bucket(
+                    &mut segment,
+                    replay,
+                    &adjustments,
+                    &cut_durations,
+                    &click_pools,
+                    i,
+                    sample_bucket_len,
+                    enable_pitch,
                 );
-                prev_frame = extended.frame;
-
-                let value = self.eval_expr().unwrap_or(0.0) as f32;
-                match expr_var {
-                    ExprVariable::Value => (value, 0.0),
-                    ExprVariable::Variation { negative } => {
-                        if value == 0.0 {
-                            (0.0, 0.0)
-                        } else if negative {
-                            (f32_range((-value).min(value)..=value.max(-value)), 0.0)
-                        } else {
-                            (f32_range(value.min(0.0)..=value.max(0.0)), 0.0)
-                        }
-                    }
-                    ExprVariable::TimeOffset => (0.0, value),
-                    _ => unreachable!(),
-                }
-            } else {
-                (0.0, 0.0)
-            };
-
-            let mut click = self.get_random_click(action.player, action.click);
-            if enable_pitch {
-                click = click.random_pitch(); // if no pitch table is generated, returns self
+                i += sample_bucket_len;
+                continue;
             }
 
-            let mut until_next = f64::INFINITY;
-            if cut_sounds {
-                // find the time until the next action, so we know when to cut
-                // off this sound
-                for next in replay.actions.iter().skip(i + 1) {
-                    if action.player == next.player && next.click.is_click() {
-                        until_next = next.time - action.time;
-                        break;
-                    }
-                }
-            }
+            let (expr_vol, time_offset) = adjustments[i];
+            let batch_len = Self::dense_batch_len(replay, &adjustments, &cut_durations, i);
+            let pool = click_pools.get(action.player, action.click);
 
             // overlay
-            segment.overlay_at_vol(
+            Self::overlay_click_batch(
+                &mut segment,
+                pool,
                 action.time + time_offset as f64,
-                click,
                 1.0 + action.vol_offset + expr_vol,
-                until_next,
+                cut_durations[i],
+                enable_pitch,
+                batch_len,
             );
+            i += batch_len;
         }
 
         if noise && self.has_noise() {
@@ -1463,5 +1806,114 @@ impl Bot {
             zip.finish()?;
         }
         Ok(buf)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cut_sounds_keeps_same_frame_clicks_audible() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.actions.push(crate::Action::new(
+            1.0,
+            Player::One,
+            Click::Regular(ClickType::Click),
+            0.0,
+            240,
+        ));
+        replay.actions.push(crate::Action::new(
+            1.0,
+            Player::One,
+            Click::Regular(ClickType::Click),
+            0.0,
+            240,
+        ));
+        replay.actions.push(crate::Action::new(
+            1.0,
+            Player::One,
+            Click::Left(ClickType::Click),
+            0.0,
+            240,
+        ));
+
+        let durations = Bot::cut_durations(&replay, true);
+
+        assert_eq!(durations.len(), 3);
+        assert!(durations[0] > 0.0);
+        assert!(durations[0].is_finite());
+        assert!(durations[1].is_infinite());
+        assert!(durations[2].is_infinite());
+    }
+
+    #[test]
+    fn sample_bucket_handles_sub_1024_dense_spam() {
+        let mut replay = Replay::build();
+        replay.fps = 1_000.0;
+
+        for i in 0..16 {
+            replay.actions.push(crate::Action::new(
+                0.5,
+                Player::One,
+                Click::Regular(ClickType::Click),
+                i as f32,
+                500,
+            ));
+        }
+
+        let adjustments = vec![(0.0, 0.0); replay.actions.len()];
+
+        assert_eq!(Bot::sample_bucket_len(&replay, &adjustments, 1_000, 0), 16);
+    }
+
+    #[test]
+    fn sample_bucket_preserves_summed_volume() {
+        let sample_rate = 1_000;
+        let mut bot = Bot::new(sample_rate);
+        bot.clickpack.player1.clicks.push(AudioFile::new(
+            AudioSegment {
+                sample_rate,
+                frames: vec![Frame::new(1.0, 0.5)],
+                pitch_table: Vec::new(),
+            },
+            "click.wav".to_owned(),
+        ));
+        bot.longest_click = 1.0 / sample_rate as f64;
+
+        let mut replay = Replay::build();
+        replay.fps = 1_000.0;
+        replay.duration = 0.5;
+
+        let mut expected_left = 0.0;
+        let mut expected_right = 0.0;
+        for i in 0..16 {
+            let vol_offset = i as f32;
+            let volume = 1.0 + vol_offset;
+            expected_left += volume;
+            expected_right += volume * 0.5;
+            replay.actions.push(crate::Action::new(
+                0.5,
+                Player::One,
+                Click::Regular(ClickType::Click),
+                vol_offset,
+                500,
+            ));
+        }
+
+        let segment = bot.render_replay(
+            &replay,
+            false,
+            0.0,
+            false,
+            ExprVariable::None,
+            false,
+            false,
+            |_| {},
+        );
+
+        assert_eq!(segment.frames[500].left, expected_left);
+        assert_eq!(segment.frames[500].right, expected_right);
     }
 }

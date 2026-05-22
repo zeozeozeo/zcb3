@@ -14,28 +14,37 @@ dlhn = "0.1.7"
 fasteval2 = { git = "https://github.com/zeozeozeo/fasteval2.git", branch = "sqrt-builtin", default-features = false, features = [
     "alpha-keywords",
 ] }
-hound = "3.5.1"
 ijson = "0.1.4"
-leb128 = "0.2.5"
+leb128 = "0.2.6"
 log = "0.4"
 lzma-rs = "0.3.0"
-rayon = { version = "1.11.0", optional = true }
+rayon = { version = "1.12.0", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-symphonia = { version = "0.5.5", features = ["all"] }
+symphonia = { version = "0.6.0", features = ["all"] }
 ybot_fmt = { path = "ybot_fmt" }
 gdr = { path = "gdr" }
 gdr2 = { path = "gdr2" }
 fastrand = "2.3.0"
 flate2 = "1.1.9"
 slc_oxide = "0.2.0"
-rubato = "1.0.1"
-audioadapter = "2.0.0"
-indexmap = "2.13.0"
+rubato = "3.0.0"
+audioadapter = "3.0.0"
+indexmap = "2.14.0"
 tcm = "0.1.0"
-audioadapter-buffers = "2.0.0"
-zip = { version = "8.0.0", default-features = false, features = ["deflate"] }
+audioadapter-buffers = "3.0.0"
+zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 #rmp-serde = "1.3.0"
+
+[dev-dependencies]
+criterion = "0.8"
+
+[lib]
+bench = false
+
+[[bench]]
+name = "render"
+harness = false
 
 [features]
 default = ["rayon"]

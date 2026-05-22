@@ -10,7 +10,7 @@ use std::{
     io::{BufRead, BufReader, Cursor, Read, Seek, SeekFrom},
 };
 
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ClickType {
     HardClick,
     HardRelease,
@@ -175,7 +175,7 @@ impl ClickType {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Click {
     /// Regular player click.
     Regular(ClickType),
@@ -198,6 +198,14 @@ impl Click {
         }
     }
 
+    pub const fn button(self) -> ButtonKind {
+        match self {
+            Click::Regular(_) => ButtonKind::Jump,
+            Click::Left(_) => ButtonKind::Left,
+            Click::Right(_) => ButtonKind::Right,
+        }
+    }
+
     pub const fn is_click(self) -> bool {
         self.click_type().is_click()
     }
@@ -211,6 +219,40 @@ impl Click {
             Button::Push | Button::Release => Self::Regular(typ),
             Button::LeftPush | Button::LeftRelease => Self::Left(typ),
             Button::RightPush | Button::RightRelease => Self::Right(typ),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ButtonKind {
+    #[default]
+    Jump,
+    Left,
+    Right,
+}
+
+impl ButtonKind {
+    pub const fn from_button_index(idx: u8) -> Self {
+        match idx {
+            2 => Self::Left,
+            3 => Self::Right,
+            _ => Self::Jump,
+        }
+    }
+
+    const fn index(self) -> usize {
+        match self {
+            Self::Jump => 0,
+            Self::Left => 1,
+            Self::Right => 2,
+        }
+    }
+
+    const fn to_button(self, down: bool) -> Button {
+        match self {
+            Self::Jump => Button::from_down(down),
+            Self::Left => Button::from_left_down(down),
+            Self::Right => Button::from_right_down(down),
         }
     }
 }
@@ -263,6 +305,15 @@ impl Button {
     }
 
     #[inline]
+    const fn kind(self) -> ButtonKind {
+        match self {
+            Self::Push | Self::Release => ButtonKind::Jump,
+            Self::LeftPush | Self::LeftRelease => ButtonKind::Left,
+            Self::RightPush | Self::RightRelease => ButtonKind::Right,
+        }
+    }
+
+    #[inline]
     const fn is_down(self) -> bool {
         matches!(self, Self::Push | Self::LeftPush | Self::RightPush)
     }
@@ -274,6 +325,65 @@ impl Button {
     // const fn is_right(self) -> bool {
     //     matches!(self, Self::RightPush | Self::RightRelease)
     // }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub struct InputLane {
+    pub player: Player,
+    pub button: ButtonKind,
+}
+
+impl InputLane {
+    pub const fn new(player: Player, button: ButtonKind) -> Self {
+        Self { player, button }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct PhysicsSnapshot {
+    pub x: f32,
+    pub y: f32,
+    pub y_accel: f32,
+    pub rot: f32,
+}
+
+impl PhysicsSnapshot {
+    pub const ZERO: Self = Self {
+        x: 0.0,
+        y: 0.0,
+        y_accel: 0.0,
+        rot: 0.0,
+    };
+
+    pub const fn new(x: f32, y: f32, y_accel: f32, rot: f32) -> Self {
+        Self { x, y, y_accel, rot }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ReplayInput {
+    pub lane: InputLane,
+    pub down: bool,
+    pub frame: u32,
+    pub time: f64,
+    pub physics: Option<PhysicsSnapshot>,
+}
+
+impl ReplayInput {
+    pub const fn new(lane: InputLane, down: bool, frame: u32, time: f64) -> Self {
+        Self {
+            lane,
+            down,
+            frame,
+            time,
+            physics: None,
+        }
+    }
+
+    pub const fn with_physics(mut self, physics: PhysicsSnapshot) -> Self {
+        self.physics = Some(physics);
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -302,7 +412,7 @@ impl Action {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Player {
     #[default]
     One,
@@ -335,8 +445,8 @@ pub struct Replay {
     pub extended: Vec<ExtendedAction>,
 
     // used for determining the click type
-    prev_action: (Option<ClickType>, Option<ClickType>),
-    prev_time: (f64, f64),
+    prev_action: [[Option<ClickType>; 3]; 2],
+    prev_time: [[f64; 3]; 2],
 
     // used for generating additional click info
     timings: Timings,
@@ -541,6 +651,7 @@ impl ReplayType {
             "re3" => ReplayEngine3,
             "slc" => Silicate,
             "slc2" => Silicate2,
+            "slc3" => Silicate3,
             "gdr2" => Gdr2,
             "ttr" => Ttr,
             "uv" => UvBot,
@@ -599,6 +710,10 @@ impl Replay {
 
     pub fn build() -> Self {
         Self::default()
+    }
+
+    pub fn builder() -> ReplayBuilder {
+        ReplayBuilder::new()
     }
 
     pub fn with_timings(mut self, timings: Timings) -> Self {
@@ -709,30 +824,106 @@ impl Replay {
         self
     }
 
-    fn process_action_p1(&mut self, time: f64, button: Button, frame: u32) {
+    pub fn push_input(&mut self, input: ReplayInput) {
+        let button = input.lane.button.to_button(input.down);
+        self.process_action(input.lane.player, input.time, button, input.frame);
+        if let Some(physics) = input.physics {
+            self.push_physics(input.lane.player, input.down, input.frame, physics);
+        }
+    }
+
+    pub fn push_input_parts(
+        &mut self,
+        player: Player,
+        button: ButtonKind,
+        down: bool,
+        frame: u32,
+        time: f64,
+    ) {
+        self.push_input(ReplayInput::new(
+            InputLane::new(player, button),
+            down,
+            frame,
+            time,
+        ));
+    }
+
+    pub fn push_physics(
+        &mut self,
+        player: Player,
+        down: bool,
+        frame: u32,
+        physics: PhysicsSnapshot,
+    ) {
+        match player {
+            Player::One => self.extended_p1(
+                down,
+                frame,
+                physics.x,
+                physics.y,
+                physics.y_accel,
+                physics.rot,
+            ),
+            Player::Two => self.extended_p2(
+                down,
+                frame,
+                physics.x,
+                physics.y,
+                physics.y_accel,
+                physics.rot,
+            ),
+        }
+    }
+
+    pub fn push_fps_change(&mut self, fps_change: f64) {
+        self.fps_change(fps_change);
+    }
+
+    fn push_button_input(
+        &mut self,
+        player: Player,
+        time: f64,
+        button: Button,
+        frame: u32,
+        physics: Option<PhysicsSnapshot>,
+    ) {
+        self.process_action(player, time, button, frame);
+        if let Some(physics) = physics {
+            self.push_physics(player, button.is_down(), frame, physics);
+        }
+    }
+
+    fn process_action(&mut self, player: Player, time: f64, button: Button, frame: u32) {
         let down = button.is_down();
-        if !down && self.actions.is_empty() {
+        let player_idx = match player {
+            Player::One => 0,
+            Player::Two => 1,
+        };
+        let button_idx = button.kind().index();
+        let prev_action = &mut self.prev_action[player_idx][button_idx];
+        let prev_time = &mut self.prev_time[player_idx][button_idx];
+
+        if !down && prev_action.is_none() {
             return;
         }
         // if action is the same, skip it
-        if let Some(typ) = self.prev_action.0 {
+        if let Some(typ) = *prev_action {
             if down == typ.is_click() {
                 return;
             }
         }
 
-        let delta = time - self.prev_time.0;
+        let delta = time - *prev_time;
         let (typ, vol_offset) = ClickType::from_time(delta, self.timings, down, self.vol_settings);
         // println!("ctyp: {typ:?}");
 
-        self.prev_time.0 = time;
-        self.prev_action.0 = Some(typ);
+        *prev_time = time;
+        *prev_action = Some(typ);
         self.actions.push(Action::new(
             time,
-            if self.swap_players {
-                Player::Two
-            } else {
-                Player::One
+            match (self.swap_players, player) {
+                (false, Player::One) | (true, Player::Two) => Player::One,
+                (false, Player::Two) | (true, Player::One) => Player::Two,
             },
             Click::from_button_and_typ(button, typ),
             vol_offset,
@@ -740,34 +931,13 @@ impl Replay {
         ))
     }
 
+    fn process_action_p1(&mut self, time: f64, button: Button, frame: u32) {
+        self.push_button_input(Player::One, time, button, frame, None);
+    }
+
     // .0 is changed to .1 here, because it's the second player
     fn process_action_p2(&mut self, time: f64, button: Button, frame: u32) {
-        let down = button.is_down();
-        if !down && self.actions.is_empty() {
-            return;
-        }
-        if let Some(typ) = self.prev_action.1 {
-            if down == typ.is_click() {
-                return;
-            }
-        }
-
-        let delta = time - self.prev_time.1;
-        let (typ, vol_offset) = ClickType::from_time(delta, self.timings, down, self.vol_settings);
-
-        self.prev_time.1 = time;
-        self.prev_action.1 = Some(typ);
-        self.actions.push(Action::new(
-            time,
-            if self.swap_players {
-                Player::One
-            } else {
-                Player::Two
-            },
-            Click::from_button_and_typ(button, typ),
-            vol_offset,
-            frame,
-        ))
+        self.push_button_input(Player::Two, time, button, frame, None);
     }
 
     fn extended_p1(&mut self, down: bool, frame: u32, x: f32, y: f32, y_accel: f32, rot: f32) {
@@ -2365,8 +2535,9 @@ impl Replay {
             } else {
                 input.frame as f64 / self.fps
             };
+            let button = Button::from_button_idx(input.button, input.down);
             if input.player2 {
-                self.process_action_p2(time, Button::from_down(input.down), input.frame);
+                self.process_action_p2(time, button, input.frame);
                 self.extended_p2(
                     input.down,
                     input.frame,
@@ -2376,7 +2547,7 @@ impl Replay {
                     input.correction.rotation,
                 );
             } else {
-                self.process_action_p1(time, Button::from_down(input.down), input.frame);
+                self.process_action_p1(time, button, input.frame);
                 self.extended_p1(
                     input.down,
                     input.frame,
@@ -2889,34 +3060,40 @@ impl Replay {
 
             if let Some(ac) = p1_action {
                 let button = Button::from_button_idx(ac.button, ac.down);
-                self.process_action_p1(time, button, frame);
+                self.push_button_input(Player::One, time, button, frame, None);
             }
             if let Some(ac) = p2_action {
                 let button = Button::from_button_idx(ac.button, ac.down);
-                self.process_action_p2(time, button, frame);
+                self.push_button_input(Player::Two, time, button, frame, None);
             }
 
             let p1_down = p1_action.as_ref().map(|a| a.down).unwrap_or(false);
             let p2_down = p2_action.as_ref().map(|a| a.down).unwrap_or(false);
 
             if let Some(p1_frame) = p1_frame {
-                self.extended_p1(
+                self.push_physics(
+                    Player::One,
                     p1_down,
                     frame,
-                    p1_frame.x,
-                    p1_frame.y,
-                    p1_frame.y_accel as _,
-                    p1_frame.rot,
+                    PhysicsSnapshot::new(
+                        p1_frame.x,
+                        p1_frame.y,
+                        p1_frame.y_accel as _,
+                        p1_frame.rot,
+                    ),
                 );
             }
             if let Some(p2_frame) = p2_frame {
-                self.extended_p2(
+                self.push_physics(
+                    Player::Two,
                     p2_down,
                     frame,
-                    p2_frame.x,
-                    p2_frame.y,
-                    p2_frame.y_accel as _,
-                    p2_frame.rot,
+                    PhysicsSnapshot::new(
+                        p2_frame.x,
+                        p2_frame.y,
+                        p2_frame.y_accel as _,
+                        p2_frame.rot,
+                    ),
                 );
             }
         }
@@ -2956,29 +3133,28 @@ impl Replay {
                 continue;
             }
             let time = input.frame as f64 / self.fps;
-            let button = Button::from_button_idx(input.button as _, input.down);
             let p = input.physics.clone().unwrap_or_default();
-            if input.player2 {
-                self.process_action_p2(time, button, input.frame as _);
-                self.extended_p2(
+            self.push_input(
+                ReplayInput::new(
+                    InputLane::new(
+                        if input.player2 {
+                            Player::Two
+                        } else {
+                            Player::One
+                        },
+                        ButtonKind::from_button_index(input.button),
+                    ),
                     input.down,
                     input.frame as _,
+                    time,
+                )
+                .with_physics(PhysicsSnapshot::new(
                     p.x_position,
                     p.y_position,
                     p.y_velocity as _,
                     p.rotation,
-                );
-            } else {
-                self.process_action_p1(time, button, input.frame as _);
-                self.extended_p1(
-                    input.down,
-                    input.frame as _,
-                    p.x_position,
-                    p.y_position,
-                    p.y_velocity as _,
-                    p.rotation,
-                );
-            }
+                )),
+            );
         }
 
         Ok(())
@@ -3047,14 +3223,22 @@ impl Replay {
                     self.fps_change(*tps);
                 }
                 InputData::Player(player) => {
-                    let button = Button::from_button_idx(player.button as _, player.hold);
-                    if player.player_2 {
-                        self.process_action_p2(time, button, input.frame as _);
-                        self.extended_p2(player.hold, input.frame as _, 0.0, 0.0, 0.0, 0.0);
-                    } else {
-                        self.process_action_p1(time, button, input.frame as _);
-                        self.extended_p1(player.hold, input.frame as _, 0.0, 0.0, 0.0, 0.0);
-                    }
+                    self.push_input(
+                        ReplayInput::new(
+                            InputLane::new(
+                                if player.player_2 {
+                                    Player::Two
+                                } else {
+                                    Player::One
+                                },
+                                ButtonKind::from_button_index(player.button),
+                            ),
+                            player.hold,
+                            input.frame as _,
+                            time,
+                        )
+                        .with_physics(PhysicsSnapshot::ZERO),
+                    );
                 }
                 _ => (),
             }
@@ -3075,7 +3259,22 @@ impl Replay {
             replay.inputs.len()
         );
 
-        for input in &replay.inputs {
+        let start = if self.discard_deaths {
+            replay
+                .inputs
+                .iter()
+                .rposition(|i| {
+                    matches!(
+                        i.data,
+                        InputData::Restart | InputData::RestartFull | InputData::Death
+                    )
+                })
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        for input in replay.inputs.iter().skip(start) {
             let time = input.frame as f64 / self.fps;
             match &input.data {
                 InputData::TPS(tps) => {
@@ -3083,14 +3282,22 @@ impl Replay {
                     self.fps_change(*tps);
                 }
                 InputData::Player(player) => {
-                    let button = Button::from_button_idx(player.button as _, player.hold);
-                    if player.player_2 {
-                        self.process_action_p2(time, button, input.frame as _);
-                        self.extended_p2(player.hold, input.frame as _, 0.0, 0.0, 0.0, 0.0);
-                    } else {
-                        self.process_action_p1(time, button, input.frame as _);
-                        self.extended_p1(player.hold, input.frame as _, 0.0, 0.0, 0.0, 0.0);
-                    }
+                    self.push_input(
+                        ReplayInput::new(
+                            InputLane::new(
+                                if player.player_2 {
+                                    Player::Two
+                                } else {
+                                    Player::One
+                                },
+                                ButtonKind::from_button_index(player.button),
+                            ),
+                            player.hold,
+                            input.frame as _,
+                            time,
+                        )
+                        .with_physics(PhysicsSnapshot::ZERO),
+                    );
                 }
                 _ => (),
             }
@@ -3256,11 +3463,17 @@ impl Replay {
             let time = frame as f64 / self.fps;
 
             for input in inputs {
-                if !input.player_2 {
-                    self.process_action_p1(time, input.button, frame as _);
-                } else {
-                    self.process_action_p2(time, input.button, frame as _);
-                }
+                self.push_button_input(
+                    if input.player_2 {
+                        Player::Two
+                    } else {
+                        Player::One
+                    },
+                    time,
+                    input.button,
+                    frame as _,
+                    None,
+                );
             }
 
             let p1_down = self
@@ -3277,24 +3490,30 @@ impl Replay {
                 .unwrap_or(false);
 
             if let Some(p1_physics) = p1_physics {
-                self.extended_p1(
+                self.push_physics(
+                    Player::One,
                     p1_down,
                     frame as _,
-                    p1_physics.x,
-                    p1_physics.y,
-                    p1_physics.y_velocity as _,
-                    p1_physics.rotation,
+                    PhysicsSnapshot::new(
+                        p1_physics.x,
+                        p1_physics.y,
+                        p1_physics.y_velocity as _,
+                        p1_physics.rotation,
+                    ),
                 );
             }
 
             if let Some(p2_physics) = p2_physics {
-                self.extended_p2(
+                self.push_physics(
+                    Player::Two,
                     p2_down,
                     frame as _,
-                    p2_physics.x,
-                    p2_physics.y,
-                    p2_physics.y_velocity as _,
-                    p2_physics.rotation,
+                    PhysicsSnapshot::new(
+                        p2_physics.x,
+                        p2_physics.y,
+                        p2_physics.y_velocity as _,
+                        p2_physics.rotation,
+                    ),
                 );
             }
         }
@@ -3322,25 +3541,191 @@ impl Replay {
                     self.fps_change(tps);
                 }
                 Vanilla(v) => {
-                    if v.player2 {
-                        self.process_action_p1(
-                            time,
-                            Button::from_button_idx(v.button as _, v.push),
-                            input.frame as _,
-                        );
-                        self.extended_p1(v.push, input.frame as _, 0.0, 0.0, 0.0, 0.0);
-                    } else {
-                        self.process_action_p2(
-                            time,
-                            Button::from_button_idx(v.button as _, v.push),
-                            input.frame as _,
-                        );
-                        self.extended_p2(v.push, input.frame as _, 0.0, 0.0, 0.0, 0.0);
-                    }
+                    self.push_button_input(
+                        if v.player2 { Player::One } else { Player::Two },
+                        time,
+                        Button::from_button_idx(v.button as _, v.push),
+                        input.frame as _,
+                        Some(PhysicsSnapshot::ZERO),
+                    );
                 }
                 _ => (),
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ReplayBuilder {
+    replay: Replay,
+}
+
+impl ReplayBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn from_replay(replay: Replay) -> Self {
+        Self { replay }
+    }
+
+    pub fn with_timings(mut self, timings: Timings) -> Self {
+        self.replay.timings = timings;
+        self
+    }
+
+    pub fn with_override_fps(mut self, override_fps: Option<f64>) -> Self {
+        self.replay.override_fps = override_fps;
+        self
+    }
+
+    pub fn with_vol_settings(mut self, vol_settings: VolumeSettings) -> Self {
+        self.replay.vol_settings = vol_settings;
+        self
+    }
+
+    pub fn with_extended(mut self, extended: bool) -> Self {
+        self.replay.extended_data = extended;
+        self
+    }
+
+    pub fn with_sort_actions(mut self, sort_actions: bool) -> Self {
+        self.replay.sort_actions = sort_actions;
+        self
+    }
+
+    pub fn with_discard_deaths(mut self, discard_deaths: bool) -> Self {
+        self.replay.discard_deaths = discard_deaths;
+        self
+    }
+
+    pub fn with_swap_players(mut self, swap_players: bool) -> Self {
+        self.replay.swap_players = swap_players;
+        self
+    }
+
+    pub fn set_fps(&mut self, fps: f64) {
+        self.replay.fps = fps;
+    }
+
+    pub fn push_input(&mut self, input: ReplayInput) {
+        self.replay.push_input(input);
+    }
+
+    pub fn push_input_parts(
+        &mut self,
+        player: Player,
+        button: ButtonKind,
+        down: bool,
+        frame: u32,
+        time: f64,
+    ) {
+        self.replay
+            .push_input_parts(player, button, down, frame, time);
+    }
+
+    pub fn push_physics(
+        &mut self,
+        player: Player,
+        down: bool,
+        frame: u32,
+        physics: PhysicsSnapshot,
+    ) {
+        self.replay.push_physics(player, down, frame, physics);
+    }
+
+    pub fn push_fps_change(&mut self, fps_change: f64) {
+        self.replay.push_fps_change(fps_change);
+    }
+
+    pub fn parse<R: Read + Seek>(self, typ: ReplayType, reader: R) -> Result<Replay> {
+        self.replay.parse(typ, reader)
+    }
+
+    pub fn finish(mut self) -> Replay {
+        if self.replay.sort_actions {
+            self.replay.sort_actions();
+        }
+        if let Some(last) = self.replay.actions.last() {
+            self.replay.duration = last.time;
+        }
+        self.replay
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn same_frame_buttons_are_independent_lanes() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+
+        replay.process_action_p1(1.0, Button::from_down(true), 240);
+        replay.process_action_p1(1.0, Button::from_left_down(true), 240);
+        replay.process_action_p1(1.0, Button::from_right_down(true), 240);
+
+        assert_eq!(replay.actions.len(), 3);
+        assert!(matches!(replay.actions[0].click, Click::Regular(_)));
+        assert!(matches!(replay.actions[1].click, Click::Left(_)));
+        assert!(matches!(replay.actions[2].click, Click::Right(_)));
+    }
+
+    #[test]
+    fn every_frame_spam_is_not_suppressed() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+
+        for frame in 0..16 {
+            let down = frame % 2 == 0;
+            replay.process_action_p1(frame as f64 / replay.fps, Button::from_down(down), frame);
+        }
+
+        assert_eq!(replay.actions.len(), 16);
+        assert!(replay.actions.iter().all(|a| matches!(
+            a.click.click_type(),
+            ClickType::MicroClick | ClickType::MicroRelease
+        )));
+    }
+
+    #[test]
+    fn guesses_slc3_extension() {
+        assert_eq!(
+            ReplayType::guess_format("macro.slc3").unwrap(),
+            ReplayType::Silicate3
+        );
+    }
+
+    #[test]
+    fn replay_builder_centralizes_lane_state_and_physics() {
+        let mut builder = Replay::builder().with_extended(true);
+        builder.set_fps(240.0);
+        builder.push_input(
+            ReplayInput::new(
+                InputLane::new(Player::One, ButtonKind::Left),
+                true,
+                120,
+                0.5,
+            )
+            .with_physics(PhysicsSnapshot::new(1.0, 2.0, 3.0, 4.0)),
+        );
+        builder.push_input_parts(Player::One, ButtonKind::Right, true, 120, 0.5);
+        builder.push_physics(
+            Player::One,
+            true,
+            120,
+            PhysicsSnapshot::new(5.0, 6.0, 7.0, 8.0),
+        );
+
+        let replay = builder.finish();
+
+        assert_eq!(replay.actions.len(), 2);
+        assert_eq!(replay.actions[0].click.button(), ButtonKind::Left);
+        assert_eq!(replay.actions[1].click.button(), ButtonKind::Right);
+        assert_eq!(replay.extended.len(), 2);
+        assert_eq!(replay.extended[0].x, 1.0);
+        assert_eq!(replay.extended[1].x, 5.0);
     }
 }

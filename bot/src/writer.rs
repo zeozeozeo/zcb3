@@ -15,20 +15,33 @@ pub struct Writer {
     fps: f64,
     duration: f64,
     actions: Vec<Action>,
-    extended_map: HashMap<u32, ExtendedAction>,
+    extended_map: HashMap<(u32, bool), ExtendedAction>,
 }
 
 #[derive(Clone, Copy)]
 struct Action {
     time: f64,
     player: Player,
+    button: crate::ButtonKind,
     down: bool,
     frame: u32,
 }
 
+fn button_num(button: crate::ButtonKind) -> u8 {
+    match button {
+        crate::ButtonKind::Jump => 1,
+        crate::ButtonKind::Left => 2,
+        crate::ButtonKind::Right => 3,
+    }
+}
+
 impl Writer {
     pub fn new(replay: ZcbReplay) -> Self {
-        let extended_map = replay.extended.iter().map(|e| (e.frame, *e)).collect();
+        let extended_map = replay
+            .extended
+            .iter()
+            .map(|e| ((e.frame, e.player2), *e))
+            .collect();
 
         let actions = replay
             .actions
@@ -36,6 +49,7 @@ impl Writer {
             .map(|a| Action {
                 time: a.time,
                 player: a.player,
+                button: a.click.button(),
                 down: a.click.is_click(),
                 frame: a.frame,
             })
@@ -86,8 +100,8 @@ impl Writer {
         }
     }
 
-    fn get_extended(&self, frame: u32, _player2: bool) -> Option<ExtendedAction> {
-        self.extended_map.get(&frame).copied()
+    fn get_extended(&self, frame: u32, player2: bool) -> Option<ExtendedAction> {
+        self.extended_map.get(&(frame, player2)).copied()
     }
 
     fn write_ttr<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
@@ -96,7 +110,11 @@ impl Writer {
         header.write_u16::<LittleEndian>(4)?;
 
         let mut flags = 0u32;
-        if self.actions.iter().any(|action| action.player == Player::Two) {
+        if self
+            .actions
+            .iter()
+            .any(|action| action.player == Player::Two)
+        {
             flags |= 1 << 3;
         }
         header.write_u32::<LittleEndian>(flags)?;
@@ -613,7 +631,7 @@ impl Writer {
             let ad = ActionDataNew {
                 frame: action.frame,
                 hold: action.down,
-                button: 1,
+                button: button_num(action.button) as i32,
                 player2: action.player == Player::Two,
             };
             let bytes = unsafe {
@@ -735,7 +753,7 @@ impl Writer {
 
             inputs.push(gdr::Input {
                 player2: action.player == Player::Two,
-                button: 1,
+                button: button_num(action.button) as i32,
                 down: action.down,
                 correction: gdr::Correction {
                     node_x_pos: x_pos,
@@ -921,7 +939,7 @@ impl Writer {
             let fd = FrameData {
                 frame: action.frame,
                 hold: action.down,
-                button: 1,
+                button: button_num(action.button) as i32,
                 player2: action.player == Player::Two,
             };
             let bytes = unsafe {
@@ -1013,7 +1031,7 @@ impl Writer {
             let ad = ActionDataRe3 {
                 frame: action.frame,
                 down: action.down,
-                button: 1,
+                button: button_num(action.button) as i32,
                 player1: true,
             };
             let bytes = unsafe {
@@ -1028,7 +1046,7 @@ impl Writer {
             let ad = ActionDataRe3 {
                 frame: action.frame,
                 down: action.down,
-                button: 1,
+                button: button_num(action.button) as i32,
                 player1: false,
             };
             let bytes = unsafe {
@@ -1061,7 +1079,7 @@ impl Writer {
 
             inputs.push(gdr2::Input {
                 frame: action.frame as u64,
-                button: 1,
+                button: button_num(action.button),
                 player2: action.player == Player::Two,
                 down: action.down,
                 physics,
@@ -1077,7 +1095,10 @@ impl Writer {
             seed: 0,
             coins: 0,
             ldm: false,
-            platformer: false,
+            platformer: self
+                .actions
+                .iter()
+                .any(|action| action.button != crate::ButtonKind::Jump),
             bot_info: Bot::default(),
             level_info: Level::default(),
             inputs,
@@ -1096,12 +1117,14 @@ impl Writer {
         for action in &self.actions {
             let player2 = action.player == Player::Two;
             let down = action.down;
-            let button = 1i32; // jump
+            let button = match action.button {
+                crate::ButtonKind::Jump => 1u32,
+                crate::ButtonKind::Left => 2,
+                crate::ButtonKind::Right => 3,
+            };
 
-            let packed = (action.frame << 4)
-                | ((button as u32) << 1)
-                | ((player2 as u32) << 3)
-                | (down as u32);
+            let packed =
+                (action.frame << 4) | (button << 1) | ((player2 as u32) << 3) | (down as u32);
             writer.write_u32::<LittleEndian>(packed)?;
         }
 
@@ -1117,7 +1140,7 @@ impl Writer {
             replay.add_input(
                 action.frame as u64,
                 InputData::Player(PlayerInput {
-                    button: 1,
+                    button: button_num(action.button),
                     hold: action.down,
                     player_2: action.player == Player::Two,
                 }),
@@ -1139,7 +1162,7 @@ impl Writer {
             replay.add_input(
                 action.frame as u64,
                 InputData::Player(PlayerInput {
-                    button: 1,
+                    button: button_num(action.button),
                     hold: action.down,
                     player_2: action.player == Player::Two,
                 }),
@@ -1204,8 +1227,9 @@ impl Writer {
 
         for action in &self.actions {
             let frame = action.frame as u64;
-            let flags =
-                (action.down as u8) | ((1u8) << 1) | ((action.player == Player::Two) as u8) << 2;
+            let button = button_num(action.button) - 1;
+            let encoded = button + if action.player == Player::Two { 3 } else { 0 };
+            let flags = (action.down as u8) | (encoded << 1);
             writer.write_u64::<LittleEndian>(frame)?;
             writer.write_u8(flags)?;
         }
@@ -1519,6 +1543,63 @@ mod tests {
         }
     }
 
+    fn button_roundtrip_replay() -> Replay {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.actions.push(Action::new(
+            10.0 / replay.fps,
+            Player::One,
+            Click::Left(ClickType::Click),
+            0.0,
+            10,
+        ));
+        replay.actions.push(Action::new(
+            11.0 / replay.fps,
+            Player::One,
+            Click::Left(ClickType::Release),
+            0.0,
+            11,
+        ));
+        replay.actions.push(Action::new(
+            12.0 / replay.fps,
+            Player::Two,
+            Click::Right(ClickType::Click),
+            0.0,
+            12,
+        ));
+        replay.actions.push(Action::new(
+            13.0 / replay.fps,
+            Player::Two,
+            Click::Right(ClickType::Release),
+            0.0,
+            13,
+        ));
+        replay.duration = 13.0 / replay.fps;
+        replay
+    }
+
+    fn test_button_roundtrip(typ: ReplayType) {
+        let original = button_roundtrip_replay();
+        let writer = original.to_writer();
+        let mut buffer = Cursor::new(Vec::new());
+        writer.write(typ, &mut buffer).unwrap();
+
+        let parsed = Replay::build()
+            .parse(typ, Cursor::new(buffer.into_inner()))
+            .unwrap();
+
+        assert_eq!(parsed.actions.len(), original.actions.len());
+        for (original, parsed) in original.actions.iter().zip(&parsed.actions) {
+            assert_eq!(parsed.player, original.player, "{typ:?}");
+            assert_eq!(parsed.click.button(), original.click.button(), "{typ:?}");
+            assert_eq!(
+                parsed.click.is_click(),
+                original.click.is_click(),
+                "{typ:?}"
+            );
+        }
+    }
+
     #[test]
     fn test_tasbot_json() {
         test_roundtrip(ReplayType::TasBot, "json");
@@ -1744,5 +1825,20 @@ mod tests {
     #[test]
     fn test_tcm() {
         test_roundtrip(ReplayType::TcBot, "tcm");
+    }
+
+    #[test]
+    fn test_supported_format_button_roundtrips() {
+        for typ in [
+            ReplayType::Gdr,
+            ReplayType::Gdr2,
+            ReplayType::ReplayEngine3,
+            ReplayType::Silicate,
+            ReplayType::Silicate2,
+            ReplayType::Silicate3,
+            ReplayType::UvBot,
+        ] {
+            test_button_roundtrip(typ);
+        }
     }
 }

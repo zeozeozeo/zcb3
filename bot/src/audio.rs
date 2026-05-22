@@ -1,26 +1,30 @@
 use anyhow::{Context, Result};
 use audioadapter_buffers::direct::InterleavedSlice;
+use byteorder::{LittleEndian, WriteBytesExt};
 #[cfg(feature = "rayon")]
 use rayon::prelude::*;
 use rubato::{
     Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
     WindowFunction,
 };
-use std::io::{BufWriter, Cursor};
+use std::io::{BufWriter, Cursor, Write};
+use std::mem::size_of;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Neg, Sub, SubAssign};
 use std::time::Duration;
-use symphonia::core::audio::{AudioBuffer, AudioBufferRef, Signal};
-use symphonia::core::codecs::DecoderOptions;
-use symphonia::core::conv::{FromSample, IntoSample};
+use symphonia::core::audio::conv::{FromSample, IntoSample};
+use symphonia::core::audio::sample::Sample;
+use symphonia::core::audio::{Audio, AudioBuffer, GenericAudioBufferRef};
+use symphonia::core::codecs::audio::AudioDecoderOptions;
 use symphonia::core::errors::Error;
-use symphonia::core::formats::FormatOptions;
+use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::{FormatOptions, TrackType};
 use symphonia::core::io::{MediaSource, MediaSourceStream};
 use symphonia::core::meta::MetadataOptions;
-use symphonia::core::probe::Hint;
-use symphonia::core::sample::Sample;
 
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Instant;
+
+const MAX_PITCH_VARIANTS: usize = 64;
 
 /// Represents an audio sample. Stores a left and right channel.
 #[derive(Debug, Copy, Clone, PartialEq, Default)]
@@ -144,18 +148,18 @@ pub struct AudioSegment {
     pub pitch_table: Vec<AudioSegment>,
 }
 
-fn load_frames_from_buffer_ref(buffer: &AudioBufferRef) -> Result<Vec<Frame>> {
+fn load_frames_from_buffer_ref(buffer: &GenericAudioBufferRef<'_>) -> Result<Vec<Frame>> {
     match buffer {
-        AudioBufferRef::U8(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::U16(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::U24(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::U32(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::S8(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::S16(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::S24(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::S32(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::F32(buffer) => load_frames_from_buffer(buffer),
-        AudioBufferRef::F64(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::U8(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::U16(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::U24(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::U32(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::S8(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::S16(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::S24(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::S32(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::F32(buffer) => load_frames_from_buffer(buffer),
+        GenericAudioBufferRef::F64(buffer) => load_frames_from_buffer(buffer),
     }
 }
 
@@ -163,19 +167,24 @@ fn load_frames_from_buffer<S: Sample>(buffer: &AudioBuffer<S>) -> Result<Vec<Fra
 where
     f32: FromSample<S>,
 {
-    let num_channels = buffer.spec().channels.count();
+    let num_channels = buffer.spec().channels().count();
     match num_channels {
         1 => Ok(buffer
-            .chan(0)
+            .plane(0)
+            .context("missing mono audio channel")?
             .iter()
             .map(|sample| Frame::from_mono((*sample).into_sample()))
             .collect()),
-        2 => Ok(buffer
-            .chan(0)
-            .iter()
-            .zip(buffer.chan(1).iter())
-            .map(|(left, right)| Frame::new((*left).into_sample(), (*right).into_sample()))
-            .collect()),
+        2 => {
+            let (left_channel, right_channel) = buffer
+                .plane_pair(0, 1)
+                .context("missing stereo audio channels")?;
+            Ok(left_channel
+                .iter()
+                .zip(right_channel.iter())
+                .map(|(left, right)| Frame::new((*left).into_sample(), (*right).into_sample()))
+                .collect())
+        }
         _ => anyhow::bail!("unsupported number of channels {num_channels}, expected 1 or 2"),
     }
 }
@@ -200,33 +209,36 @@ impl AudioSegment {
         // use default options for reading and encoding
         let format_opts: FormatOptions = Default::default();
         let metadata_opts: MetadataOptions = Default::default();
-        let decoder_opts: DecoderOptions = Default::default();
+        let decoder_opts: AudioDecoderOptions = Default::default();
 
         // probe the media source for a format
-        let probed =
-            symphonia::default::get_probe().format(&hint, mss, &format_opts, &metadata_opts)?;
-
-        let mut format = probed.format;
+        let mut format =
+            symphonia::default::get_probe().probe(&hint, mss, format_opts, metadata_opts)?;
         let track = format
-            .default_track()
+            .default_track(TrackType::Audio)
             .context("failed to get default track")?;
+        let codec_params = track
+            .codec_params
+            .as_ref()
+            .and_then(|params| params.audio())
+            .context("failed to get audio codec parameters")?
+            .clone();
 
         // create a decoder for the track
         let mut decoder =
-            symphonia::default::get_codecs().make(&track.codec_params, &decoder_opts)?;
+            symphonia::default::get_codecs().make_audio_decoder(&codec_params, &decoder_opts)?;
 
         // store the track identifier, we'll use it to filter packets
         let track_id = track.id;
 
         // get sample rate
-        let sample_rate = track
-            .codec_params
+        let sample_rate = codec_params
             .sample_rate
             .context("failed to get sample rate")?;
 
         log::info!(
             "sample rate: {sample_rate}, chns: {}",
-            track.codec_params.channels.unwrap_or_default()
+            codec_params.channels.unwrap_or_default()
         );
 
         let mut frames = Vec::new(); // audio data
@@ -234,7 +246,8 @@ impl AudioSegment {
         loop {
             // get the next packet from the format reader
             let packet = match format.next_packet() {
-                Ok(p) => p,
+                Ok(Some(p)) => p,
+                Ok(None) => break,
                 Err(Error::IoError(e)) => {
                     // if we reached eof, stop decoding
                     if e.kind() == UnexpectedEof {
@@ -247,7 +260,7 @@ impl AudioSegment {
             };
 
             // if the packet does not belong to the selected track, skip it
-            if packet.track_id() != track_id {
+            if packet.track_id != track_id {
                 continue;
             }
 
@@ -286,31 +299,47 @@ impl AudioSegment {
         writer: W,
         clamp: bool,
     ) -> Result<()> {
-        let spec = hound::WavSpec {
-            channels: Self::NUM_CHANNELS as _,
-            sample_rate: self.sample_rate,
-            bits_per_sample: 32,
-            sample_format: hound::SampleFormat::Float,
-        };
         log::info!("writing wav file");
         #[cfg(not(target_arch = "wasm32"))]
         let start = Instant::now();
 
+        let data_bytes = self
+            .frames
+            .len()
+            .checked_mul(Self::NUM_CHANNELS)
+            .and_then(|v| v.checked_mul(size_of::<f32>()))
+            .context("WAV data size overflow")?;
+        let data_bytes_u32 =
+            u32::try_from(data_bytes).context("WAV data is too large for RIFF/WAVE")?;
+
         // create buffered writer with 16mb buffer size
-        let mut wav =
-            hound::WavWriter::new(BufWriter::with_capacity(16 * 1024 * 1024, writer), spec)?;
+        let mut wav = BufWriter::with_capacity(16 * 1024 * 1024, writer);
+        wav.write_all(b"RIFF")?;
+        wav.write_u32::<LittleEndian>(36 + data_bytes_u32)?;
+        wav.write_all(b"WAVE")?;
+        wav.write_all(b"fmt ")?;
+        wav.write_u32::<LittleEndian>(16)?;
+        wav.write_u16::<LittleEndian>(3)?; // IEEE float
+        wav.write_u16::<LittleEndian>(Self::NUM_CHANNELS as u16)?;
+        wav.write_u32::<LittleEndian>(self.sample_rate)?;
+        wav.write_u32::<LittleEndian>(self.sample_rate * Self::NUM_CHANNELS as u32 * 4)?;
+        wav.write_u16::<LittleEndian>((Self::NUM_CHANNELS * 4) as u16)?;
+        wav.write_u16::<LittleEndian>(32)?;
+        wav.write_all(b"data")?;
+        wav.write_u32::<LittleEndian>(data_bytes_u32)?;
+
         if clamp {
             for frame in &self.frames {
-                wav.write_sample(frame.left.clamp(-1.0, 1.0))?;
-                wav.write_sample(frame.right.clamp(-1.0, 1.0))?;
+                wav.write_f32::<LittleEndian>(frame.left.clamp(-1.0, 1.0))?;
+                wav.write_f32::<LittleEndian>(frame.right.clamp(-1.0, 1.0))?;
             }
         } else {
             for frame in &self.frames {
-                wav.write_sample(frame.left)?;
-                wav.write_sample(frame.right)?;
+                wav.write_f32::<LittleEndian>(frame.left)?;
+                wav.write_f32::<LittleEndian>(frame.right)?;
             }
         }
-        wav.finalize()?; // flush writer
+        wav.flush()?;
 
         #[cfg(not(target_arch = "wasm32"))]
         log::info!("finished writing wav file in {:?}", start.elapsed());
@@ -325,23 +354,54 @@ impl AudioSegment {
         time_to_frame(self.sample_rate, time).min(self.frames.len().saturating_sub(1))
     }
 
+    #[inline(always)]
+    fn frames_for_duration(&self, dur: f64) -> usize {
+        if dur.is_finite() {
+            time_to_frame(self.sample_rate, dur)
+        } else {
+            usize::MAX
+        }
+    }
+
     #[inline]
     pub fn overlay_at(&mut self, time: f64, other: &AudioSegment, dur: f64) {
         debug_assert!(self.sample_rate == other.sample_rate);
 
         let start = self.time_to_frame(time);
-        let end = (start + other.frames.len().min(self.time_to_frame(dur)))
-            .min(self.frames.len().saturating_sub(1));
+        let len = other
+            .frames
+            .len()
+            .min(self.frames_for_duration(dur))
+            .min(self.frames.len().saturating_sub(start));
+        if len == 0 {
+            return;
+        }
+        let end = start + len;
 
         #[cfg(feature = "rayon")]
-        let iter = self.frames[start..end].par_iter_mut();
+        let use_parallel = len >= 32 * 1024;
         #[cfg(not(feature = "rayon"))]
-        let iter = self.frames[start..end].iter_mut();
+        let use_parallel = false;
 
-        iter.zip(&other.frames).for_each(|(s, o)| {
-            s.left += o.left;
-            s.right += o.right;
-        });
+        #[cfg(feature = "rayon")]
+        if use_parallel {
+            self.frames[start..end]
+                .par_iter_mut()
+                .zip(&other.frames[..len])
+                .for_each(|(s, o)| {
+                    s.left += o.left;
+                    s.right += o.right;
+                });
+            return;
+        }
+
+        self.frames[start..end]
+            .iter_mut()
+            .zip(&other.frames[..len])
+            .for_each(|(s, o)| {
+                s.left += o.left;
+                s.right += o.right;
+            });
     }
 
     #[inline]
@@ -355,18 +415,40 @@ impl AudioSegment {
         }
 
         let start = self.time_to_frame(time);
-        let end = (start + other.frames.len().min(self.time_to_frame(dur)))
-            .min(self.frames.len().saturating_sub(1));
+        let len = other
+            .frames
+            .len()
+            .min(self.frames_for_duration(dur))
+            .min(self.frames.len().saturating_sub(start));
+        if len == 0 {
+            return;
+        }
+        let end = start + len;
 
         #[cfg(feature = "rayon")]
-        let iter = self.frames[start..end].par_iter_mut();
+        let use_parallel = len >= 32 * 1024;
         #[cfg(not(feature = "rayon"))]
-        let iter = self.frames[start..end].iter_mut();
+        let use_parallel = false;
 
-        iter.zip(&other.frames).for_each(|(s, o)| {
-            s.left += o.left * volume;
-            s.right += o.right * volume;
-        });
+        #[cfg(feature = "rayon")]
+        if use_parallel {
+            self.frames[start..end]
+                .par_iter_mut()
+                .zip(&other.frames[..len])
+                .for_each(|(s, o)| {
+                    s.left += o.left * volume;
+                    s.right += o.right * volume;
+                });
+            return;
+        }
+
+        self.frames[start..end]
+            .iter_mut()
+            .zip(&other.frames[..len])
+            .for_each(|(s, o)| {
+                s.left += o.left * volume;
+                s.right += o.right * volume;
+            });
     }
 
     /// Returns the duration of the audio segment.
@@ -496,18 +578,24 @@ impl AudioSegment {
 
     /// Generates a pitch table for an audiosegment (pitch ranges from `from` to `to` with step `step`).
     pub fn make_pitch_table(&mut self, from: f32, to: f32, step: f32) {
-        let old_seg = self.clone();
-        self.pitch_table = vec![old_seg; ((to - from) / step) as usize];
-        #[cfg(feature = "rayon")]
-        let iter = self.pitch_table.par_iter_mut();
-        #[cfg(not(feature = "rayon"))]
-        let iter = self.pitch_table.iter_mut();
+        self.pitch_table.clear();
+        if step <= 0.0 || (to - from).abs() <= f32::EPSILON {
+            return;
+        }
 
-        iter.enumerate().for_each(|(i, seg)| {
-            let cur = from + (i as f32 * step);
+        let requested = ((to - from).abs() / step).ceil() as usize;
+        let variants = requested.clamp(1, MAX_PITCH_VARIANTS);
+        let actual_step = (to - from) / variants as f32;
+        self.pitch_table.reserve(variants);
+
+        for i in 0..variants {
+            let mut seg = self.clone();
+            seg.pitch_table.clear();
+            let cur = from + (i as f32 * actual_step);
             seg.resample((self.sample_rate as f32 * cur) as u32);
             seg.sample_rate = self.sample_rate; // keep same sample rate
-        });
+            self.pitch_table.push(seg);
+        }
     }
 
     /// Does not clear the pitch table, only clears data
@@ -611,5 +699,28 @@ mod tests {
         #[allow(clippy::approx_constant)]
         let sample = segment.time_to_frame(3.14);
         assert!(segment.frames.get(sample).is_some());
+    }
+
+    #[test]
+    fn exported_wav_has_float_header_and_data() {
+        let segment = AudioSegment {
+            sample_rate: 44_100,
+            frames: vec![Frame::new(0.25, -0.25), Frame::new(0.5, -0.5)],
+            pitch_table: Vec::new(),
+        };
+
+        let data = segment.export_wav_bytes(false).unwrap();
+
+        assert_eq!(&data[0..4], b"RIFF");
+        assert_eq!(&data[8..12], b"WAVE");
+        assert_eq!(&data[12..16], b"fmt ");
+        assert_eq!(u16::from_le_bytes([data[20], data[21]]), 3);
+        assert_eq!(u16::from_le_bytes([data[22], data[23]]), 2);
+        assert_eq!(u16::from_le_bytes([data[34], data[35]]), 32);
+        assert_eq!(&data[36..40], b"data");
+        assert_eq!(
+            u32::from_le_bytes([data[40], data[41], data[42], data[43]]),
+            16
+        );
     }
 }

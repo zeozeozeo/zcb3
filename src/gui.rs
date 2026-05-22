@@ -258,7 +258,7 @@ struct App {
     #[cfg(target_arch = "wasm32")]
     output_handle: Option<SendWrapper<FileHandle>>,
     // autocutter: AutoCutter,
-    last_chars: [Key; 9],
+    last_chars: [Key; 5],
     char_idx: u8,
     expr_error: String,
     plot_points: Rc<Vec<PlotPoint>>,
@@ -302,7 +302,7 @@ impl Default for App {
             bot: RefCell::new(Bot::default()),
             output: None,
             // autocutter: AutoCutter::default(),
-            last_chars: [Key::A; 9],
+            last_chars: [Key::A; 5],
             char_idx: 0,
             expr_error: String::new(),
             plot_points: Rc::new(vec![]),
@@ -406,17 +406,17 @@ impl eframe::App for App {
 
         ctx.input(|i| {
             use Key::*;
-            const BOYKISSER: [Key; 9] = [B, O, Y, K, I, S, S, E, R];
-            for key in BOYKISSER {
+            const DEBUG: [Key; 5] = [D, E, B, U, G];
+            for key in DEBUG {
                 if i.key_pressed(key) {
                     self.last_chars[self.char_idx as usize] = key;
                     self.char_idx += 1;
-                    self.char_idx %= BOYKISSER.len() as u8;
+                    self.char_idx %= DEBUG.len() as u8;
                     break;
                 }
             }
-            if self.last_chars == BOYKISSER {
-                self.last_chars = [Key::A; BOYKISSER.len()];
+            if self.last_chars == DEBUG {
+                self.last_chars = [Key::A; DEBUG.len()];
                 self.stage = Stage::Secret;
             }
         });
@@ -570,7 +570,8 @@ impl eframe::App for App {
                             "This egui backend doesn't support multiple viewports",
                         );
 
-                        egui::CentralPanel::default().show_inside(ui, |ui| {
+                        #[allow(deprecated)]
+                        egui::CentralPanel::default().show(ctx, |ui| {
                             self.show_clickpack_db(ctx, ui);
                         });
 
