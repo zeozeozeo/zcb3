@@ -527,6 +527,8 @@ pub enum ReplayType {
     UvBot,
     // TCBot .tcm files
     TcBot,
+    /// xdBot 2.7 compressed macro files
+    Cml,
 }
 
 impl ReplayType {
@@ -564,6 +566,7 @@ impl ReplayType {
             ReplayType::Ttr => "ttr",
             ReplayType::UvBot => "uv",
             ReplayType::TcBot => "tcm",
+            ReplayType::Cml => "cml",
         }
     }
 
@@ -601,6 +604,7 @@ impl ReplayType {
             ReplayType::Ttr => "ToastyReplay (.ttr)",
             ReplayType::UvBot => "UvBot (.uv)",
             ReplayType::TcBot => "TcBot (.tcm)",
+            ReplayType::Cml => "xdBot compressed macro (.cml)",
         }
     }
 }
@@ -656,6 +660,7 @@ impl ReplayType {
             "ttr" => Ttr,
             "uv" => UvBot,
             "tcm" => TcBot,
+            "cml" => Cml,
             _ => anyhow::bail!("unknown replay format"),
         })
     }
@@ -706,6 +711,7 @@ impl Replay {
         "ttr",
         "uv",
         "tcm",
+        "cml",
     ];
 
     pub fn build() -> Self {
@@ -797,6 +803,7 @@ impl Replay {
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
             ReplayType::UvBot => self.parse_uvbot(reader)?,
             ReplayType::TcBot => self.parse_tcm(reader)?,
+            ReplayType::Cml => self.parse_cml(reader)?,
         }
 
         // sort actions by time / frame
@@ -3552,6 +3559,268 @@ impl Replay {
                 _ => (),
             }
         }
+        Ok(())
+    }
+
+    fn parse_cml<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        const CML_MAGIC: [u8; 4] = [0xd7, 0x8a, 0x3e, 0x91];
+        const CML_TEXT_MAGIC: [u8; 4] = *b"CML\0";
+        const CML_FIXED_SCALE: f32 = 1000.0;
+
+        struct CmlReader {
+            data: Vec<u8>,
+            pos: usize,
+            encoded_strings: bool,
+        }
+
+        impl CmlReader {
+            fn new(data: Vec<u8>) -> Result<Self> {
+                let magic = data
+                    .get(..4)
+                    .context("CML file is too short to contain a header")?;
+                let encoded_strings = if magic == CML_MAGIC {
+                    true
+                } else if magic == CML_TEXT_MAGIC {
+                    false
+                } else {
+                    anyhow::bail!("invalid CML magic {magic:02x?}");
+                };
+
+                Ok(Self {
+                    data,
+                    pos: 4,
+                    encoded_strings,
+                })
+            }
+
+            fn read_u8(&mut self) -> Result<u8> {
+                let value = *self
+                    .data
+                    .get(self.pos)
+                    .context("unexpected EOF reading CML byte")?;
+                self.pos += 1;
+                Ok(value)
+            }
+
+            fn read_bool(&mut self) -> Result<bool> {
+                Ok(self.read_u8()? != 0)
+            }
+
+            fn read_f32(&mut self) -> Result<f32> {
+                let bytes = self
+                    .data
+                    .get(self.pos..self.pos + 4)
+                    .context("unexpected EOF reading CML f32")?;
+                self.pos += 4;
+                Ok(f32::from_le_bytes(bytes.try_into().unwrap()))
+            }
+
+            fn read_var_u64(&mut self) -> Result<u64> {
+                let mut value = 0u64;
+                let mut shift = 0u32;
+                loop {
+                    if shift > 63 {
+                        anyhow::bail!("CML varint is too long");
+                    }
+                    let byte = self.read_u8()?;
+                    value |= u64::from(byte & 0x7f) << shift;
+                    if byte & 0x80 == 0 {
+                        return Ok(value);
+                    }
+                    shift += 7;
+                }
+            }
+
+            fn read_var_i64(&mut self) -> Result<i64> {
+                let value = self.read_var_u64()?;
+                Ok(((value >> 1) as i64) ^ (-((value & 1) as i64)))
+            }
+
+            fn read_len(&mut self, what: &str) -> Result<usize> {
+                usize::try_from(self.read_var_u64()?)
+                    .with_context(|| format!("CML {what} length does not fit in usize"))
+            }
+
+            fn string_key(index: usize) -> u8 {
+                ((index as u64 * 0x3d + 0xa7 + ((index as u64 >> 1) * 0x11)) & 0xff) as u8
+            }
+
+            fn read_string(&mut self) -> Result<String> {
+                let len = self.read_len("string")?;
+                let end = self
+                    .pos
+                    .checked_add(len)
+                    .context("CML string length overflow")?;
+                let bytes = self
+                    .data
+                    .get(self.pos..end)
+                    .context("unexpected EOF reading CML string")?;
+                self.pos = end;
+
+                let decoded = if self.encoded_strings {
+                    bytes
+                        .iter()
+                        .enumerate()
+                        .map(|(i, byte)| byte ^ Self::string_key(i))
+                        .collect::<Vec<_>>()
+                } else {
+                    bytes.to_vec()
+                };
+                String::from_utf8(decoded).context("CML string is not valid UTF-8")
+            }
+
+            fn read_optional_delta(&mut self, current: &mut i64, flags: u8, bit: u8) -> Result<()> {
+                if flags & bit != 0 {
+                    *current += self.read_var_i64()?;
+                }
+                Ok(())
+            }
+        }
+
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        let mut cml = CmlReader::new(data)?;
+
+        let version = cml.read_var_u64()?;
+        if !(1..=3).contains(&version) {
+            anyhow::bail!("unsupported CML version {version}");
+        }
+
+        let _author = cml.read_string()?;
+        let _description = cml.read_string()?;
+        let _accuracy = cml.read_f32()?;
+        let _duration = cml.read_f32()?;
+        let _speedhack = cml.read_f32()?;
+        let fps = cml.read_f32()?;
+        self.fps = self.get_fps(fps as f64);
+
+        let _unknown_a = cml.read_var_i64()?;
+        let _unknown_b = cml.read_var_i64()?;
+        let _unknown_flag = cml.read_bool()?;
+        let mut last_frame = cml.read_var_i64()?;
+        let bot_name = cml.read_string()?;
+        let bot_version = cml.read_string()?;
+        let seed = cml.read_var_u64()?;
+        let macro_name = cml.read_string()?;
+
+        log::info!(
+            "CML macro: name='{macro_name}', bot='{bot_name}', version='{bot_version}', seed={seed}, format_version={version}"
+        );
+
+        let input_count = cml.read_len("input")?;
+        self.actions.reserve(input_count);
+        let mut frame = 0i64;
+        for _ in 0..input_count {
+            frame += cml.read_var_i64()?;
+            if frame < 0 {
+                anyhow::bail!("CML input frame became negative ({frame})");
+            }
+            let flags = cml.read_u8()?;
+            let button_idx = ((flags >> 2) & 0x0f) as i32;
+            let player = if flags & 0x02 != 0 {
+                Player::Two
+            } else {
+                Player::One
+            };
+            let down = flags & 0x01 != 0;
+            let frame = u32::try_from(frame).context("CML input frame exceeds u32")?;
+            let button = Button::from_button_idx(button_idx, down);
+            self.process_action(player, frame as f64 / self.fps, button, frame);
+        }
+
+        let framefix_count = cml.read_len("frame fix")?;
+        if last_frame <= 0 {
+            last_frame = self.actions.last().map(|a| i64::from(a.frame)).unwrap_or(0);
+        }
+        log::info!(
+            "CML macro inputs={}, frame_fixes={}, last_frame={last_frame}",
+            input_count,
+            framefix_count
+        );
+
+        let mut accum = [0i64; 6];
+        let mut p1_valid = true;
+        let mut p2_valid = true;
+        let mut base_frame = 0i64;
+        let mut action_idx = 0usize;
+        let mut down_state = [[false; 3]; 2];
+
+        for _ in 0..framefix_count {
+            let (group_start, group_len) = if version == 1 {
+                base_frame += cml.read_var_i64()?;
+                (base_frame, 1usize)
+            } else {
+                base_frame += cml.read_var_i64()?;
+                let len = cml.read_len("frame fix group")?;
+                (base_frame, len)
+            };
+
+            for offset in 0..group_len {
+                let current_frame = group_start
+                    .checked_add(i64::try_from(offset).context("CML frame fix offset overflow")?)
+                    .context("CML frame fix frame overflow")?;
+                if current_frame < 0 {
+                    anyhow::bail!("CML frame fix frame became negative ({current_frame})");
+                }
+                let current_frame =
+                    u32::try_from(current_frame).context("CML frame fix frame exceeds u32")?;
+
+                let flags = cml.read_u8()?;
+                for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
+                    cml.read_optional_delta(&mut accum[idx], flags, bit)?;
+                }
+                if flags & 0x40 != 0 {
+                    p1_valid = cml.read_bool()?;
+                }
+                if flags & 0x80 != 0 {
+                    p2_valid = cml.read_bool()?;
+                }
+
+                while let Some(action) = self.actions.get(action_idx) {
+                    if action.frame > current_frame {
+                        break;
+                    }
+                    let player_idx = match action.player {
+                        Player::One => 0,
+                        Player::Two => 1,
+                    };
+                    down_state[player_idx][action.click.button().index()] = action.click.is_click();
+                    action_idx += 1;
+                }
+
+                let p1_down = down_state[0].iter().any(|down| *down);
+                let p2_down = down_state[1].iter().any(|down| *down);
+                let p1_x = accum[0] as f32 / CML_FIXED_SCALE;
+                let p1_y = accum[1] as f32 / CML_FIXED_SCALE;
+                let p1_rot = accum[2] as f32 / CML_FIXED_SCALE;
+                let p2_x = accum[3] as f32 / CML_FIXED_SCALE;
+                let p2_y = accum[4] as f32 / CML_FIXED_SCALE;
+                let p2_rot = accum[5] as f32 / CML_FIXED_SCALE;
+
+                if p1_valid {
+                    self.push_physics(
+                        Player::One,
+                        p1_down,
+                        current_frame,
+                        PhysicsSnapshot::new(p1_x, p1_y, 0.0, p1_rot),
+                    );
+                }
+                if p2_valid && (p2_x != 0.0 || p2_y != 0.0 || p2_rot != 0.0) {
+                    self.push_physics(
+                        Player::Two,
+                        p2_down,
+                        current_frame,
+                        PhysicsSnapshot::new(p2_x, p2_y, 0.0, p2_rot),
+                    );
+                }
+            }
+
+            if version != 1 {
+                base_frame += i64::try_from(group_len.saturating_sub(1))
+                    .context("CML frame fix group length overflow")?;
+            }
+        }
+
         Ok(())
     }
 }

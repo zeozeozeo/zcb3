@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use audioadapter_buffers::direct::InterleavedSlice;
 use byteorder::{LittleEndian, WriteBytesExt};
-#[cfg(feature = "rayon")]
+#[cfg(all(feature = "rayon", not(target_arch = "wasm32")))]
 use rayon::prelude::*;
 use rubato::{
     Async, FixedAsync, Indexing, Resampler, SincInterpolationParameters, SincInterpolationType,
@@ -378,13 +378,8 @@ impl AudioSegment {
         }
         let end = start + len;
 
-        #[cfg(feature = "rayon")]
-        let use_parallel = len >= 32 * 1024;
-        #[cfg(not(feature = "rayon"))]
-        let use_parallel = false;
-
-        #[cfg(feature = "rayon")]
-        if use_parallel {
+        #[cfg(all(feature = "rayon", not(target_arch = "wasm32")))]
+        if len >= 32 * 1024 {
             self.frames[start..end]
                 .par_iter_mut()
                 .zip(&other.frames[..len])
@@ -425,13 +420,8 @@ impl AudioSegment {
         }
         let end = start + len;
 
-        #[cfg(feature = "rayon")]
-        let use_parallel = len >= 32 * 1024;
-        #[cfg(not(feature = "rayon"))]
-        let use_parallel = false;
-
-        #[cfg(feature = "rayon")]
-        if use_parallel {
+        #[cfg(all(feature = "rayon", not(target_arch = "wasm32")))]
+        if len >= 32 * 1024 {
             self.frames[start..end]
                 .par_iter_mut()
                 .zip(&other.frames[..len])

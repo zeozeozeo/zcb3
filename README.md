@@ -57,6 +57,7 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 - [uvBot (.uv)](https://github.com/thisisignitedoreo/uvbot), thanks @thisisignitedoreo
 - TCBot (.tcm)
 - ToastyReplay (.ttr)
+- xdBot compressed (.cml)
 
 \+ a replay converter from any format to any other supported format (currently only in the [web version](https://zeozeozeo.github.io/zcb3))
 

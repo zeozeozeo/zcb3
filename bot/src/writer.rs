@@ -7,7 +7,7 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use slc_oxide::input::InputData;
 use slc_oxide::replay::Replay;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Cursor, Seek, Write};
 use tcm::replay::ReplaySerializer;
 
@@ -33,6 +33,35 @@ fn button_num(button: crate::ButtonKind) -> u8 {
         crate::ButtonKind::Left => 2,
         crate::ButtonKind::Right => 3,
     }
+}
+
+fn write_var_u64<W: Write>(writer: &mut W, mut value: u64) -> Result<()> {
+    while value >= 0x80 {
+        writer.write_u8((value as u8 & 0x7f) | 0x80)?;
+        value >>= 7;
+    }
+    writer.write_u8(value as u8)?;
+    Ok(())
+}
+
+fn write_var_i64<W: Write>(writer: &mut W, value: i64) -> Result<()> {
+    write_var_u64(writer, ((value as u64) << 1) ^ ((value >> 63) as u64))
+}
+
+fn cml_string_key(index: usize) -> u8 {
+    ((index as u64 * 0x3d + 0xa7 + ((index as u64 >> 1) * 0x11)) & 0xff) as u8
+}
+
+fn write_cml_string<W: Write>(writer: &mut W, value: &str) -> Result<()> {
+    write_var_u64(writer, value.len() as u64)?;
+    for (i, byte) in value.bytes().enumerate() {
+        writer.write_u8(byte ^ cml_string_key(i))?;
+    }
+    Ok(())
+}
+
+fn cml_fixed(value: f32) -> i64 {
+    (value * 1000.0).round() as i64
 }
 
 impl Writer {
@@ -97,11 +126,145 @@ impl Writer {
             ReplayType::Ttr => self.write_ttr(writer),
             ReplayType::UvBot => self.write_uvbot(writer),
             ReplayType::TcBot => self.write_tcm(writer),
+            ReplayType::Cml => self.write_cml(writer),
         }
     }
 
     fn get_extended(&self, frame: u32, player2: bool) -> Option<ExtendedAction> {
         self.extended_map.get(&(frame, player2)).copied()
+    }
+
+    fn write_cml<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
+        const CML_MAGIC: [u8; 4] = [0xd7, 0x8a, 0x3e, 0x91];
+
+        writer.write_all(&CML_MAGIC)?;
+        write_var_u64(&mut writer, 3)?;
+        write_cml_string(&mut writer, "")?;
+        write_cml_string(&mut writer, "")?;
+        writer.write_f32::<LittleEndian>(0.0)?;
+        writer.write_f32::<LittleEndian>(self.duration as f32)?;
+        writer.write_f32::<LittleEndian>(1.0)?;
+        writer.write_f32::<LittleEndian>(self.fps as f32)?;
+        write_var_i64(&mut writer, 0)?;
+        write_var_i64(&mut writer, 0)?;
+        writer.write_u8(0)?;
+        write_var_i64(
+            &mut writer,
+            self.actions
+                .iter()
+                .map(|action| i64::from(action.frame))
+                .max()
+                .unwrap_or(0),
+        )?;
+        write_cml_string(&mut writer, "zcb3")?;
+        write_cml_string(&mut writer, env!("CARGO_PKG_VERSION"))?;
+        write_var_u64(&mut writer, 0)?;
+        write_cml_string(&mut writer, "")?;
+
+        let mut actions = self.actions.clone();
+        actions.sort_by_key(|action| (action.frame, action.player, action.button, action.down));
+
+        write_var_u64(&mut writer, actions.len() as u64)?;
+        let mut prev_frame = 0i64;
+        for action in &actions {
+            let frame = i64::from(action.frame);
+            write_var_i64(&mut writer, frame - prev_frame)?;
+            prev_frame = frame;
+
+            let flags = (button_num(action.button) << 2)
+                | if action.player == Player::Two {
+                    0x02
+                } else {
+                    0
+                }
+                | if action.down { 0x01 } else { 0 };
+            writer.write_u8(flags)?;
+        }
+
+        let mut frame_fixes: BTreeMap<u32, (Option<ExtendedAction>, Option<ExtendedAction>)> =
+            BTreeMap::new();
+        for ((frame, player2), extended) in &self.extended_map {
+            let entry = frame_fixes.entry(*frame).or_default();
+            if *player2 {
+                entry.1 = Some(*extended);
+            } else {
+                entry.0 = Some(*extended);
+            }
+        }
+
+        let mut groups: Vec<Vec<(u32, Option<ExtendedAction>, Option<ExtendedAction>)>> =
+            Vec::new();
+        for (frame, (p1, p2)) in frame_fixes {
+            if let Some(last_group) = groups.last_mut() {
+                if last_group
+                    .last()
+                    .map(|(last_frame, _, _)| *last_frame + 1 == frame)
+                    .unwrap_or(false)
+                {
+                    last_group.push((frame, p1, p2));
+                    continue;
+                }
+            }
+            groups.push(vec![(frame, p1, p2)]);
+        }
+
+        write_var_u64(&mut writer, groups.len() as u64)?;
+        let mut base_frame = 0i64;
+        let mut accum = [0i64; 6];
+        let mut p1_valid = true;
+        let mut p2_valid = true;
+
+        for group in groups {
+            let group_start = i64::from(group[0].0);
+            write_var_i64(&mut writer, group_start - base_frame)?;
+            write_var_u64(&mut writer, group.len() as u64)?;
+
+            for (_, p1, p2) in &group {
+                let target = [
+                    p1.map(|e| cml_fixed(e.x)).unwrap_or(accum[0]),
+                    p1.map(|e| cml_fixed(e.y)).unwrap_or(accum[1]),
+                    p1.map(|e| cml_fixed(e.rot)).unwrap_or(accum[2]),
+                    p2.map(|e| cml_fixed(e.x)).unwrap_or(accum[3]),
+                    p2.map(|e| cml_fixed(e.y)).unwrap_or(accum[4]),
+                    p2.map(|e| cml_fixed(e.rot)).unwrap_or(accum[5]),
+                ];
+
+                let next_p1_valid = p1.is_some();
+                let next_p2_valid = p2.is_some();
+                let mut flags = 0u8;
+                for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
+                    if target[idx] != accum[idx] {
+                        flags |= bit;
+                    }
+                }
+                if next_p1_valid != p1_valid {
+                    flags |= 0x40;
+                }
+                if next_p2_valid != p2_valid {
+                    flags |= 0x80;
+                }
+
+                writer.write_u8(flags)?;
+                for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
+                    if flags & bit != 0 {
+                        write_var_i64(&mut writer, target[idx] - accum[idx])?;
+                        accum[idx] = target[idx];
+                    }
+                }
+                if flags & 0x40 != 0 {
+                    writer.write_u8(next_p1_valid as u8)?;
+                    p1_valid = next_p1_valid;
+                }
+                if flags & 0x80 != 0 {
+                    writer.write_u8(next_p2_valid as u8)?;
+                    p2_valid = next_p2_valid;
+                }
+            }
+
+            base_frame = group_start + group.len() as i64 - 1;
+        }
+
+        Ok(writer)
     }
 
     fn write_ttr<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
@@ -1828,6 +1991,11 @@ mod tests {
     }
 
     #[test]
+    fn test_cml() {
+        test_roundtrip(ReplayType::Cml, "cml");
+    }
+
+    #[test]
     fn test_supported_format_button_roundtrips() {
         for typ in [
             ReplayType::Gdr,
@@ -1837,6 +2005,7 @@ mod tests {
             ReplayType::Silicate2,
             ReplayType::Silicate3,
             ReplayType::UvBot,
+            ReplayType::Cml,
         ] {
             test_button_roundtrip(typ);
         }

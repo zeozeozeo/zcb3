@@ -30,13 +30,11 @@ impl Default for Bot {
 }
 
 /// Information about the level that the replay was recorded on
-#[derive(Debug, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Level {
     pub id: u32,
     pub name: String,
 }
-
 
 /// Information about a single input in a replay
 #[derive(Debug, Clone, PartialEq)]

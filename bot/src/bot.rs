@@ -1811,6 +1811,8 @@ impl Bot {
 
 #[cfg(test)]
 mod tests {
+    use crate::Frame;
+
     use super::*;
 
     #[test]

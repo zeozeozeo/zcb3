@@ -2316,7 +2316,8 @@ impl App {
 • GDReplayFormat 2 (.gdr2)
 • uvBot (.uv)
 • TCBot (.tcm)
-• ToastyReplay (.ttr)",
+• ToastyReplay (.ttr)
+• xdBot compressed (.cml)",
             );
         });
 
