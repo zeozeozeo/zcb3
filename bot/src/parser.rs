@@ -3562,6 +3562,9 @@ impl Replay {
         Ok(())
     }
 
+    // DISCLAIMER:
+    // reverse engineered from https://github.com/CamelliaOffical/XDBot-2.7, but i heavily discourage
+    // you from using this since it's a closed source xdBot fork that can potentially inject malware by autoupdating
     fn parse_cml<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         const CML_MAGIC: [u8; 4] = [0xd7, 0x8a, 0x3e, 0x91];
         const CML_TEXT_MAGIC: [u8; 4] = *b"CML\0";
