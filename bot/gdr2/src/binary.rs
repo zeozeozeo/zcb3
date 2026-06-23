@@ -20,8 +20,6 @@ impl<'a> BinaryReader<'a> {
         Ok(slice)
     }
 
-    /// Returns a view of the next `size` bytes without consuming them
-    /// Returns None if there aren't enough bytes available
     pub fn peek(&self, size: usize) -> Option<&[u8]> {
         if self.pos + size <= self.data.len() {
             Some(&self.data[self.pos..self.pos + size])
@@ -39,24 +37,35 @@ impl<'a> BinaryReader<'a> {
         String::from_utf8(bytes.to_vec()).map_err(|_| Error::InvalidData("Invalid UTF-8".into()))
     }
 
-    pub fn read_varint(&mut self) -> Result<i32> {
-        let mut result = 0;
-        let mut shift = 0;
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
+    pub fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
+    pub fn read_varint(&mut self) -> Result<u64> {
+        let mut result = 0u64;
+        let mut shift = 0u32;
 
         loop {
             let byte = *self.read_bytes(1)?.first().ok_or(Error::UnexpectedEof)?;
-
-            result |= ((byte & 0x7F) as i32) << shift;
+            result |= ((byte & 0x7F) as u64) << shift;
             if byte & 0x80 == 0 {
                 break;
             }
             shift += 7;
-            if shift >= 32 {
-                return Err(Error::InvalidData("VarInt too long".into()));
+            if shift >= 64 {
+                return Err(Error::InvalidData("VarInt too long (max 9 bytes)".into()));
             }
         }
 
         Ok(result)
+    }
+
+    pub fn read_varint_i32(&mut self) -> Result<i32> {
+        self.read_varint().map(|v| v as i32)
     }
 
     pub fn read_bool(&mut self) -> Result<bool> {
@@ -114,11 +123,11 @@ impl BinaryWriter {
     }
 
     pub fn write_string(&mut self, s: &str) {
-        self.write_varint(s.len() as i32);
+        self.write_varint(s.len() as u64);
         self.write_bytes(s.as_bytes());
     }
 
-    pub fn write_varint(&mut self, mut value: i32) {
+    pub fn write_varint(&mut self, mut value: u64) {
         loop {
             let mut byte = (value & 0x7F) as u8;
             value >>= 7;

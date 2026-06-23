@@ -11,7 +11,7 @@ pub use error::{Error, Result};
 pub use physics::PhysicsData;
 
 const GDR_MAGIC: &[u8; 3] = b"GDR";
-const GDR_VERSION: i32 = 2;
+const GDR_VERSION: u64 = 2;
 
 /// Information about the bot that recorded the replay
 #[derive(Debug, Clone, PartialEq)]
@@ -138,46 +138,42 @@ impl Replay {
     pub fn export_data(&self) -> Result<Vec<u8>> {
         let mut writer = BinaryWriter::new();
 
-        // Write header
         writer.write_bytes(GDR_MAGIC);
         writer.write_varint(GDR_VERSION);
 
-        // Write input tag
         let has_physics = self.inputs.iter().any(|input| input.physics.is_some());
         writer.write_string(if has_physics { "Phys" } else { "" });
 
-        // Write metadata
         writer.write_string(&self.author);
         writer.write_string(&self.description);
         writer.write_f32(self.duration);
-        writer.write_varint(self.game_version);
+        writer.write_varint(self.game_version as u64);
         writer.write_f64(self.framerate);
-        writer.write_varint(self.seed);
-        writer.write_varint(self.coins);
+        writer.write_varint(self.seed as u64);
+        writer.write_varint(self.coins as u64);
         writer.write_bool(self.ldm);
         writer.write_bool(self.platformer);
         writer.write_string(&self.bot_info.name);
-        writer.write_varint(self.bot_info.version);
-        writer.write_varint(self.level_info.id as i32);
+        writer.write_varint(self.bot_info.version as u64);
+        writer.write_varint(self.level_info.id as u64);
         writer.write_string(&self.level_info.name);
 
         // Write empty extension section
         writer.write_varint(0);
 
         // Write deaths
-        writer.write_varint(self.deaths.len() as i32);
+        writer.write_varint(self.deaths.len() as u64);
         let mut prev = 0;
         for &death in &self.deaths {
-            writer.write_varint((death - prev) as i32);
+            writer.write_varint(death - prev);
             prev = death;
         }
 
         // Count player 1 inputs
         let p1_inputs = self.inputs.iter().filter(|input| !input.player2).count();
 
-        // Write total inputs and p1 input count
-        writer.write_varint(self.inputs.len() as i32);
-        writer.write_varint(p1_inputs as i32);
+        writer.write_varint(self.inputs.len() as u64);
+        writer.write_varint(p1_inputs as u64);
 
         let mut prev = 0;
         for input in &self.inputs {
@@ -191,13 +187,13 @@ impl Replay {
             } else {
                 (delta << 1) | (input.down as u64)
             };
-            writer.write_varint(packed as i32);
+            writer.write_varint(packed);
 
             // Write physics extension if present
             if has_physics {
                 let mut ext_writer = BinaryWriter::new();
                 input.write_extension(&mut ext_writer, "Phys");
-                writer.write_varint(ext_writer.data().len() as i32);
+                writer.write_varint(ext_writer.data().len() as u64);
                 writer.write_bytes(ext_writer.data());
             }
 
@@ -217,13 +213,12 @@ impl Replay {
             } else {
                 (delta << 1) | (input.down as u64)
             };
-            writer.write_varint(packed as i32);
+            writer.write_varint(packed);
 
-            // Write physics extension if present
             if has_physics {
                 let mut ext_writer = BinaryWriter::new();
                 input.write_extension(&mut ext_writer, "Phys");
-                writer.write_varint(ext_writer.data().len() as i32);
+                writer.write_varint(ext_writer.data().len() as u64);
                 writer.write_bytes(ext_writer.data());
             }
 
@@ -253,7 +248,7 @@ impl Replay {
         // Read version and input tag
         let version = reader.read_varint()?;
         if version != GDR_VERSION {
-            return Err(Error::UnsupportedVersion(version));
+            return Err(Error::UnsupportedVersion(version as i32));
         }
 
         let input_tag = reader.read_string()?;
@@ -263,14 +258,14 @@ impl Replay {
         replay.author = reader.read_string()?;
         replay.description = reader.read_string()?;
         replay.duration = reader.read_f32()?;
-        replay.game_version = reader.read_varint()?;
+        replay.game_version = reader.read_varint()? as i32;
         replay.framerate = reader.read_f64()?;
-        replay.seed = reader.read_varint()?;
-        replay.coins = reader.read_varint()?;
+        replay.seed = reader.read_varint()? as i32;
+        replay.coins = reader.read_varint()? as i32;
         replay.ldm = reader.read_bool()?;
         replay.platformer = reader.read_bool()?;
         replay.bot_info.name = reader.read_string()?;
-        replay.bot_info.version = reader.read_varint()?;
+        replay.bot_info.version = reader.read_varint()? as i32;
         replay.level_info.id = reader.read_varint()? as u32;
         replay.level_info.name = reader.read_string()?;
 
@@ -280,73 +275,74 @@ impl Replay {
 
         // Read deaths
         let death_count = reader.read_varint()? as usize;
-        let mut prev = 0;
+        let mut prev = 0u64;
         for _ in 0..death_count {
-            let delta = reader.read_varint()? as u64;
+            let delta = reader.read_varint()?;
             prev += delta;
             replay.deaths.push(prev);
         }
 
         // Read inputs
-        let total_inputs = reader.read_varint()? as usize;
-        let p1_inputs = reader.read_varint()? as usize;
+        let _total_inputs = reader.read_varint()?;
+        let p1_inputs = reader.read_varint()?;
+        let mut prev = 0u64;
+        let mut p1_remaining = p1_inputs;
 
-        // Read player 1 inputs
-        let mut prev = 0;
-        for _ in 0..p1_inputs {
-            let packed = reader.read_varint()? as u64;
-            let mut input = if replay.platformer {
-                Input::new(
-                    prev + (packed >> 3),
-                    ((packed >> 1) & 3) as u8,
-                    false,
-                    (packed & 1) != 0,
-                )
-            } else {
-                Input::new(prev + (packed >> 1), 1, false, (packed & 1) != 0)
+        while reader.remaining() > 0 {
+            let packed = match reader.read_varint() {
+                Ok(v) => v,
+                Err(_) => break,
             };
 
+            let delta = if replay.platformer {
+                packed >> 3
+            } else {
+                packed >> 1
+            };
+
+            let frame = prev.wrapping_add(delta);
+            let button = if replay.platformer {
+                ((packed >> 1) & 3) as u8
+            } else {
+                1
+            };
+
+            let is_player2 = p1_remaining == 0;
+            let mut input = Input::new(frame, button, is_player2, (packed & 1) != 0);
+
             if has_extension {
-                let ext_size = reader.read_varint()? as usize;
+                if reader.remaining() == 0 {
+                    replay.inputs.push(input);
+                    break;
+                }
+                let ext_size = match reader.read_varint() {
+                    Ok(v) => v as usize,
+                    Err(_) => {
+                        replay.inputs.push(input);
+                        break;
+                    }
+                };
                 if ext_size > 0 {
+                    if ext_size > reader.remaining() {
+                        replay.inputs.push(input);
+                        break;
+                    }
                     let ext_data = reader.peek(ext_size).ok_or(Error::UnexpectedEof)?;
                     let mut ext_reader = BinaryReader::new(ext_data);
-                    input.read_extension(&mut ext_reader, &input_tag)?;
+                    let _ = input.read_extension(&mut ext_reader, &input_tag);
                     reader.skip(ext_size)?;
                 }
             }
 
-            prev = input.frame;
+            prev = frame;
             replay.inputs.push(input);
-        }
 
-        // Read player 2 inputs
-        let mut prev = 0;
-        for _ in p1_inputs..total_inputs {
-            let packed = reader.read_varint()? as u64;
-            let mut input = if replay.platformer {
-                Input::new(
-                    prev + (packed >> 3),
-                    ((packed >> 1) & 3) as u8,
-                    true,
-                    (packed & 1) != 0,
-                )
-            } else {
-                Input::new(prev + (packed >> 1), 1, true, (packed & 1) != 0)
-            };
-
-            if has_extension {
-                let ext_size = reader.read_varint()? as usize;
-                if ext_size > 0 {
-                    let ext_data = reader.peek(ext_size).ok_or(Error::UnexpectedEof)?;
-                    let mut ext_reader = BinaryReader::new(ext_data);
-                    input.read_extension(&mut ext_reader, &input_tag)?;
-                    reader.skip(ext_size)?;
+            if p1_remaining > 0 {
+                p1_remaining -= 1;
+                if p1_remaining == 0 {
+                    prev = 0;
                 }
             }
-
-            prev = input.frame;
-            replay.inputs.push(input);
         }
 
         replay.sort_inputs();
