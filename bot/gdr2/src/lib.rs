@@ -283,15 +283,19 @@ impl Replay {
         }
 
         // Read inputs
-        let _total_inputs = reader.read_varint()?;
-        let p1_inputs = reader.read_varint()?;
+        let total_inputs = reader.read_varint()? as usize;
+        let p1_inputs = reader.read_varint()? as usize;
         let mut prev = 0u64;
-        let mut p1_remaining = p1_inputs;
+        let mut p1_remaining = p1_inputs as u64;
 
-        while reader.remaining() > 0 {
+        while reader.remaining() > 0 && replay.inputs.len() < total_inputs {
             let packed = match reader.read_varint() {
                 Ok(v) => v,
-                Err(_) => break,
+                Err(Error::UnexpectedEof) => break,
+                Err(_) => {
+                    // WTF? This is too much voodoo
+                    continue;
+                }
             };
 
             let delta = if replay.platformer {

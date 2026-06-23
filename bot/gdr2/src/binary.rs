@@ -47,21 +47,15 @@ impl<'a> BinaryReader<'a> {
 
     pub fn read_varint(&mut self) -> Result<u64> {
         let mut result = 0u64;
-        let mut shift = 0u32;
-
-        loop {
+        // What in the name of fuck?
+        for i in 0..9u32 {
             let byte = *self.read_bytes(1)?.first().ok_or(Error::UnexpectedEof)?;
-            result |= ((byte & 0x7F) as u64) << shift;
+            result |= ((byte & 0x7F) as u64) << (i * 7);
             if byte & 0x80 == 0 {
-                break;
-            }
-            shift += 7;
-            if shift >= 64 {
-                return Err(Error::InvalidData("VarInt too long (max 9 bytes)".into()));
+                return Ok(result);
             }
         }
-
-        Ok(result)
+        Err(Error::InvalidData("VarInt too long (max 9 bytes)".into()))
     }
 
     pub fn read_varint_i32(&mut self) -> Result<i32> {
