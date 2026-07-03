@@ -1,7 +1,6 @@
-use crate::{f32_range, Timings, VolumeSettings, Writer};
+use crate::{f32_range, ttr, Timings, VolumeSettings, Writer};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
-use flate2::read::ZlibDecoder;
 use ijson::IValue;
 use indexmap::IndexMap;
 use serde::Deserialize;
@@ -523,6 +522,10 @@ pub enum ReplayType {
     Gdr2,
     /// ToastyReplay .ttr files
     Ttr,
+    /// ToastyReplay 2 .ttr2 files
+    Ttr2,
+    /// ToastyReplay 3 .ttr3 files
+    Ttr3,
     /// uvBot .uv files
     UvBot,
     // TCBot .tcm files
@@ -564,6 +567,8 @@ impl ReplayType {
             ReplayType::Silicate3 => "slc3",
             ReplayType::Gdr2 => "gdr2",
             ReplayType::Ttr => "ttr",
+            ReplayType::Ttr2 => "ttr2",
+            ReplayType::Ttr3 => "ttr3",
             ReplayType::UvBot => "uv",
             ReplayType::TcBot => "tcm",
             ReplayType::Cml => "cml",
@@ -602,6 +607,8 @@ impl ReplayType {
             ReplayType::Silicate3 => "Silicate 3 (.slc3)",
             ReplayType::Gdr2 => "Gdr2 (.gdr2)",
             ReplayType::Ttr => "ToastyReplay (.ttr)",
+            ReplayType::Ttr2 => "ToastyReplay 2 (.ttr2)",
+            ReplayType::Ttr3 => "ToastyReplay 3 (.ttr3)",
             ReplayType::UvBot => "UvBot (.uv)",
             ReplayType::TcBot => "TcBot (.tcm)",
             ReplayType::Cml => "xdBot compressed macro (.cml)",
@@ -658,6 +665,8 @@ impl ReplayType {
             "slc3" => Silicate3,
             "gdr2" => Gdr2,
             "ttr" => Ttr,
+            "ttr2" => Ttr2,
+            "ttr3" => Ttr3,
             "uv" => UvBot,
             "tcm" => TcBot,
             "cml" => Cml,
@@ -709,6 +718,8 @@ impl Replay {
         "slc3",
         "gdr2",
         "ttr",
+        "ttr2",
+        "ttr3",
         "uv",
         "tcm",
         "cml",
@@ -796,7 +807,7 @@ impl Replay {
             ReplayType::ReplayEngine2 => self.parse_re2(reader)?,
             ReplayType::ReplayEngine3 => self.parse_re3(reader)?,
             ReplayType::Gdr2 => self.parse_gdr2(reader)?,
-            ReplayType::Ttr => self.parse_ttr(reader)?,
+            ReplayType::Ttr | ReplayType::Ttr2 | ReplayType::Ttr3 => self.parse_ttr(reader)?,
             ReplayType::Silicate => self.parse_slc(reader)?,
             ReplayType::Silicate2 => self.parse_slc2(reader)?,
             ReplayType::Silicate3 => self.parse_slc3(reader)?,
@@ -1039,94 +1050,17 @@ impl Replay {
     }
 
     fn parse_ttr<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
-        let mut magic = [0u8; 4];
-        reader.read_exact(&mut magic)?;
-        if &magic != b"TTR\0" {
-            anyhow::bail!("invalid ttr magic");
-        }
+        let decoded = ttr::parse(&mut reader)?;
+        self.fps = self.get_fps(decoded.fps);
+        self.duration = decoded.duration;
 
-        let version = reader.read_u16::<LittleEndian>()?;
-        let header_flags = reader.read_u32::<LittleEndian>()?;
-        let header_size = reader.read_u32::<LittleEndian>()? as u64;
-
-        let read_string = |reader: &mut R| -> Result<String> {
-            let len = reader.read_u16::<LittleEndian>()? as usize;
-            let mut buf = vec![0u8; len];
-            reader.read_exact(&mut buf)?;
-            Ok(String::from_utf8_lossy(&buf).into_owned())
-        };
-
-        let author = read_string(&mut reader)?;
-        let name = read_string(&mut reader)?;
-        let level_name = read_string(&mut reader)?;
-        let level_id = reader.read_i32::<LittleEndian>()?;
-        let framerate = reader.read_f64::<LittleEndian>()?;
-        let duration = reader.read_f64::<LittleEndian>()?;
-        let _game_version = reader.read_u32::<LittleEndian>()?;
-        let _start_pos_x = reader.read_f32::<LittleEndian>()?;
-        let _start_pos_y = reader.read_f32::<LittleEndian>()?;
-        let _rng_seed = reader.read_u32::<LittleEndian>()?;
-        let _record_timestamp = reader.read_i64::<LittleEndian>()?;
-
-        let end_of_header = header_size;
-        let pos = reader.stream_position()?;
-        if pos < end_of_header {
-            reader.seek(SeekFrom::Start(end_of_header))?;
-        }
-
-        if version == 1 {
-            anyhow::bail!("ttr version 1 is not supported");
-        }
-
-        let mut uncompressed = Vec::new();
-        let uncompressed_size = reader.read_u32::<LittleEndian>()? as usize;
-        let mut decoder = ZlibDecoder::new(reader);
-        decoder.read_to_end(&mut uncompressed)?;
-        if uncompressed.len() != uncompressed_size {
-            log::warn!(
-                "ttr payload size mismatch: header={} decoded={}",
-                uncompressed_size,
-                uncompressed.len()
-            );
-        }
-
-        let mut cursor = Cursor::new(uncompressed);
-        let input_count = cursor.read_u32::<LittleEndian>()?;
-        let mut prev_tick = 0i32;
-        self.fps = self.get_fps(framerate);
-        self.duration = duration;
-
-        for _ in 0..input_count {
-            let delta = leb128::read::unsigned(&mut cursor)? as i32;
-            prev_tick += delta;
-            let action_type = cursor.read_u8()?;
-            let flags = cursor.read_u8()?;
-            let step_offset = if (header_flags & (1 << 0 | 1 << 5)) != 0 {
-                cursor.read_f32::<LittleEndian>()?
-            } else {
-                0.0
-            };
-
-            let time = prev_tick as f64 / self.fps;
-            let button = Button::from_button_idx(action_type as i32, (flags & 0x02) != 0);
-            if (flags & 0x01) != 0 {
-                self.process_action_p2(time, button, prev_tick as u32);
-            } else {
-                self.process_action_p1(time, button, prev_tick as u32);
-            }
-
-            if step_offset != 0.0 {
-                if (flags & 0x01) != 0 {
-                    self.extended_p2((flags & 0x02) != 0, prev_tick as u32, 0.0, 0.0, 0.0, 0.0);
-                } else {
-                    self.extended_p1((flags & 0x02) != 0, prev_tick as u32, 0.0, 0.0, 0.0, 0.0);
-                }
+        for action in decoded.actions {
+            let button = action.button.to_button(action.down);
+            match action.player {
+                Player::One => self.process_action_p1(action.time, button, action.frame),
+                Player::Two => self.process_action_p2(action.time, button, action.frame),
             }
         }
-
-        log::debug!(
-            "parsed ttr: author={author:?}, name={name:?}, level={level_name:?} ({level_id})"
-        );
 
         Ok(())
     }

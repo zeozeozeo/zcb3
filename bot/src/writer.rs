@@ -1,7 +1,6 @@
-use crate::{ExtendedAction, Player, Replay as ZcbReplay, ReplayType};
+use crate::{ttr, ExtendedAction, Player, Replay as ZcbReplay, ReplayType};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, WriteBytesExt};
-use flate2::{write::ZlibEncoder, Compression};
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -124,6 +123,8 @@ impl Writer {
             ReplayType::Silicate2 => self.write_slc2(writer),
             ReplayType::Silicate3 => self.write_slc3(writer),
             ReplayType::Ttr => self.write_ttr(writer),
+            ReplayType::Ttr2 => self.write_ttr2(writer),
+            ReplayType::Ttr3 => self.write_ttr3(writer),
             ReplayType::UvBot => self.write_uvbot(writer),
             ReplayType::TcBot => self.write_tcm(writer),
             ReplayType::Cml => self.write_cml(writer),
@@ -267,76 +268,32 @@ impl Writer {
         Ok(writer)
     }
 
-    fn write_ttr<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
-        let mut header = Vec::new();
-        header.extend_from_slice(b"TTR\0");
-        header.write_u16::<LittleEndian>(4)?;
+    fn write_ttr<W: Write + Seek>(&self, writer: W) -> Result<W> {
+        self.write_toasty(writer, ttr::ToastyFormat::Legacy)
+    }
 
-        let mut flags = 0u32;
-        if self
+    fn write_ttr2<W: Write + Seek>(&self, writer: W) -> Result<W> {
+        self.write_toasty(writer, ttr::ToastyFormat::Ttr2)
+    }
+
+    fn write_ttr3<W: Write + Seek>(&self, writer: W) -> Result<W> {
+        self.write_toasty(writer, ttr::ToastyFormat::Ttr3)
+    }
+
+    fn write_toasty<W: Write + Seek>(&self, writer: W, format: ttr::ToastyFormat) -> Result<W> {
+        let actions = self
             .actions
             .iter()
-            .any(|action| action.player == Player::Two)
-        {
-            flags |= 1 << 3;
-        }
-        header.write_u32::<LittleEndian>(flags)?;
+            .map(|action| ttr::ToastyAction {
+                time: action.time,
+                frame: action.frame,
+                player: action.player,
+                button: action.button,
+                down: action.down,
+            })
+            .collect::<Vec<_>>();
 
-        let header_size_pos = header.len();
-        header.write_u32::<LittleEndian>(0)?;
-
-        let write_string = |buf: &mut Vec<u8>, value: &str| -> Result<()> {
-            let bytes = value.as_bytes();
-            let len = bytes.len().min(u16::MAX as usize) as u16;
-            buf.write_u16::<LittleEndian>(len)?;
-            buf.extend_from_slice(&bytes[..len as usize]);
-            Ok(())
-        };
-
-        write_string(&mut header, "")?;
-        write_string(&mut header, "")?;
-        write_string(&mut header, "")?;
-        header.write_i32::<LittleEndian>(0)?;
-        header.write_f64::<LittleEndian>(self.fps)?;
-        header.write_f64::<LittleEndian>(self.duration)?;
-        header.write_u32::<LittleEndian>(0)?;
-        header.write_f32::<LittleEndian>(0.0)?;
-        header.write_f32::<LittleEndian>(0.0)?;
-        header.write_u32::<LittleEndian>(0)?;
-        header.write_i64::<LittleEndian>(0)?;
-
-        let header_size = header.len() as u32;
-        header[header_size_pos..header_size_pos + 4].copy_from_slice(&header_size.to_le_bytes());
-
-        let mut payload = Vec::new();
-        payload.write_u32::<LittleEndian>(self.actions.len() as u32)?;
-
-        let mut prev_tick = 0i32;
-        for action in &self.actions {
-            let delta = action.frame as i32 - prev_tick;
-            prev_tick = action.frame as i32;
-            leb128::write::unsigned(&mut payload, delta as u64)?;
-            payload.write_u8(0)?;
-            let mut flags = 0u8;
-            if action.player == Player::Two {
-                flags |= 0x01;
-            }
-            if action.down {
-                flags |= 0x02;
-            }
-            payload.write_u8(flags)?;
-        }
-
-        payload.write_u32::<LittleEndian>(0)?;
-
-        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
-        encoder.write_all(&payload)?;
-        let compressed = encoder.finish()?;
-
-        writer.write_all(&header)?;
-        writer.write_u32::<LittleEndian>(payload.len() as u32)?;
-        writer.write_all(&compressed)?;
-        Ok(writer)
+        ttr::write(writer, format, self.fps, self.duration, &actions)
     }
 
     fn write_mhr<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
@@ -1869,6 +1826,16 @@ mod tests {
     }
 
     #[test]
+    fn test_ttr2() {
+        test_roundtrip(ReplayType::Ttr2, "ttr2");
+    }
+
+    #[test]
+    fn test_ttr3() {
+        test_roundtrip(ReplayType::Ttr3, "ttr3");
+    }
+
+    #[test]
     fn test_empty_replay() {
         let original = Replay::build();
         let writer = original.to_writer();
@@ -1901,6 +1868,40 @@ mod tests {
         let parsed = Replay::build()
             .parse(ReplayType::Ttr, Cursor::new(&data))
             .expect("Failed to parse empty ttr replay");
+
+        assert_eq!(parsed.actions.len(), 0);
+        assert_eq!(parsed.fps, 240.0);
+    }
+
+    #[test]
+    fn test_empty_ttr2_replay() {
+        let mut original = Replay::build();
+        original.fps = 240.0;
+        let writer = original.to_writer();
+
+        let mut buffer = Cursor::new(Vec::new());
+        writer.write(ReplayType::Ttr2, &mut buffer).unwrap();
+
+        let parsed = Replay::build()
+            .parse(ReplayType::Ttr2, Cursor::new(buffer.into_inner()))
+            .unwrap();
+
+        assert_eq!(parsed.actions.len(), 0);
+        assert_eq!(parsed.fps, 240.0);
+    }
+
+    #[test]
+    fn test_empty_ttr3_replay() {
+        let mut original = Replay::build();
+        original.fps = 240.0;
+        let writer = original.to_writer();
+
+        let mut buffer = Cursor::new(Vec::new());
+        writer.write(ReplayType::Ttr3, &mut buffer).unwrap();
+
+        let parsed = Replay::build()
+            .parse(ReplayType::Ttr3, Cursor::new(buffer.into_inner()))
+            .unwrap();
 
         assert_eq!(parsed.actions.len(), 0);
         assert_eq!(parsed.fps, 240.0);
@@ -2006,6 +2007,9 @@ mod tests {
             ReplayType::Silicate3,
             ReplayType::UvBot,
             ReplayType::Cml,
+            ReplayType::Ttr,
+            ReplayType::Ttr2,
+            ReplayType::Ttr3,
         ] {
             test_button_roundtrip(typ);
         }

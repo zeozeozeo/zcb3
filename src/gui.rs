@@ -421,7 +421,7 @@ impl eframe::App for App {
             }
         });
 
-        egui::Panel::top("top_panel").show_inside(ui, |ui| {
+        egui::Panel::top("top_panel").show(ui, |ui| {
             ui.add_space(4.0);
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut self.stage, Stage::SelectReplay, "Replay");
@@ -437,7 +437,7 @@ impl eframe::App for App {
             ui.add_space(2.0);
         });
 
-        egui::Panel::bottom("bottom_panel").show_inside(ui, |ui| {
+        egui::Panel::bottom("bottom_panel").show(ui, |ui| {
             let mut dialog = Modal::new(&ctx, "config_dialog");
             let mut update_dialog = Modal::new(&ctx, "update_dialog");
             let mut modal = Modal::new(&ctx, "update_modal");
@@ -513,7 +513,7 @@ impl eframe::App for App {
             self.show_update_check_modal(&modal);
         });
 
-        egui::CentralPanel::default().show_inside(ui, |ui| {
+        egui::CentralPanel::default().show(ui, |ui| {
             egui::ScrollArea::both().show(ui, |ui| {
                 match self.stage {
                     Stage::SelectReplay => self.show_replay_stage(&ctx, ui),
@@ -570,9 +570,10 @@ impl eframe::App for App {
                             "This egui backend doesn't support multiple viewports",
                         );
 
+                        let viewport_ctx = ctx.clone();
                         #[allow(deprecated)]
                         egui::CentralPanel::default().show(ctx, |ui| {
-                            self.show_clickpack_db(ctx, ui);
+                            self.show_clickpack_db(&viewport_ctx, ui);
                         });
 
                         if ctx.input(|i| i.viewport().close_requested()) {
@@ -1906,6 +1907,9 @@ impl App {
                         ReplayType::ReplayEngine2,
                         ReplayType::ReplayEngine3,
                         ReplayType::Gdr2,
+                        ReplayType::Ttr,
+                        ReplayType::Ttr2,
+                        ReplayType::Ttr3,
                         ReplayType::UvBot,
                         ReplayType::TcBot,
                         ReplayType::Ybotf,
@@ -2316,7 +2320,9 @@ impl App {
 • GDReplayFormat 2 (.gdr2)
 • uvBot (.uv)
 • TCBot (.tcm)
-• ToastyReplay (.ttr)
+• ToastyReplay 1 (.ttr)
+• ToastyReplay 2 (.ttr2)
+• ToastyReplay 3 (.ttr3)
 • xdBot compressed (.cml)",
             );
         });
