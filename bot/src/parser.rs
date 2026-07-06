@@ -512,6 +512,8 @@ pub enum ReplayType {
     ReplayEngine2,
     /// ReplayEngine 3 .re3 files
     ReplayEngine3,
+    /// ReplayEngine 4 .re4 files
+    ReplayEngine4,
     /// Silicate .slc files
     Silicate,
     /// Silicate .slc2 files
@@ -562,6 +564,7 @@ impl ReplayType {
             ReplayType::Zephyrus => "zr",
             ReplayType::ReplayEngine2 => "re2",
             ReplayType::ReplayEngine3 => "re3",
+            ReplayType::ReplayEngine4 => "re4",
             ReplayType::Silicate => "slc",
             ReplayType::Silicate2 => "slc2",
             ReplayType::Silicate3 => "slc3",
@@ -602,6 +605,7 @@ impl ReplayType {
             ReplayType::Zephyrus => "Zephyrus (.zr)",
             ReplayType::ReplayEngine2 => "ReplayEngine2 (.re2)",
             ReplayType::ReplayEngine3 => "ReplayEngine3 (.re3)",
+            ReplayType::ReplayEngine4 => "ReplayEngine4 (.re4)",
             ReplayType::Silicate => "Silicate (.slc)",
             ReplayType::Silicate2 => "Silicate 2 (.slc2)",
             ReplayType::Silicate3 => "Silicate 3 (.slc3)",
@@ -617,6 +621,45 @@ impl ReplayType {
 }
 
 impl ReplayType {
+    pub const VARIANTS: [Self; 36] = [
+        ReplayType::Mhr,
+        ReplayType::TasBot,
+        ReplayType::Zbot,
+        ReplayType::Obot,
+        ReplayType::Ybotf,
+        ReplayType::MhrBin,
+        ReplayType::Echo,
+        ReplayType::Amethyst,
+        ReplayType::OsuReplay,
+        ReplayType::Gdmo,
+        ReplayType::ReplayBot,
+        ReplayType::Rush,
+        ReplayType::Kdbot,
+        ReplayType::Txt,
+        ReplayType::ReplayEngine,
+        ReplayType::Ddhor,
+        ReplayType::Xbot,
+        ReplayType::Ybot2,
+        ReplayType::XdBot,
+        ReplayType::Gdr,
+        ReplayType::Qbot,
+        ReplayType::Rbot,
+        ReplayType::Zephyrus,
+        ReplayType::ReplayEngine2,
+        ReplayType::ReplayEngine3,
+        ReplayType::ReplayEngine4,
+        ReplayType::Silicate,
+        ReplayType::Silicate2,
+        ReplayType::Silicate3,
+        ReplayType::Gdr2,
+        ReplayType::Ttr,
+        ReplayType::Ttr2,
+        ReplayType::Ttr3,
+        ReplayType::UvBot,
+        ReplayType::TcBot,
+        ReplayType::Cml,
+    ];
+
     pub fn guess_format(filename: &str) -> Result<Self> {
         use ReplayType::*;
         let ext = filename
@@ -660,6 +703,7 @@ impl ReplayType {
             "zr" => Zephyrus,
             "re2" => ReplayEngine2,
             "re3" => ReplayEngine3,
+            "re4" => ReplayEngine4,
             "slc" => Silicate,
             "slc2" => Silicate2,
             "slc3" => Silicate3,
@@ -713,6 +757,7 @@ impl Replay {
         "zr",
         "re2",
         "re3",
+        "re4",
         "slc",
         "slc2",
         "slc3",
@@ -806,6 +851,7 @@ impl Replay {
             ReplayType::Zephyrus => self.parse_zephyrus(reader)?,
             ReplayType::ReplayEngine2 => self.parse_re2(reader)?,
             ReplayType::ReplayEngine3 => self.parse_re3(reader)?,
+            ReplayType::ReplayEngine4 => self.parse_re4(reader)?,
             ReplayType::Gdr2 => self.parse_gdr2(reader)?,
             ReplayType::Ttr | ReplayType::Ttr2 | ReplayType::Ttr3 => self.parse_ttr(reader)?,
             ReplayType::Silicate => self.parse_slc(reader)?,
@@ -3036,6 +3082,91 @@ impl Replay {
                         p2_frame.rot,
                     ),
                 );
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_re4<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        const RE4_MAGIC: [u8; 3] = *b"RE4";
+
+        #[derive(Default)]
+        struct Re4FrameData {
+            inputs: Vec<(Player, bool, i32)>,
+            p1_physics: Option<PhysicsSnapshot>,
+            p2_physics: Option<PhysicsSnapshot>,
+        }
+
+        let mut magic = [0u8; 3];
+        reader.read_exact(&mut magic)?;
+        if magic != RE4_MAGIC {
+            anyhow::bail!(format!(
+                "invalid re4 magic (got: {magic:?}, expect: {RE4_MAGIC:?})"
+            ));
+        }
+
+        self.fps = self.get_fps(reader.read_f32::<LittleEndian>()? as f64);
+
+        let physics_count = reader.read_u64::<LittleEndian>()?;
+        let mut frame_data: IndexMap<u64, Re4FrameData> = IndexMap::new();
+
+        for _ in 0..physics_count {
+            let frame = reader.read_u64::<LittleEndian>()?;
+            let x = reader.read_f32::<LittleEndian>()?;
+            let y = reader.read_f32::<LittleEndian>()?;
+            let y_accel = reader.read_f64::<LittleEndian>()? as f32;
+            let player2 = reader.read_u8()? != 0;
+
+            let entry = frame_data.entry(frame).or_default();
+            let physics = PhysicsSnapshot::new(x, y, y_accel, 0.0);
+            if player2 {
+                entry.p2_physics = Some(physics);
+            } else {
+                entry.p1_physics = Some(physics);
+            }
+        }
+
+        let input_count = reader.read_u64::<LittleEndian>()?;
+        for _ in 0..input_count {
+            let frame = reader.read_u64::<LittleEndian>()?;
+            let down = reader.read_u8()? != 0;
+            let button = reader.read_i32::<LittleEndian>()?;
+            let player2 = reader.read_u8()? != 0;
+
+            frame_data.entry(frame).or_default().inputs.push((
+                if player2 { Player::Two } else { Player::One },
+                down,
+                button,
+            ));
+        }
+
+        frame_data.sort_by(|k1, _, k2, _| k1.cmp(k2));
+
+        let mut down_state = [[false; 3]; 2];
+        for (frame, frame_data) in frame_data {
+            let frame = u32::try_from(frame).context("re4 physics frame exceeds u32")?;
+            let time = frame as f64 / self.fps;
+
+            for (player, down, button_idx) in frame_data.inputs {
+                let button = Button::from_button_idx(button_idx, down);
+                self.push_button_input(player, time, button, frame, None);
+
+                let player_idx = match player {
+                    Player::One => 0,
+                    Player::Two => 1,
+                };
+                down_state[player_idx][button.kind().index()] = down;
+            }
+
+            let p1_down = down_state[0].iter().any(|down| *down);
+            let p2_down = down_state[1].iter().any(|down| *down);
+
+            if let Some(physics) = frame_data.p1_physics {
+                self.push_physics(Player::One, p1_down, frame, physics);
+            }
+            if let Some(physics) = frame_data.p2_physics {
+                self.push_physics(Player::Two, p2_down, frame, physics);
             }
         }
 

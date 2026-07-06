@@ -1880,43 +1880,7 @@ impl App {
             egui::ComboBox::from_id_salt("convert_output_format")
                 .selected_text(self.convert_to_format.display_name())
                 .show_ui(ui, |ui| {
-                    let variants = [
-                        ReplayType::TasBot,
-                        ReplayType::Silicate,
-                        ReplayType::Silicate2,
-                        ReplayType::Silicate3,
-                        ReplayType::ReplayBot,
-                        ReplayType::Ddhor,
-                        ReplayType::Txt,
-                        ReplayType::Ybot2,
-                        ReplayType::Zbot,
-                        ReplayType::Kdbot,
-                        ReplayType::Mhr,
-                        ReplayType::MhrBin,
-                        ReplayType::Echo,
-                        ReplayType::Amethyst,
-                        ReplayType::Gdmo,
-                        ReplayType::Rush,
-                        ReplayType::ReplayEngine,
-                        ReplayType::Xbot,
-                        ReplayType::XdBot,
-                        ReplayType::Gdr,
-                        ReplayType::Qbot,
-                        ReplayType::Rbot,
-                        ReplayType::Zephyrus,
-                        ReplayType::ReplayEngine2,
-                        ReplayType::ReplayEngine3,
-                        ReplayType::Gdr2,
-                        ReplayType::Ttr,
-                        ReplayType::Ttr2,
-                        ReplayType::Ttr3,
-                        ReplayType::UvBot,
-                        ReplayType::TcBot,
-                        ReplayType::Ybotf,
-                        ReplayType::Obot,
-                    ];
-
-                    for variant in variants {
+                    for variant in ReplayType::VARIANTS {
                         ui.selectable_value(
                             &mut self.convert_to_format,
                             variant,
@@ -2314,6 +2278,7 @@ impl App {
 • ReplayEngine 1 Replay (.re, old and new formats)
 • ReplayEngine 2 Replay (.re2)
 • ReplayEngine 3 Replay (.re3)
+• ReplayEngine 4 Replay (.re4)
 • Silicate (.slc)
 • Silicate 2 (.slc)
 • Silicate 3 (.slc)

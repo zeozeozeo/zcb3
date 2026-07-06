@@ -118,6 +118,7 @@ impl Writer {
             ReplayType::Zephyrus => self.write_zephyrus(writer),
             ReplayType::ReplayEngine2 => self.write_re2(writer),
             ReplayType::ReplayEngine3 => self.write_re3(writer),
+            ReplayType::ReplayEngine4 => self.write_re4(writer),
             ReplayType::Gdr2 => self.write_gdr2(writer),
             ReplayType::Silicate => self.write_slc(writer),
             ReplayType::Silicate2 => self.write_slc2(writer),
@@ -1181,6 +1182,54 @@ impl Writer {
         Ok(writer)
     }
 
+    fn write_re4<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
+        #[derive(Clone, Copy)]
+        struct Re4Physics {
+            frame: u64,
+            x: f32,
+            y: f32,
+            y_accel: f64,
+            player2: bool,
+        }
+
+        writer.write_all(b"RE4")?;
+        writer.write_f32::<LittleEndian>(self.fps as f32)?;
+
+        let mut physics = Vec::new();
+        for ((frame, player2), extended) in &self.extended_map {
+            physics.push(Re4Physics {
+                frame: u64::from(*frame),
+                x: extended.x,
+                y: extended.y,
+                y_accel: extended.y_accel as f64,
+                player2: *player2,
+            });
+        }
+        physics.sort_by_key(|entry| (entry.frame, entry.player2));
+
+        writer.write_u64::<LittleEndian>(physics.len() as u64)?;
+        for entry in physics {
+            writer.write_u64::<LittleEndian>(entry.frame)?;
+            writer.write_f32::<LittleEndian>(entry.x)?;
+            writer.write_f32::<LittleEndian>(entry.y)?;
+            writer.write_f64::<LittleEndian>(entry.y_accel)?;
+            writer.write_u8(entry.player2 as u8)?;
+        }
+
+        let mut actions = self.actions.clone();
+        actions.sort_by_key(|action| (action.frame, action.player, action.button, action.down));
+
+        writer.write_u64::<LittleEndian>(actions.len() as u64)?;
+        for action in actions {
+            writer.write_u64::<LittleEndian>(u64::from(action.frame))?;
+            writer.write_u8(action.down as u8)?;
+            writer.write_i32::<LittleEndian>(i32::from(button_num(action.button)))?;
+            writer.write_u8((action.player == Player::Two) as u8)?;
+        }
+
+        Ok(writer)
+    }
+
     fn write_gdr2<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
         use gdr2::Replay as Gdr2Replay;
         use gdr2::{Bot, Level};
@@ -1982,6 +2031,11 @@ mod tests {
     }
 
     #[test]
+    fn test_re4() {
+        test_roundtrip(ReplayType::ReplayEngine4, "re4");
+    }
+
+    #[test]
     fn test_uvbot() {
         test_roundtrip(ReplayType::UvBot, "uv");
     }
@@ -2002,6 +2056,7 @@ mod tests {
             ReplayType::Gdr,
             ReplayType::Gdr2,
             ReplayType::ReplayEngine3,
+            ReplayType::ReplayEngine4,
             ReplayType::Silicate,
             ReplayType::Silicate2,
             ReplayType::Silicate3,

@@ -50,6 +50,7 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 - ReplayEngine 1 Replay (.re, old and new formats)
 - ReplayEngine 2 Replay (.re2)
 - ReplayEngine 3 Replay (.re3)
+- ReplayEngine 4 Replay (.re4)
 - Silicate (.slc)
 - Silicate 2 (.slc)
 - Silicate 3 (.slc)
