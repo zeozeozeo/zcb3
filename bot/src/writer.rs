@@ -1,6 +1,7 @@
 use crate::{ttr, ExtendedAction, Player, Replay as ZcbReplay, ReplayType};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, WriteBytesExt};
+use flate2::{write::GzEncoder, Compression};
 use indexmap::IndexMap;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -129,6 +130,7 @@ impl Writer {
             ReplayType::UvBot => self.write_uvbot(writer),
             ReplayType::TcBot => self.write_tcm(writer),
             ReplayType::Cml => self.write_cml(writer),
+            ReplayType::CmlV5 => self.write_cml_v5(writer),
         }
     }
 
@@ -141,36 +143,67 @@ impl Writer {
 
         writer.write_all(&CML_MAGIC)?;
         write_var_u64(&mut writer, 3)?;
-        write_cml_string(&mut writer, "")?;
-        write_cml_string(&mut writer, "")?;
+        self.write_cml_body(&mut writer, 1)?;
+
+        Ok(writer)
+    }
+
+    fn write_cml_v5<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
+        const CML_MAGIC: [u8; 4] = [0xd7, 0x8a, 0x3e, 0x91];
+
+        // Build the uncompressed body into a buffer first so we know its size.
+        let mut payload = Vec::new();
+        self.write_cml_body(&mut payload, 1_000_000i64)?;
+        let decompressed_size = payload.len() as u64;
+
+        // Compress with gzip.
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&payload)?;
+        let compressed = encoder.finish()?;
+
+        // Write the v5 header: [magic][varint(5)][varint(decompressed_size)][gzip_data]
+        writer.write_all(&CML_MAGIC)?;
+        write_var_u64(&mut writer, 5)?;
+        write_var_u64(&mut writer, decompressed_size)?;
+        writer.write_all(&compressed)?;
+
+        Ok(writer)
+    }
+
+    /// Writes the CML payload body (metadata + inputs + frame-fixes)
+    ///
+    /// `frame_scale` is multiplied onto each frame number before encoding, use `1` for v1-v3 and `1_000_000` for v5
+    fn write_cml_body<W: Write>(&self, writer: &mut W, frame_scale: i64) -> Result<()> {
+        write_cml_string(writer, "")?;
+        write_cml_string(writer, "")?;
         writer.write_f32::<LittleEndian>(0.0)?;
         writer.write_f32::<LittleEndian>(self.duration as f32)?;
         writer.write_f32::<LittleEndian>(1.0)?;
         writer.write_f32::<LittleEndian>(self.fps as f32)?;
-        write_var_i64(&mut writer, 0)?;
-        write_var_i64(&mut writer, 0)?;
+        write_var_i64(writer, 0)?;
+        write_var_i64(writer, 0)?;
         writer.write_u8(0)?;
         write_var_i64(
-            &mut writer,
+            writer,
             self.actions
                 .iter()
-                .map(|action| i64::from(action.frame))
+                .map(|action| i64::from(action.frame) * frame_scale)
                 .max()
                 .unwrap_or(0),
         )?;
-        write_cml_string(&mut writer, "zcb3")?;
-        write_cml_string(&mut writer, env!("CARGO_PKG_VERSION"))?;
-        write_var_u64(&mut writer, 0)?;
-        write_cml_string(&mut writer, "")?;
+        write_cml_string(writer, "zcb3")?;
+        write_cml_string(writer, env!("CARGO_PKG_VERSION"))?;
+        write_var_u64(writer, 0)?;
+        write_cml_string(writer, "")?;
 
         let mut actions = self.actions.clone();
         actions.sort_by_key(|action| (action.frame, action.player, action.button, action.down));
 
-        write_var_u64(&mut writer, actions.len() as u64)?;
+        write_var_u64(writer, actions.len() as u64)?;
         let mut prev_frame = 0i64;
         for action in &actions {
-            let frame = i64::from(action.frame);
-            write_var_i64(&mut writer, frame - prev_frame)?;
+            let frame = i64::from(action.frame) * frame_scale;
+            write_var_i64(writer, frame - prev_frame)?;
             prev_frame = frame;
 
             let flags = (button_num(action.button) << 2)
@@ -210,7 +243,7 @@ impl Writer {
             groups.push(vec![(frame, p1, p2)]);
         }
 
-        write_var_u64(&mut writer, groups.len() as u64)?;
+        write_var_u64(writer, groups.len() as u64)?;
         let mut base_frame = 0i64;
         let mut accum = [0i64; 6];
         let mut p1_valid = true;
@@ -218,8 +251,8 @@ impl Writer {
 
         for group in groups {
             let group_start = i64::from(group[0].0);
-            write_var_i64(&mut writer, group_start - base_frame)?;
-            write_var_u64(&mut writer, group.len() as u64)?;
+            write_var_i64(writer, group_start - base_frame)?;
+            write_var_u64(writer, group.len() as u64)?;
 
             for (_, p1, p2) in &group {
                 let target = [
@@ -249,7 +282,7 @@ impl Writer {
                 writer.write_u8(flags)?;
                 for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
                     if flags & bit != 0 {
-                        write_var_i64(&mut writer, target[idx] - accum[idx])?;
+                        write_var_i64(writer, target[idx] - accum[idx])?;
                         accum[idx] = target[idx];
                     }
                 }
@@ -266,7 +299,7 @@ impl Writer {
             base_frame = group_start + group.len() as i64 - 1;
         }
 
-        Ok(writer)
+        Ok(())
     }
 
     fn write_ttr<W: Write + Seek>(&self, writer: W) -> Result<W> {

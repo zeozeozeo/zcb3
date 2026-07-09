@@ -532,8 +532,10 @@ pub enum ReplayType {
     UvBot,
     // TCBot .tcm files
     TcBot,
-    /// xdBot 2.7 compressed macro files
+    /// xdBot 2.7 compressed macro files (v1-v3)
     Cml,
+    /// xdBot 2.7 compressed macro files v5 (gzip-compressed payload)
+    CmlV5,
 }
 
 impl ReplayType {
@@ -575,6 +577,7 @@ impl ReplayType {
             ReplayType::UvBot => "uv",
             ReplayType::TcBot => "tcm",
             ReplayType::Cml => "cml",
+            ReplayType::CmlV5 => "cml",
         }
     }
 
@@ -616,12 +619,13 @@ impl ReplayType {
             ReplayType::UvBot => "UvBot (.uv)",
             ReplayType::TcBot => "TcBot (.tcm)",
             ReplayType::Cml => "xdBot compressed macro (.cml)",
+            ReplayType::CmlV5 => "xdBot compressed macro v5 (.cml)",
         }
     }
 }
 
 impl ReplayType {
-    pub const VARIANTS: [Self; 36] = [
+    pub const VARIANTS: [Self; 37] = [
         ReplayType::Mhr,
         ReplayType::TasBot,
         ReplayType::Zbot,
@@ -658,6 +662,7 @@ impl ReplayType {
         ReplayType::UvBot,
         ReplayType::TcBot,
         ReplayType::Cml,
+        ReplayType::CmlV5,
     ];
 
     pub fn guess_format(filename: &str) -> Result<Self> {
@@ -860,7 +865,8 @@ impl Replay {
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
             ReplayType::UvBot => self.parse_uvbot(reader)?,
             ReplayType::TcBot => self.parse_tcm(reader)?,
-            ReplayType::Cml => self.parse_cml(reader)?,
+            // CmlV5 uses the same parser; version is auto-detected from the file header
+            ReplayType::Cml | ReplayType::CmlV5 => self.parse_cml(reader)?,
         }
 
         // sort actions by time / frame
@@ -3750,8 +3756,23 @@ impl Replay {
         let mut cml = CmlReader::new(data)?;
 
         let version = cml.read_var_u64()?;
-        if !(1..=3).contains(&version) {
+        if !(1..=3).contains(&version) && version != 5 {
             anyhow::bail!("unsupported CML version {version}");
+        }
+
+        if version == 5 {
+            let decompressed_size = cml.read_var_u64()?;
+            let gzip_data = &cml.data[cml.pos..];
+            use flate2::read::GzDecoder;
+            let mut decoder = GzDecoder::new(gzip_data);
+            let mut decompressed = Vec::with_capacity(decompressed_size as usize);
+            decoder.read_to_end(&mut decompressed)?;
+            let encoded_strings = cml.encoded_strings;
+            cml = CmlReader {
+                data: decompressed,
+                pos: 0,
+                encoded_strings,
+            };
         }
 
         let _author = cml.read_string()?;
@@ -3791,9 +3812,21 @@ impl Replay {
                 Player::One
             };
             let down = flags & 0x01 != 0;
-            let frame = u32::try_from(frame).context("CML input frame exceeds u32")?;
+
+            let actual_frame = if version == 5 {
+                frame / 1_000_000
+            } else {
+                frame
+            };
+            let actual_frame_f64 = if version == 5 {
+                frame as f64 / 1_000_000.0
+            } else {
+                frame as f64
+            };
+
+            let frame_u32 = u32::try_from(actual_frame).context("CML input frame exceeds u32")?;
             let button = Button::from_button_idx(button_idx, down);
-            self.process_action(player, frame as f64 / self.fps, button, frame);
+            self.process_action(player, actual_frame_f64 / self.fps, button, frame_u32);
         }
 
         let framefix_count = cml.read_len("frame fix")?;
