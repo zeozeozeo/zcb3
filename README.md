@@ -60,7 +60,7 @@ ZCB also has an in-game version that can be downloaded from the Geode Index: htt
 - ToastyReplay 1 (.ttr)
 - ToastyReplay 2 (.ttr2)
 - ToastyReplay 3 (.ttr3)
-- xdBot compressed (.cml)
+- xdBot compressed (.cml, v1-v3, v5)
 
 \+ a replay converter from any format to any other supported format (currently only in the [web version](https://zeozeozeo.github.io/zcb3))
 
