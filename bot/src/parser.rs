@@ -3846,8 +3846,10 @@ impl Replay {
         let mut action_idx = 0usize;
         let mut down_state = [[false; 3]; 2];
 
+        let flat_groups = version == 1 || version == 5;
+
         for _ in 0..framefix_count {
-            let (group_start, group_len) = if version == 1 {
+            let (group_start, group_len) = if flat_groups {
                 base_frame += cml.read_var_i64()?;
                 (base_frame, 1usize)
             } else {
@@ -3860,6 +3862,11 @@ impl Replay {
                 let current_frame = group_start
                     .checked_add(i64::try_from(offset).context("CML frame fix offset overflow")?)
                     .context("CML frame fix frame overflow")?;
+                let current_frame = if version == 5 {
+                    current_frame / 1_000_000
+                } else {
+                    current_frame
+                };
                 if current_frame < 0 {
                     anyhow::bail!("CML frame fix frame became negative ({current_frame})");
                 }
@@ -3916,7 +3923,7 @@ impl Replay {
                 }
             }
 
-            if version != 1 {
+            if !flat_groups {
                 base_frame += i64::try_from(group_len.saturating_sub(1))
                     .context("CML frame fix group length overflow")?;
             }
