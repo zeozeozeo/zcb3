@@ -548,6 +548,7 @@ pub enum ReplayType {
     Cml,
     /// xdBot 2.7 compressed macro files v5 (gzip-compressed payload)
     CmlV5,
+    CmlV6,
 }
 
 impl ReplayType {
@@ -591,6 +592,7 @@ impl ReplayType {
             ReplayType::TcBot => "tcm",
             ReplayType::Cml => "cml",
             ReplayType::CmlV5 => "cml",
+            ReplayType::CmlV6 => "cml",
         }
     }
 
@@ -634,12 +636,13 @@ impl ReplayType {
             ReplayType::TcBot => "TcBot (.tcm)",
             ReplayType::Cml => "xdBot compressed macro (.cml)",
             ReplayType::CmlV5 => "xdBot compressed macro v5 (.cml)",
+            ReplayType::CmlV6 => "xdBot compressed macro v6 (.cml)",
         }
     }
 }
 
 impl ReplayType {
-    pub const VARIANTS: [Self; 38] = [
+    pub const VARIANTS: [Self; 39] = [
         ReplayType::Mhr,
         ReplayType::TasBot,
         ReplayType::Zbot,
@@ -678,6 +681,7 @@ impl ReplayType {
         ReplayType::TcBot,
         ReplayType::Cml,
         ReplayType::CmlV5,
+        ReplayType::CmlV6,
     ];
 
     pub fn guess_format(filename: &str) -> Result<Self> {
@@ -884,7 +888,7 @@ impl Replay {
             ReplayType::UvBot => self.parse_uvbot(reader)?,
             ReplayType::TcBot => self.parse_tcm(reader)?,
             // CmlV5 uses the same parser; version is auto-detected from the file header
-            ReplayType::Cml | ReplayType::CmlV5 => self.parse_cml(reader)?,
+            ReplayType::Cml | ReplayType::CmlV5 | ReplayType::CmlV6 => self.parse_cml(reader)?,
         }
 
         // sort actions by time / frame
@@ -3850,11 +3854,11 @@ impl Replay {
         let mut cml = CmlReader::new(data)?;
 
         let version = cml.read_var_u64()?;
-        if !(1..=3).contains(&version) && version != 5 {
+        if !(1..=3).contains(&version) && !(5..=6).contains(&version) {
             anyhow::bail!("unsupported CML version {version}");
         }
 
-        if version == 5 {
+        if (5..=6).contains(&version) {
             let decompressed_size = cml.read_var_u64()?;
             let gzip_data = &cml.data[cml.pos..];
             use flate2::read::GzDecoder;
@@ -3884,6 +3888,7 @@ impl Replay {
         let bot_name = cml.read_string()?;
         let bot_version = cml.read_string()?;
         let seed = cml.read_var_u64()?;
+        self.seed = seed;
         let macro_name = cml.read_string()?;
 
         log::info!(
@@ -3907,12 +3912,12 @@ impl Replay {
             };
             let down = flags & 0x01 != 0;
 
-            let actual_frame = if version == 5 {
+            let actual_frame = if (5..=6).contains(&version) {
                 frame / 1_000_000
             } else {
                 frame
             };
-            let actual_frame_f64 = if version == 5 {
+            let actual_frame_f64 = if (5..=6).contains(&version) {
                 frame as f64 / 1_000_000.0
             } else {
                 frame as f64
@@ -3920,7 +3925,7 @@ impl Replay {
 
             let frame_u32 = u32::try_from(actual_frame).context("CML input frame exceeds u32")?;
             let button = Button::from_button_idx(button_idx, down);
-            self.process_action(player, actual_frame_f64 / self.fps, button, frame_u32);
+            self.push_button_input(player, actual_frame_f64 / self.fps, button, frame_u32, None);
         }
 
         let framefix_count = cml.read_len("frame fix")?;
@@ -3940,7 +3945,7 @@ impl Replay {
         let mut action_idx = 0usize;
         let mut down_state = [[false; 3]; 2];
 
-        let flat_groups = version == 1 || version == 5;
+        let flat_groups = version == 1 || (5..=6).contains(&version);
 
         for _ in 0..framefix_count {
             let (group_start, group_len) = if flat_groups {
@@ -3956,7 +3961,7 @@ impl Replay {
                 let current_frame = group_start
                     .checked_add(i64::try_from(offset).context("CML frame fix offset overflow")?)
                     .context("CML frame fix frame overflow")?;
-                let current_frame = if version == 5 {
+                let current_frame = if (5..=6).contains(&version) {
                     current_frame / 1_000_000
                 } else {
                     current_frame

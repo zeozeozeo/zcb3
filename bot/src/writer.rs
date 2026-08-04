@@ -70,6 +70,54 @@ fn cml_fixed(value: f32) -> i64 {
     (value * 1000.0).round() as i64
 }
 
+fn write_cml_frame_fix<W: Write>(
+    writer: &mut W,
+    p1: Option<ExtendedAction>,
+    p2: Option<ExtendedAction>,
+    accum: &mut [i64; 6],
+    p1_valid: &mut bool,
+    p2_valid: &mut bool,
+) -> Result<()> {
+    let target = [
+        p1.map(|e| cml_fixed(e.x)).unwrap_or(accum[0]),
+        p1.map(|e| cml_fixed(e.y)).unwrap_or(accum[1]),
+        p1.map(|e| cml_fixed(e.rot)).unwrap_or(accum[2]),
+        p2.map(|e| cml_fixed(e.x)).unwrap_or(accum[3]),
+        p2.map(|e| cml_fixed(e.y)).unwrap_or(accum[4]),
+        p2.map(|e| cml_fixed(e.rot)).unwrap_or(accum[5]),
+    ];
+    let next_p1_valid = p1.is_some();
+    let next_p2_valid = p2.is_some();
+    let mut flags = 0u8;
+    for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
+        if target[idx] != accum[idx] {
+            flags |= bit;
+        }
+    }
+    if next_p1_valid != *p1_valid {
+        flags |= 0x40;
+    }
+    if next_p2_valid != *p2_valid {
+        flags |= 0x80;
+    }
+    writer.write_u8(flags)?;
+    for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
+        if flags & bit != 0 {
+            write_var_i64(writer, target[idx] - accum[idx])?;
+            accum[idx] = target[idx];
+        }
+    }
+    if flags & 0x40 != 0 {
+        writer.write_u8(next_p1_valid as u8)?;
+        *p1_valid = next_p1_valid;
+    }
+    if flags & 0x80 != 0 {
+        writer.write_u8(next_p2_valid as u8)?;
+        *p2_valid = next_p2_valid;
+    }
+    Ok(())
+}
+
 impl Writer {
     pub fn new(replay: ZcbReplay) -> Self {
         let inputs = replay.inputs.clone();
@@ -156,6 +204,7 @@ impl Writer {
             ReplayType::TcBot => self.write_tcm(writer),
             ReplayType::Cml => self.write_cml(writer),
             ReplayType::CmlV5 => self.write_cml_v5(writer),
+            ReplayType::CmlV6 => self.write_cml_v6(writer),
         }
     }
 
@@ -219,37 +268,49 @@ impl Writer {
 
         writer.write_all(&CML_MAGIC)?;
         write_var_u64(&mut writer, 3)?;
-        self.write_cml_body(&mut writer, 1)?;
+        self.write_cml_body(&mut writer, 1, false)?;
 
         Ok(writer)
     }
 
     fn write_cml_v5<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
+        self.write_cml_compressed(&mut writer, 5)?;
+        Ok(writer)
+    }
+
+    fn write_cml_v6<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
+        self.write_cml_compressed(&mut writer, 6)?;
+        Ok(writer)
+    }
+
+    fn write_cml_compressed<W: Write>(&self, writer: &mut W, version: u64) -> Result<()> {
         const CML_MAGIC: [u8; 4] = [0xd7, 0x8a, 0x3e, 0x91];
 
-        // Build the uncompressed body into a buffer first so we know its size.
         let mut payload = Vec::new();
-        self.write_cml_body(&mut payload, 1_000_000i64)?;
+        self.write_cml_body(&mut payload, 1_000_000i64, true)?;
         let decompressed_size = payload.len() as u64;
 
-        // Compress with gzip.
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&payload)?;
         let compressed = encoder.finish()?;
 
-        // Write the v5 header: [magic][varint(5)][varint(decompressed_size)][gzip_data]
         writer.write_all(&CML_MAGIC)?;
-        write_var_u64(&mut writer, 5)?;
-        write_var_u64(&mut writer, decompressed_size)?;
+        write_var_u64(writer, version)?;
+        write_var_u64(writer, decompressed_size)?;
         writer.write_all(&compressed)?;
 
-        Ok(writer)
+        Ok(())
     }
 
     /// Writes the CML payload body (metadata + inputs + frame-fixes)
     ///
     /// `frame_scale` is multiplied onto each frame number before encoding, use `1` for v1-v3 and `1_000_000` for v5
-    fn write_cml_body<W: Write>(&self, writer: &mut W, frame_scale: i64) -> Result<()> {
+    fn write_cml_body<W: Write>(
+        &self,
+        writer: &mut W,
+        frame_scale: i64,
+        flat_groups: bool,
+    ) -> Result<()> {
         write_cml_string(writer, "")?;
         write_cml_string(writer, "")?;
         writer.write_f32::<LittleEndian>(0.0)?;
@@ -303,76 +364,52 @@ impl Writer {
             }
         }
 
-        let mut groups: Vec<Vec<(u32, Option<ExtendedAction>, Option<ExtendedAction>)>> =
-            Vec::new();
-        for (frame, (p1, p2)) in frame_fixes {
-            if let Some(last_group) = groups.last_mut() {
-                if last_group
-                    .last()
-                    .map(|(last_frame, _, _)| *last_frame + 1 == frame)
-                    .unwrap_or(false)
-                {
-                    last_group.push((frame, p1, p2));
-                    continue;
-                }
-            }
-            groups.push(vec![(frame, p1, p2)]);
-        }
-
-        write_var_u64(writer, groups.len() as u64)?;
         let mut base_frame = 0i64;
         let mut accum = [0i64; 6];
         let mut p1_valid = true;
         let mut p2_valid = true;
 
-        for group in groups {
-            let group_start = i64::from(group[0].0);
-            write_var_i64(writer, group_start - base_frame)?;
-            write_var_u64(writer, group.len() as u64)?;
-
-            for (_, p1, p2) in &group {
-                let target = [
-                    p1.map(|e| cml_fixed(e.x)).unwrap_or(accum[0]),
-                    p1.map(|e| cml_fixed(e.y)).unwrap_or(accum[1]),
-                    p1.map(|e| cml_fixed(e.rot)).unwrap_or(accum[2]),
-                    p2.map(|e| cml_fixed(e.x)).unwrap_or(accum[3]),
-                    p2.map(|e| cml_fixed(e.y)).unwrap_or(accum[4]),
-                    p2.map(|e| cml_fixed(e.rot)).unwrap_or(accum[5]),
-                ];
-
-                let next_p1_valid = p1.is_some();
-                let next_p2_valid = p2.is_some();
-                let mut flags = 0u8;
-                for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
-                    if target[idx] != accum[idx] {
-                        flags |= bit;
-                    }
-                }
-                if next_p1_valid != p1_valid {
-                    flags |= 0x40;
-                }
-                if next_p2_valid != p2_valid {
-                    flags |= 0x80;
-                }
-
-                writer.write_u8(flags)?;
-                for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
-                    if flags & bit != 0 {
-                        write_var_i64(writer, target[idx] - accum[idx])?;
-                        accum[idx] = target[idx];
-                    }
-                }
-                if flags & 0x40 != 0 {
-                    writer.write_u8(next_p1_valid as u8)?;
-                    p1_valid = next_p1_valid;
-                }
-                if flags & 0x80 != 0 {
-                    writer.write_u8(next_p2_valid as u8)?;
-                    p2_valid = next_p2_valid;
-                }
+        if flat_groups {
+            write_var_u64(writer, frame_fixes.len() as u64)?;
+            for (frame, (p1, p2)) in frame_fixes {
+                let frame = i64::from(frame) * frame_scale;
+                write_var_i64(writer, frame - base_frame)?;
+                base_frame = frame;
+                write_cml_frame_fix(writer, p1, p2, &mut accum, &mut p1_valid, &mut p2_valid)?;
             }
-
-            base_frame = group_start + group.len() as i64 - 1;
+        } else {
+            let mut groups: Vec<Vec<(u32, Option<ExtendedAction>, Option<ExtendedAction>)>> =
+                Vec::new();
+            for (frame, (p1, p2)) in frame_fixes {
+                if let Some(last_group) = groups.last_mut() {
+                    if last_group
+                        .last()
+                        .map(|(last_frame, _, _)| *last_frame + 1 == frame)
+                        .unwrap_or(false)
+                    {
+                        last_group.push((frame, p1, p2));
+                        continue;
+                    }
+                }
+                groups.push(vec![(frame, p1, p2)]);
+            }
+            write_var_u64(writer, groups.len() as u64)?;
+            for group in groups {
+                let group_start = i64::from(group[0].0) * frame_scale;
+                write_var_i64(writer, group_start - base_frame)?;
+                write_var_u64(writer, group.len() as u64)?;
+                for (_, p1, p2) in &group {
+                    write_cml_frame_fix(
+                        writer,
+                        *p1,
+                        *p2,
+                        &mut accum,
+                        &mut p1_valid,
+                        &mut p2_valid,
+                    )?;
+                }
+                base_frame = group_start + (group.len() as i64 - 1) * frame_scale;
+            }
         }
 
         Ok(())
@@ -2462,6 +2499,16 @@ mod tests {
     }
 
     #[test]
+    fn test_cml_v5() {
+        test_roundtrip(ReplayType::CmlV5, "cml");
+    }
+
+    #[test]
+    fn test_cml_v6() {
+        test_roundtrip(ReplayType::CmlV6, "cml");
+    }
+
+    #[test]
     fn test_supported_format_button_roundtrips() {
         for typ in [
             ReplayType::Gdr,
@@ -2474,6 +2521,7 @@ mod tests {
             ReplayType::Grape,
             ReplayType::UvBot,
             ReplayType::Cml,
+            ReplayType::CmlV6,
             ReplayType::Ttr,
             ReplayType::Ttr2,
             ReplayType::Ttr3,
