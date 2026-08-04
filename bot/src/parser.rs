@@ -385,6 +385,13 @@ impl ReplayInput {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ReplayEvent {
+    FpsChange { frame: u32, fps: f64 },
+    Restart { frame: u32, full: bool, seed: u64 },
+    Death { frame: u32, seed: u64 },
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Action {
     /// Time since the replay was started (in seconds).
@@ -442,6 +449,10 @@ pub struct Replay {
     pub extended_data: bool,
     /// Action data used for converting replays.
     pub extended: Vec<ExtendedAction>,
+    pub inputs: Vec<ReplayInput>,
+    pub events: Vec<ReplayEvent>,
+    pub seed: u64,
+    pub build: u32,
 
     // used for determining the click type
     prev_action: [[Option<ClickType>; 3]; 2],
@@ -520,6 +531,7 @@ pub enum ReplayType {
     Silicate2,
     /// Silicate .slc3 files
     Silicate3,
+    Grape,
     /// GDReplayFormat 2 .gdr2 files
     Gdr2,
     /// ToastyReplay .ttr files
@@ -569,7 +581,8 @@ impl ReplayType {
             ReplayType::ReplayEngine4 => "re4",
             ReplayType::Silicate => "slc",
             ReplayType::Silicate2 => "slc2",
-            ReplayType::Silicate3 => "slc3",
+            ReplayType::Silicate3 => "slc",
+            ReplayType::Grape => "grape",
             ReplayType::Gdr2 => "gdr2",
             ReplayType::Ttr => "ttr",
             ReplayType::Ttr2 => "ttr2",
@@ -612,6 +625,7 @@ impl ReplayType {
             ReplayType::Silicate => "Silicate (.slc)",
             ReplayType::Silicate2 => "Silicate 2 (.slc2)",
             ReplayType::Silicate3 => "Silicate 3 (.slc3)",
+            ReplayType::Grape => "GRAPE (.grape)",
             ReplayType::Gdr2 => "Gdr2 (.gdr2)",
             ReplayType::Ttr => "ToastyReplay (.ttr)",
             ReplayType::Ttr2 => "ToastyReplay 2 (.ttr2)",
@@ -625,7 +639,7 @@ impl ReplayType {
 }
 
 impl ReplayType {
-    pub const VARIANTS: [Self; 37] = [
+    pub const VARIANTS: [Self; 38] = [
         ReplayType::Mhr,
         ReplayType::TasBot,
         ReplayType::Zbot,
@@ -655,6 +669,7 @@ impl ReplayType {
         ReplayType::Silicate,
         ReplayType::Silicate2,
         ReplayType::Silicate3,
+        ReplayType::Grape,
         ReplayType::Gdr2,
         ReplayType::Ttr,
         ReplayType::Ttr2,
@@ -712,6 +727,7 @@ impl ReplayType {
             "slc" => Silicate,
             "slc2" => Silicate2,
             "slc3" => Silicate3,
+            "grape" => Grape,
             "gdr2" => Gdr2,
             "ttr" => Ttr,
             "ttr2" => Ttr2,
@@ -766,6 +782,7 @@ impl Replay {
         "slc",
         "slc2",
         "slc3",
+        "grape",
         "gdr2",
         "ttr",
         "ttr2",
@@ -862,6 +879,7 @@ impl Replay {
             ReplayType::Silicate => self.parse_slc(reader)?,
             ReplayType::Silicate2 => self.parse_slc2(reader)?,
             ReplayType::Silicate3 => self.parse_slc3(reader)?,
+            ReplayType::Grape => self.parse_slc3(reader)?,
             // MacroType::GatoBot => self.parse_gatobot(reader)?,
             ReplayType::UvBot => self.parse_uvbot(reader)?,
             ReplayType::TcBot => self.parse_tcm(reader)?,
@@ -891,15 +909,25 @@ impl Replay {
     pub fn sort_actions(&mut self) -> &mut Self {
         self.actions.sort_by(|a, b| a.time.total_cmp(&b.time));
         self.extended.sort_by_key(|a| a.frame);
+        self.inputs
+            .sort_by(|a, b| a.time.total_cmp(&b.time).then(a.frame.cmp(&b.frame)));
+        self.events.sort_by_key(|event| match event {
+            ReplayEvent::FpsChange { frame, .. }
+            | ReplayEvent::Restart { frame, .. }
+            | ReplayEvent::Death { frame, .. } => *frame,
+        });
         self
     }
 
     pub fn push_input(&mut self, input: ReplayInput) {
         let button = input.lane.button.to_button(input.down);
-        self.process_action(input.lane.player, input.time, button, input.frame);
-        if let Some(physics) = input.physics {
-            self.push_physics(input.lane.player, input.down, input.frame, physics);
-        }
+        self.push_button_input(
+            input.lane.player,
+            input.time,
+            button,
+            input.frame,
+            input.physics,
+        );
     }
 
     pub fn push_input_parts(
@@ -957,6 +985,17 @@ impl Replay {
         frame: u32,
         physics: Option<PhysicsSnapshot>,
     ) {
+        let stored_player = match (self.swap_players, player) {
+            (false, Player::One) | (true, Player::Two) => Player::One,
+            (false, Player::Two) | (true, Player::One) => Player::Two,
+        };
+        self.inputs.push(ReplayInput {
+            lane: InputLane::new(stored_player, button.kind()),
+            down: button.is_down(),
+            frame,
+            time,
+            physics,
+        });
         self.process_action(player, time, button, frame);
         if let Some(physics) = physics {
             self.push_physics(player, button.is_down(), frame, physics);
@@ -1091,6 +1130,10 @@ impl Replay {
         if let Some(last) = self.extended.last_mut() {
             last.fps_change = Some(fps_change);
         }
+    }
+
+    fn push_event(&mut self, event: ReplayEvent) {
+        self.events.push(event);
     }
 
     fn get_fps(&self, actual: f64) -> f64 {
@@ -3185,6 +3228,7 @@ impl Replay {
         let replay = gdr2::Replay::import_data(&buf)?;
 
         self.fps = self.get_fps(replay.framerate);
+        self.seed = replay.seed as u64;
 
         log::info!("gdr2 replay author: {}", replay.author);
         log::info!("gdr2 replay description: {}", replay.description);
@@ -3200,6 +3244,19 @@ impl Replay {
             0
         };
 
+        if !self.discard_deaths {
+            self.events.extend(
+                replay
+                    .deaths
+                    .iter()
+                    .copied()
+                    .map(|frame| ReplayEvent::Death {
+                        frame: frame.try_into().unwrap_or(u32::MAX),
+                        seed: 0,
+                    }),
+            );
+        }
+
         log::info!(
             "gdr2 replay start frame: {} (discard deaths: {})",
             start_frame,
@@ -3210,29 +3267,27 @@ impl Replay {
             if input.frame < start_frame {
                 continue;
             }
-            let time = input.frame as f64 / self.fps;
-            let p = input.physics.clone().unwrap_or_default();
-            self.push_input(
-                ReplayInput::new(
-                    InputLane::new(
-                        if input.player2 {
-                            Player::Two
-                        } else {
-                            Player::One
-                        },
-                        ButtonKind::from_button_index(input.button),
-                    ),
-                    input.down,
-                    input.frame as _,
-                    time,
-                )
-                .with_physics(PhysicsSnapshot::new(
+            let frame = input.frame.saturating_sub(start_frame);
+            let time = frame as f64 / self.fps;
+            let lane = InputLane::new(
+                if input.player2 {
+                    Player::Two
+                } else {
+                    Player::One
+                },
+                ButtonKind::from_button_index(input.button),
+            );
+            let replay_input = ReplayInput::new(lane, input.down, frame as _, time);
+            self.push_input(if let Some(p) = input.physics.as_ref() {
+                replay_input.with_physics(PhysicsSnapshot::new(
                     p.x_position,
                     p.y_position,
                     p.y_velocity as _,
                     p.rotation,
-                )),
-            );
+                ))
+            } else {
+                replay_input
+            });
         }
 
         Ok(())
@@ -3275,48 +3330,64 @@ impl Replay {
             return self.parse_slc3(reader);
         };
         log::info!("slc2: meta: {:?}", replay.meta);
+        self.seed = replay.meta.seed;
         self.fps = self.get_fps(replay.tps);
 
-        let start = if self.discard_deaths {
-            // find the last death
-            replay
-                .inputs
-                .iter()
-                .rposition(|i| {
-                    matches!(
-                        i.data,
-                        InputData::Restart | InputData::RestartFull | InputData::Death
-                    )
-                })
-                .unwrap_or(0)
+        let (start, frame_offset) = if self.discard_deaths {
+            if let Some(index) = replay.inputs.iter().rposition(|input| {
+                matches!(
+                    input.data,
+                    InputData::Restart | InputData::RestartFull | InputData::Death
+                )
+            }) {
+                (index + 1, replay.inputs[index].frame)
+            } else {
+                (0, 0)
+            }
         } else {
-            0
+            (0, 0)
         };
 
         for input in replay.inputs.iter().skip(start) {
-            let time = input.frame as f64 / self.fps;
+            let frame = input.frame.saturating_sub(frame_offset);
+            let time = frame as f64 / self.fps;
             match &input.data {
                 InputData::TPS(tps) => {
                     self.fps = self.get_fps(*tps);
                     self.fps_change(*tps);
+                    self.push_event(ReplayEvent::FpsChange {
+                        frame: frame as u32,
+                        fps: *tps,
+                    });
                 }
+                InputData::Restart => self.push_event(ReplayEvent::Restart {
+                    frame: frame as u32,
+                    full: false,
+                    seed: 0,
+                }),
+                InputData::RestartFull => self.push_event(ReplayEvent::Restart {
+                    frame: frame as u32,
+                    full: true,
+                    seed: 0,
+                }),
+                InputData::Death => self.push_event(ReplayEvent::Death {
+                    frame: frame as u32,
+                    seed: 0,
+                }),
                 InputData::Player(player) => {
-                    self.push_input(
-                        ReplayInput::new(
-                            InputLane::new(
-                                if player.player_2 {
-                                    Player::Two
-                                } else {
-                                    Player::One
-                                },
-                                ButtonKind::from_button_index(player.button),
-                            ),
-                            player.hold,
-                            input.frame as _,
-                            time,
-                        )
-                        .with_physics(PhysicsSnapshot::ZERO),
-                    );
+                    self.push_input(ReplayInput::new(
+                        InputLane::new(
+                            if player.player_2 {
+                                Player::Two
+                            } else {
+                                Player::One
+                            },
+                            ButtonKind::from_button_index(player.button),
+                        ),
+                        player.hold,
+                        frame as _,
+                        time,
+                    ));
                 }
                 _ => (),
             }
@@ -3328,7 +3399,14 @@ impl Replay {
     fn parse_slc3<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         use slc_oxide::{input::InputData, replay::Replay};
 
-        let replay = Replay::<()>::read(&mut reader).map_err(|e| anyhow::anyhow!("{}", e))?;
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        if data.len() >= 34 && &data[..8] == b"SLC3RPLY" {
+            self.seed = u64::from_le_bytes(data[18..26].try_into().unwrap());
+            self.build = u32::from_le_bytes(data[30..34].try_into().unwrap());
+        }
+        let replay =
+            Replay::<()>::read(&mut Cursor::new(data)).map_err(|e| anyhow::anyhow!("{}", e))?;
 
         self.fps = self.get_fps(replay.tps);
         log::info!(
@@ -3337,45 +3415,61 @@ impl Replay {
             replay.inputs.len()
         );
 
-        let start = if self.discard_deaths {
-            replay
-                .inputs
-                .iter()
-                .rposition(|i| {
-                    matches!(
-                        i.data,
-                        InputData::Restart | InputData::RestartFull | InputData::Death
-                    )
-                })
-                .unwrap_or(0)
+        let (start, frame_offset) = if self.discard_deaths {
+            if let Some(index) = replay.inputs.iter().rposition(|input| {
+                matches!(
+                    input.data,
+                    InputData::Restart | InputData::RestartFull | InputData::Death
+                )
+            }) {
+                (index + 1, replay.inputs[index].frame)
+            } else {
+                (0, 0)
+            }
         } else {
-            0
+            (0, 0)
         };
 
         for input in replay.inputs.iter().skip(start) {
-            let time = input.frame as f64 / self.fps;
+            let frame = input.frame.saturating_sub(frame_offset);
+            let time = frame as f64 / self.fps;
             match &input.data {
                 InputData::TPS(tps) => {
                     self.fps = self.get_fps(*tps);
                     self.fps_change(*tps);
+                    self.push_event(ReplayEvent::FpsChange {
+                        frame: frame as u32,
+                        fps: *tps,
+                    });
                 }
+                InputData::Restart => self.push_event(ReplayEvent::Restart {
+                    frame: frame as u32,
+                    full: false,
+                    seed: 0,
+                }),
+                InputData::RestartFull => self.push_event(ReplayEvent::Restart {
+                    frame: frame as u32,
+                    full: true,
+                    seed: 0,
+                }),
+                InputData::Death => self.push_event(ReplayEvent::Death {
+                    frame: frame as u32,
+                    seed: 0,
+                }),
                 InputData::Player(player) => {
-                    self.push_input(
-                        ReplayInput::new(
-                            InputLane::new(
-                                if player.player_2 {
-                                    Player::Two
-                                } else {
-                                    Player::One
-                                },
-                                ButtonKind::from_button_index(player.button),
-                            ),
-                            player.hold,
-                            input.frame as _,
-                            time,
-                        )
-                        .with_physics(PhysicsSnapshot::ZERO),
-                    );
+                    self.push_input(ReplayInput::new(
+                        InputLane::new(
+                            if player.player_2 {
+                                Player::Two
+                            } else {
+                                Player::One
+                            },
+                            ButtonKind::from_button_index(player.button),
+                        ),
+                        player.hold,
+                        frame as _,
+                        time,
+                    ));
                 }
                 _ => (),
             }
@@ -3624,7 +3718,7 @@ impl Replay {
                         time,
                         Button::from_button_idx(v.button as _, v.push),
                         input.frame as _,
-                        Some(PhysicsSnapshot::ZERO),
+                        None,
                     );
                 }
                 _ => (),
@@ -4073,6 +4167,11 @@ mod tests {
             ReplayType::guess_format("macro.slc3").unwrap(),
             ReplayType::Silicate3
         );
+        assert_eq!(
+            ReplayType::guess_format("nuclear winter.grape").unwrap(),
+            ReplayType::Grape
+        );
+        assert_eq!(ReplayType::Silicate3.extension(), "slc");
     }
 
     #[test]

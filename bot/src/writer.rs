@@ -1,4 +1,6 @@
-use crate::{ttr, ExtendedAction, Player, Replay as ZcbReplay, ReplayType};
+use crate::{
+    ttr, ExtendedAction, Player, Replay as ZcbReplay, ReplayEvent, ReplayInput, ReplayType,
+};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, WriteBytesExt};
 use flate2::{write::GzEncoder, Compression};
@@ -15,6 +17,10 @@ pub struct Writer {
     fps: f64,
     duration: f64,
     actions: Vec<Action>,
+    inputs: Vec<ReplayInput>,
+    events: Vec<ReplayEvent>,
+    seed: u64,
+    build: u32,
     extended_map: HashMap<(u32, bool), ExtendedAction>,
 }
 
@@ -66,28 +72,46 @@ fn cml_fixed(value: f32) -> i64 {
 
 impl Writer {
     pub fn new(replay: ZcbReplay) -> Self {
+        let inputs = replay.inputs.clone();
         let extended_map = replay
             .extended
             .iter()
             .map(|e| ((e.frame, e.player2), *e))
             .collect();
 
-        let actions = replay
-            .actions
-            .iter()
-            .map(|a| Action {
-                time: a.time,
-                player: a.player,
-                button: a.click.button(),
-                down: a.click.is_click(),
-                frame: a.frame,
-            })
-            .collect();
+        let actions = if inputs.is_empty() {
+            replay
+                .actions
+                .iter()
+                .map(|a| Action {
+                    time: a.time,
+                    player: a.player,
+                    button: a.click.button(),
+                    down: a.click.is_click(),
+                    frame: a.frame,
+                })
+                .collect()
+        } else {
+            inputs
+                .iter()
+                .map(|input| Action {
+                    time: input.time,
+                    player: input.lane.player,
+                    button: input.lane.button,
+                    down: input.down,
+                    frame: input.frame,
+                })
+                .collect()
+        };
 
         Self {
             fps: replay.fps,
             duration: replay.duration,
             actions,
+            inputs,
+            events: replay.events,
+            seed: replay.seed,
+            build: replay.build,
             extended_map,
         }
     }
@@ -124,6 +148,7 @@ impl Writer {
             ReplayType::Silicate => self.write_slc(writer),
             ReplayType::Silicate2 => self.write_slc2(writer),
             ReplayType::Silicate3 => self.write_slc3(writer),
+            ReplayType::Grape => self.write_grape(writer),
             ReplayType::Ttr => self.write_ttr(writer),
             ReplayType::Ttr2 => self.write_ttr2(writer),
             ReplayType::Ttr3 => self.write_ttr3(writer),
@@ -136,6 +161,57 @@ impl Writer {
 
     fn get_extended(&self, frame: u32, player2: bool) -> Option<ExtendedAction> {
         self.extended_map.get(&(frame, player2)).copied()
+    }
+
+    fn input_records(&self) -> Vec<ReplayInput> {
+        if !self.inputs.is_empty() {
+            return self.inputs.clone();
+        }
+
+        self.actions
+            .iter()
+            .map(|action| {
+                ReplayInput::new(
+                    crate::InputLane::new(action.player, action.button),
+                    action.down,
+                    action.frame,
+                    action.time,
+                )
+            })
+            .collect()
+    }
+
+    fn slc_records(&self) -> Vec<(u64, InputData)> {
+        let mut records: Vec<(u64, InputData)> = self
+            .input_records()
+            .into_iter()
+            .map(|input| {
+                (
+                    input.frame as u64,
+                    InputData::Player(slc_oxide::input::PlayerInput {
+                        button: button_num(input.lane.button),
+                        hold: input.down,
+                        player_2: input.lane.player == Player::Two,
+                    }),
+                )
+            })
+            .collect();
+
+        records.extend(self.events.iter().map(|event| match *event {
+            ReplayEvent::FpsChange { frame, fps } => (frame as u64, InputData::TPS(fps)),
+            ReplayEvent::Restart { frame, full, .. } => (
+                frame as u64,
+                if full {
+                    InputData::RestartFull
+                } else {
+                    InputData::Restart
+                },
+            ),
+            ReplayEvent::Death { frame, .. } => (frame as u64, InputData::Death),
+        }));
+
+        records.sort_by_key(|(frame, _)| *frame);
+        records
     }
 
     fn write_cml<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
@@ -1267,26 +1343,47 @@ impl Writer {
         use gdr2::Replay as Gdr2Replay;
         use gdr2::{Bot, Level};
 
+        let source_inputs = self.input_records();
         let mut inputs = Vec::new();
 
-        for action in &self.actions {
-            let ext = self.get_extended(action.frame, action.player == Player::Two);
-            let physics = ext.map(|e| gdr2::PhysicsData {
-                x_position: e.x,
-                y_position: e.y,
-                rotation: e.rot,
-                x_velocity: 0.0,
-                y_velocity: e.y_accel as f64,
-            });
+        for input in source_inputs {
+            let physics = input
+                .physics
+                .map(|p| gdr2::PhysicsData {
+                    x_position: p.x,
+                    y_position: p.y,
+                    rotation: p.rot,
+                    x_velocity: 0.0,
+                    y_velocity: p.y_accel as f64,
+                })
+                .or_else(|| {
+                    self.get_extended(input.frame, input.lane.player == Player::Two)
+                        .map(|e| gdr2::PhysicsData {
+                            x_position: e.x,
+                            y_position: e.y,
+                            rotation: e.rot,
+                            x_velocity: 0.0,
+                            y_velocity: e.y_accel as f64,
+                        })
+                });
 
             inputs.push(gdr2::Input {
-                frame: action.frame as u64,
-                button: button_num(action.button),
-                player2: action.player == Player::Two,
-                down: action.down,
+                frame: input.frame as u64,
+                button: button_num(input.lane.button),
+                player2: input.lane.player == Player::Two,
+                down: input.down,
                 physics,
             });
         }
+
+        let deaths = self
+            .events
+            .iter()
+            .filter_map(|event| match *event {
+                ReplayEvent::Death { frame, .. } => Some(frame as u64),
+                _ => None,
+            })
+            .collect();
 
         let replay = Gdr2Replay {
             author: String::new(),
@@ -1294,17 +1391,17 @@ impl Writer {
             duration: self.duration as f32,
             game_version: 0,
             framerate: self.fps,
-            seed: 0,
+            seed: i32::try_from(self.seed).unwrap_or(0),
             coins: 0,
             ldm: false,
             platformer: self
-                .actions
+                .input_records()
                 .iter()
-                .any(|action| action.button != crate::ButtonKind::Jump),
+                .any(|input| input.lane.button != crate::ButtonKind::Jump),
             bot_info: Bot::default(),
             level_info: Level::default(),
             inputs,
-            deaths: Vec::new(),
+            deaths,
         };
 
         let data = replay.export_data()?;
@@ -1334,19 +1431,10 @@ impl Writer {
     }
 
     fn write_slc2<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
-        use slc_oxide::input::PlayerInput;
-
         let mut replay = Replay::<()>::new(self.fps, ());
 
-        for action in &self.actions {
-            replay.add_input(
-                action.frame as u64,
-                InputData::Player(PlayerInput {
-                    button: button_num(action.button),
-                    hold: action.down,
-                    player_2: action.player == Player::Two,
-                }),
-            );
+        for (frame, input) in self.slc_records() {
+            replay.add_input(frame, input);
         }
 
         replay
@@ -1356,25 +1444,45 @@ impl Writer {
     }
 
     fn write_slc3<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
-        use slc_oxide::input::PlayerInput;
+        self.write_slc3_versioned(&mut writer, 1)?;
+        Ok(writer)
+    }
 
+    fn write_grape<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
+        self.write_slc3_versioned(&mut writer, 2)?;
+        Ok(writer)
+    }
+
+    fn write_slc3_versioned<W: Write>(&self, writer: &mut W, version: u32) -> Result<()> {
         let mut replay = Replay::<()>::new(self.fps, ());
 
-        for action in &self.actions {
-            replay.add_input(
-                action.frame as u64,
-                InputData::Player(PlayerInput {
-                    button: button_num(action.button),
-                    hold: action.down,
-                    player_2: action.player == Player::Two,
-                }),
-            );
+        for (frame, input) in self.slc_records() {
+            replay.add_input(frame, input);
         }
 
+        let mut data = Vec::new();
         replay
-            .write_v3(&mut writer)
+            .write_v3(&mut data)
             .map_err(|e| anyhow::anyhow!("{}", e))?;
-        Ok(writer)
+
+        const HEADER_SIZE: usize = 8 + 2 + 64;
+        const ATOM_HEADER_SIZE: usize = 4 + 8;
+        const FOOTER_SIZE: usize = 1;
+        if data.len() < HEADER_SIZE + ATOM_HEADER_SIZE + FOOTER_SIZE {
+            anyhow::bail!("SLC3 writer produced a truncated replay");
+        }
+        let atom_size = data
+            .len()
+            .checked_sub(HEADER_SIZE + ATOM_HEADER_SIZE + FOOTER_SIZE)
+            .context("SLC3 atom size overflow")?;
+        data[HEADER_SIZE + 4..HEADER_SIZE + 12].copy_from_slice(&(atom_size as u64).to_le_bytes());
+
+        data[18..26].copy_from_slice(&self.seed.to_le_bytes());
+        data[26..30].copy_from_slice(&version.to_le_bytes());
+        data[30..34].copy_from_slice(&self.build.max(81).to_le_bytes());
+
+        writer.write_all(&data)?;
+        Ok(())
     }
 
     fn write_uvbot<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
@@ -1612,6 +1720,86 @@ mod tests {
         replay.sort_actions();
         replay.duration = replay.actions.last().map(|a| a.time).unwrap_or(0.0);
         replay
+    }
+
+    fn conversion_replay() -> Replay {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.seed = 1234;
+        replay.build = 81;
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::One, ButtonKind::Jump),
+            true,
+            7,
+            7.0 / 240.0,
+        ));
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::One, ButtonKind::Jump),
+            true,
+            8,
+            8.0 / 240.0,
+        ));
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::One, ButtonKind::Jump),
+            false,
+            9,
+            9.0 / 240.0,
+        ));
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::Two, ButtonKind::Right),
+            true,
+            7,
+            7.0 / 240.0,
+        ));
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::Two, ButtonKind::Right),
+            false,
+            13,
+            13.0 / 240.0,
+        ));
+        replay.events.push(ReplayEvent::Death {
+            frame: 100,
+            seed: 5678,
+        });
+        replay
+    }
+
+    fn write_parse(replay: &Replay, typ: ReplayType) -> Replay {
+        let mut buffer = Cursor::new(Vec::new());
+        replay.to_writer().write(typ, &mut buffer).unwrap();
+        Replay::build()
+            .parse(typ, Cursor::new(buffer.into_inner()))
+            .unwrap()
+    }
+
+    fn input_signature(replay: &Replay) -> Vec<(u32, Player, ButtonKind, bool)> {
+        let mut signature: Vec<_> = replay
+            .inputs
+            .iter()
+            .map(|input| {
+                (
+                    input.frame,
+                    input.lane.player,
+                    input.lane.button,
+                    input.down,
+                )
+            })
+            .collect();
+        signature.sort();
+        signature
+    }
+
+    fn death_signature(replay: &Replay) -> Vec<u32> {
+        let mut signature: Vec<_> = replay
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                ReplayEvent::Death { frame, .. } => Some(*frame),
+                _ => None,
+            })
+            .collect();
+        signature.sort();
+        signature
     }
 
     fn test_roundtrip(typ: ReplayType, _ext: &str) {
@@ -1898,6 +2086,196 @@ mod tests {
     }
 
     #[test]
+    fn test_grape() {
+        test_roundtrip(ReplayType::Grape, "grape");
+    }
+
+    #[test]
+    fn test_cross_format_conversion_matrix() {
+        let formats = [
+            ReplayType::Gdr2,
+            ReplayType::Silicate2,
+            ReplayType::Silicate3,
+            ReplayType::Grape,
+        ];
+
+        for source_type in formats {
+            let source = write_parse(&conversion_replay(), source_type);
+            let expected_inputs = input_signature(&source);
+            let expected_deaths = death_signature(&source);
+
+            for target_type in formats {
+                let converted = write_parse(&source, target_type);
+                assert_eq!(
+                    input_signature(&converted),
+                    expected_inputs,
+                    "input mismatch: {source_type:?} -> {target_type:?}"
+                );
+                assert_eq!(
+                    death_signature(&converted),
+                    expected_deaths,
+                    "event mismatch: {source_type:?} -> {target_type:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_slc3_wire_format_has_valid_atom_size() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.seed = 1234;
+        replay.build = 81;
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::One, ButtonKind::Jump),
+            true,
+            10,
+            10.0 / 240.0,
+        ));
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::Two, ButtonKind::Right),
+            false,
+            10,
+            10.0 / 240.0,
+        ));
+
+        let mut buffer = Cursor::new(Vec::new());
+        replay
+            .to_writer()
+            .write(ReplayType::Grape, &mut buffer)
+            .unwrap();
+        let data = buffer.into_inner();
+
+        assert_eq!(&data[..8], b"SLC3RPLY");
+        assert_eq!(u16::from_le_bytes(data[8..10].try_into().unwrap()), 64);
+        assert_eq!(u64::from_le_bytes(data[18..26].try_into().unwrap()), 1234);
+        assert_eq!(u32::from_le_bytes(data[26..30].try_into().unwrap()), 2);
+        assert_eq!(u32::from_le_bytes(data[30..34].try_into().unwrap()), 81);
+        assert_eq!(data.last().copied(), Some(0xCC));
+
+        let atom_size = u64::from_le_bytes(data[78..86].try_into().unwrap());
+        assert_eq!(atom_size as usize, data.len() - 86 - 1);
+        assert!(atom_size > 0);
+
+        let parsed = Replay::build()
+            .with_extended(true)
+            .parse(ReplayType::Grape, Cursor::new(data))
+            .unwrap();
+        assert_eq!(parsed.inputs.len(), 2);
+        assert_eq!(parsed.inputs[0].frame, 10);
+        assert_eq!(parsed.inputs[1].lane.player, Player::Two);
+    }
+
+    #[test]
+    fn test_slc3_preserves_repeated_raw_inputs() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::One, ButtonKind::Jump),
+            true,
+            10,
+            10.0 / 240.0,
+        ));
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::One, ButtonKind::Jump),
+            true,
+            11,
+            11.0 / 240.0,
+        ));
+
+        let mut buffer = Cursor::new(Vec::new());
+        replay
+            .to_writer()
+            .write(ReplayType::Silicate3, &mut buffer)
+            .unwrap();
+        let parsed = Replay::build()
+            .parse(ReplayType::Silicate3, Cursor::new(buffer.into_inner()))
+            .unwrap();
+
+        assert_eq!(parsed.inputs.len(), 2);
+        assert_eq!(parsed.actions.len(), 1);
+        assert_eq!(parsed.inputs[0].frame, 10);
+        assert_eq!(parsed.inputs[1].frame, 11);
+    }
+
+    #[test]
+    fn test_gdr2_does_not_invent_physics() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::One, ButtonKind::Jump),
+            true,
+            120,
+            0.5,
+        ));
+
+        let mut buffer = Cursor::new(Vec::new());
+        replay
+            .to_writer()
+            .write(ReplayType::Gdr2, &mut buffer)
+            .unwrap();
+        let imported = gdr2::Replay::import_data(buffer.get_ref()).unwrap();
+
+        assert_eq!(imported.inputs.len(), 1);
+        assert_eq!(imported.inputs[0].frame, 120);
+        assert!(imported.inputs[0].physics.is_none());
+    }
+
+    #[test]
+    fn test_gdr2_preserves_physics_on_direct_conversion() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.push_input(
+            ReplayInput::new(
+                InputLane::new(Player::One, ButtonKind::Jump),
+                true,
+                120,
+                0.5,
+            )
+            .with_physics(PhysicsSnapshot::new(12.0, 34.0, 56.0, 78.0)),
+        );
+
+        let converted = write_parse(&replay, ReplayType::Gdr2);
+        assert_eq!(converted.inputs.len(), 1);
+        let physics = converted.inputs[0].physics.unwrap();
+        assert_eq!(physics.x, 12.0);
+        assert_eq!(physics.y, 34.0);
+        assert_eq!(physics.y_accel, 56.0);
+        assert_eq!(physics.rot, 78.0);
+    }
+
+    #[test]
+    fn test_slc3_discard_death_rebases_frames() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.events.push(ReplayEvent::Death {
+            frame: 120,
+            seed: 0,
+        });
+        replay.push_input(ReplayInput::new(
+            InputLane::new(Player::One, ButtonKind::Jump),
+            true,
+            180,
+            0.75,
+        ));
+
+        let mut buffer = Cursor::new(Vec::new());
+        replay
+            .to_writer()
+            .write(ReplayType::Silicate3, &mut buffer)
+            .unwrap();
+        let parsed = Replay::build()
+            .with_discard_deaths(true)
+            .parse(ReplayType::Silicate3, Cursor::new(buffer.into_inner()))
+            .unwrap();
+
+        assert_eq!(parsed.actions.len(), 1);
+        assert_eq!(parsed.actions[0].frame, 60);
+        assert_eq!(parsed.inputs[0].frame, 60);
+        assert!(parsed.events.is_empty());
+    }
+
+    #[test]
     fn test_gdmo() {
         test_roundtrip(ReplayType::Gdmo, "macro");
     }
@@ -2093,6 +2471,7 @@ mod tests {
             ReplayType::Silicate,
             ReplayType::Silicate2,
             ReplayType::Silicate3,
+            ReplayType::Grape,
             ReplayType::UvBot,
             ReplayType::Cml,
             ReplayType::Ttr,

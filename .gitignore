@@ -1,5 +1,5 @@
 /target
 /.vscode
 /zcb3.debug
-.aider*
 /dist
+/gitignored
