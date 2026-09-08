@@ -2288,6 +2288,7 @@ impl App {
 • ToastyReplay 1 (.ttr)
 • ToastyReplay 2 (.ttr2)
 • ToastyReplay 3 (.ttr3)
+• ToastyReplay Lite (.ttrl)
 • xdBot compressed (.cml, v1-v3, v5-v7)
 • Grape (.grape)",
             );

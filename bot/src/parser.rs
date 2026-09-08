@@ -1,4 +1,4 @@
-use crate::{f32_range, ttr, Timings, VolumeSettings, Writer};
+use crate::{f32_range, ttr, ttrl, Timings, VolumeSettings, Writer};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use ijson::IValue;
@@ -551,6 +551,8 @@ pub enum ReplayType {
     CmlV6,
     /// xdBot 2.7 compressed macro files v7
     CmlV7,
+    /// ToastyReplay Lite (.ttrl) files
+    Ttrl,
 }
 
 impl ReplayType {
@@ -596,6 +598,7 @@ impl ReplayType {
             ReplayType::CmlV5 => "cml",
             ReplayType::CmlV6 => "cml",
             ReplayType::CmlV7 => "cml",
+            ReplayType::Ttrl => "ttrl",
         }
     }
 
@@ -641,12 +644,13 @@ impl ReplayType {
             ReplayType::CmlV5 => "xdBot compressed macro v5 (.cml)",
             ReplayType::CmlV6 => "xdBot compressed macro v6 (.cml)",
             ReplayType::CmlV7 => "xdBot compressed macro v7 (.cml)",
+            ReplayType::Ttrl => "ToastyReplay Lite (.ttrl)",
         }
     }
 }
 
 impl ReplayType {
-    pub const VARIANTS: [Self; 40] = [
+    pub const VARIANTS: [Self; 41] = [
         ReplayType::Mhr,
         ReplayType::TasBot,
         ReplayType::Zbot,
@@ -687,6 +691,7 @@ impl ReplayType {
         ReplayType::CmlV5,
         ReplayType::CmlV6,
         ReplayType::CmlV7,
+        ReplayType::Ttrl,
     ];
 
     pub fn guess_format(filename: &str) -> Result<Self> {
@@ -741,6 +746,7 @@ impl ReplayType {
             "ttr" => Ttr,
             "ttr2" => Ttr2,
             "ttr3" => Ttr3,
+            "ttrl" => Ttrl,
             "uv" => UvBot,
             "tcm" => TcBot,
             "cml" => Cml,
@@ -796,6 +802,7 @@ impl Replay {
         "ttr",
         "ttr2",
         "ttr3",
+        "ttrl",
         "uv",
         "tcm",
         "cml",
@@ -885,6 +892,7 @@ impl Replay {
             ReplayType::ReplayEngine4 => self.parse_re4(reader)?,
             ReplayType::Gdr2 => self.parse_gdr2(reader)?,
             ReplayType::Ttr | ReplayType::Ttr2 | ReplayType::Ttr3 => self.parse_ttr(reader)?,
+            ReplayType::Ttrl => self.parse_ttrl(reader)?,
             ReplayType::Silicate => self.parse_slc(reader)?,
             ReplayType::Silicate2 => self.parse_slc2(reader)?,
             ReplayType::Silicate3 => self.parse_slc3(reader)?,
@@ -1166,6 +1174,51 @@ impl Replay {
                 Player::One => self.process_action_p1(action.time, button, action.frame),
                 Player::Two => self.process_action_p2(action.time, button, action.frame),
             }
+        }
+
+        Ok(())
+    }
+
+    fn parse_ttrl<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
+        let decoded = ttrl::parse(&mut reader)?;
+        self.fps = self.get_fps(decoded.fps);
+        self.seed = decoded.seed.unwrap_or(0);
+        self.build = decoded.game_version;
+
+        for action in decoded.actions {
+            let button = action.button.to_button(action.down);
+            match action.player {
+                Player::One => self.process_action_p1(action.time, button, action.frame),
+                Player::Two => self.process_action_p2(action.time, button, action.frame),
+            }
+        }
+
+        let mut action_idx = 0usize;
+        let mut down_state = [[false; 3]; 2];
+        for fix in &decoded.fixes {
+            while let Some(action) = self.actions.get(action_idx) {
+                if action.frame > fix.frame {
+                    break;
+                }
+                let player_idx = match action.player {
+                    Player::One => 0,
+                    Player::Two => 1,
+                };
+                down_state[player_idx][action.click.button().index()] = action.click.is_click();
+                action_idx += 1;
+            }
+
+            let player_idx = match fix.player {
+                Player::One => 0,
+                Player::Two => 1,
+            };
+            let down = down_state[player_idx].iter().any(|down| *down);
+            self.push_physics(
+                fix.player,
+                down,
+                fix.frame,
+                PhysicsSnapshot::new(fix.x, fix.y, fix.y_vel as f32, fix.rot),
+            );
         }
 
         Ok(())

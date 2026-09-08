@@ -1,5 +1,5 @@
 use crate::{
-    ttr, ExtendedAction, Player, Replay as ZcbReplay, ReplayEvent, ReplayInput, ReplayType,
+    ttr, ttrl, ExtendedAction, Player, Replay as ZcbReplay, ReplayEvent, ReplayInput, ReplayType,
 };
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, WriteBytesExt};
@@ -279,6 +279,7 @@ impl Writer {
             ReplayType::Ttr => self.write_ttr(writer),
             ReplayType::Ttr2 => self.write_ttr2(writer),
             ReplayType::Ttr3 => self.write_ttr3(writer),
+            ReplayType::Ttrl => self.write_ttrl(writer),
             ReplayType::UvBot => self.write_uvbot(writer),
             ReplayType::TcBot => self.write_tcm(writer),
             ReplayType::Cml => self.write_cml(writer),
@@ -660,6 +661,42 @@ impl Writer {
             .collect::<Vec<_>>();
 
         ttr::write(writer, format, self.fps, self.duration, &actions)
+    }
+
+    fn write_ttrl<W: Write + Seek>(&self, writer: W) -> Result<W> {
+        let actions = self
+            .actions
+            .iter()
+            .map(|action| ttr::ToastyAction {
+                time: action.time,
+                frame: action.frame,
+                player: action.player,
+                button: action.button,
+                down: action.down,
+            })
+            .collect::<Vec<_>>();
+
+        let mut fixes: Vec<ttrl::TtrlFix> = self
+            .extended_map
+            .iter()
+            .map(|((frame, player2), extended)| ttrl::TtrlFix {
+                frame: *frame,
+                player: if *player2 { Player::Two } else { Player::One },
+                x: extended.x,
+                y: extended.y,
+                rot: extended.rot,
+                y_vel: f64::from(extended.y_accel),
+            })
+            .collect();
+        fixes.sort_by_key(|fix| (fix.frame, fix.player));
+
+        let seed = if self.seed != 0 { Some(self.seed) } else { None };
+        let game_version = if self.build != 0 {
+            self.build
+        } else {
+            ttrl::DEFAULT_GAME_VERSION
+        };
+        ttrl::write(writer, self.fps, seed, game_version, &actions, &fixes)
     }
 
     fn write_mhr<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
@@ -2552,6 +2589,11 @@ mod tests {
     }
 
     #[test]
+    fn test_ttrl() {
+        test_roundtrip(ReplayType::Ttrl, "ttrl");
+    }
+
+    #[test]
     fn test_empty_replay() {
         let original = Replay::build();
         let writer = original.to_writer();
@@ -2750,6 +2792,7 @@ mod tests {
             ReplayType::Ttr,
             ReplayType::Ttr2,
             ReplayType::Ttr3,
+            ReplayType::Ttrl,
         ] {
             test_button_roundtrip(typ);
         }

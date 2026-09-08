@@ -2,6 +2,7 @@ mod audio;
 mod bot;
 mod parser;
 mod ttr;
+mod ttrl;
 mod writer;
 
 pub use audio::*;
