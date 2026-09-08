@@ -70,6 +70,85 @@ fn cml_fixed(value: f32) -> i64 {
     (value * 1000.0).round() as i64
 }
 
+fn cml_fixed_v7(value: f32) -> i64 {
+    (value * 1_000_000.0).round() as i64
+}
+
+struct CmlBitWriter {
+    out: Vec<u8>,
+    acc: u8,
+    count: u32,
+}
+
+impl CmlBitWriter {
+    fn new() -> Self {
+        Self {
+            out: Vec::new(),
+            acc: 0,
+            count: 0,
+        }
+    }
+
+    fn write_bit(&mut self, bit: bool) {
+        self.acc = u8::from(bit) | (self.acc << 1);
+        self.count += 1;
+        if self.count == 8 {
+            self.out.push(self.acc);
+            self.acc = 0;
+            self.count = 0;
+        }
+    }
+
+    fn write_bits(&mut self, value: u64, count: u32) {
+        for i in (0..count).rev() {
+            self.write_bit((value >> i) & 1 == 1);
+        }
+    }
+
+    fn write_byte(&mut self, byte: u8) {
+        self.write_bits(u64::from(byte), 8);
+    }
+
+    fn write_f32(&mut self, value: f32) {
+        self.write_bits(u64::from(value.to_bits()), 32);
+    }
+
+    fn write_var_u64(&mut self, mut value: u64) {
+        loop {
+            if value < 0x80 {
+                self.write_bit(false);
+                self.write_bits(value, 7);
+                break;
+            }
+            self.write_bit(true);
+            self.write_bits(value & 0x7f, 7);
+            value >>= 7;
+        }
+    }
+
+    fn write_var_i64(&mut self, value: i64) {
+        self.write_var_u64(((value as u64) << 1) ^ ((value >> 63) as u64));
+    }
+
+    fn write_boolean(&mut self, value: bool) {
+        self.write_bit(value);
+    }
+
+    fn write_string(&mut self, value: &str) {
+        self.write_var_u64(value.len() as u64);
+        for (i, byte) in value.bytes().enumerate() {
+            self.write_byte(byte ^ cml_string_key(i));
+        }
+    }
+
+    fn finish(mut self) -> Vec<u8> {
+        if self.count > 0 {
+            self.out.push(self.acc << (8 - self.count));
+        }
+        self.out
+    }
+}
+
 fn write_cml_frame_fix<W: Write>(
     writer: &mut W,
     p1: Option<ExtendedAction>,
@@ -205,6 +284,7 @@ impl Writer {
             ReplayType::Cml => self.write_cml(writer),
             ReplayType::CmlV5 => self.write_cml_v5(writer),
             ReplayType::CmlV6 => self.write_cml_v6(writer),
+            ReplayType::CmlV7 => self.write_cml_v7(writer),
         }
     }
 
@@ -281,6 +361,145 @@ impl Writer {
     fn write_cml_v6<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
         self.write_cml_compressed(&mut writer, 6)?;
         Ok(writer)
+    }
+
+    fn write_cml_v7<W: Write + Seek>(&self, mut writer: W) -> Result<W> {
+        const CML_MAGIC: [u8; 4] = [0xd7, 0x8a, 0x3e, 0x91];
+
+        let payload = self.write_cml_v7_body()?;
+        let decompressed_size = payload.len() as u64;
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&payload)?;
+        let compressed = encoder.finish()?;
+
+        writer.write_all(&CML_MAGIC)?;
+        write_var_u64(&mut writer, 7)?;
+        write_var_u64(&mut writer, decompressed_size)?;
+        writer.write_all(&compressed)?;
+
+        Ok(writer)
+    }
+
+    fn write_cml_v7_body(&self) -> Result<Vec<u8>> {
+        const CML_V7_SUBTICK_SCALE: i64 = 1_000_000;
+
+        let mut writer = CmlBitWriter::new();
+        writer.write_string("");
+        writer.write_string("");
+        writer.write_f32(0.0);
+        writer.write_f32(self.duration as f32);
+        writer.write_f32(1.0);
+        writer.write_f32(self.fps as f32);
+        writer.write_var_i64(0);
+        writer.write_var_i64(0);
+        writer.write_boolean(false);
+        writer.write_var_i64(
+            self.actions
+                .iter()
+                .map(|action| i64::from(action.frame) * CML_V7_SUBTICK_SCALE)
+                .max()
+                .unwrap_or(0),
+        );
+        writer.write_string("zcb3");
+        writer.write_string(env!("CARGO_PKG_VERSION"));
+        writer.write_var_u64(0);
+        writer.write_string("");
+
+        let mut actions = self.actions.clone();
+        actions.sort_by_key(|action| action.frame);
+
+        writer.write_var_u64(actions.len() as u64);
+        let mut prev_subtick = 0i64;
+        for action in &actions {
+            let subtick = i64::from(action.frame) * CML_V7_SUBTICK_SCALE;
+            let delta = subtick.wrapping_sub(prev_subtick);
+            prev_subtick = subtick;
+            if delta == CML_V7_SUBTICK_SCALE {
+                writer.write_bit(true);
+            } else {
+                writer.write_bit(false);
+                writer.write_var_i64(delta);
+            }
+
+            let flags = (button_num(action.button) << 2)
+                | if action.player == Player::Two {
+                    0x02
+                } else {
+                    0
+                }
+                | if action.down { 0x01 } else { 0 };
+            writer.write_byte(flags);
+        }
+
+        let mut frame_fixes: BTreeMap<u32, (Option<ExtendedAction>, Option<ExtendedAction>)> =
+            BTreeMap::new();
+        for ((frame, player2), extended) in &self.extended_map {
+            let entry = frame_fixes.entry(*frame).or_default();
+            if *player2 {
+                entry.1 = Some(*extended);
+            } else {
+                entry.0 = Some(*extended);
+            }
+        }
+
+        writer.write_var_u64(frame_fixes.len() as u64);
+        let mut base = 0i64;
+        let mut prev_quant = [0i64; 6];
+        let mut p1_valid = false;
+        let mut p2_valid = false;
+        for (frame, (p1, p2)) in frame_fixes {
+            let subtick = i64::from(frame) * CML_V7_SUBTICK_SCALE;
+            let delta = subtick.wrapping_sub(base);
+            base = subtick;
+            if delta == CML_V7_SUBTICK_SCALE {
+                writer.write_bit(true);
+            } else {
+                writer.write_bit(false);
+                writer.write_var_i64(delta);
+            }
+
+            let target = [
+                p1.map(|e| cml_fixed_v7(e.x)).unwrap_or(prev_quant[0]),
+                p1.map(|e| cml_fixed_v7(e.y)).unwrap_or(prev_quant[1]),
+                p1.map(|e| cml_fixed_v7(e.rot)).unwrap_or(prev_quant[2]),
+                p2.map(|e| cml_fixed_v7(e.x)).unwrap_or(prev_quant[3]),
+                p2.map(|e| cml_fixed_v7(e.y)).unwrap_or(prev_quant[4]),
+                p2.map(|e| cml_fixed_v7(e.rot)).unwrap_or(prev_quant[5]),
+            ];
+            let next_p1_valid = p1.is_some();
+            let next_p2_valid = p2.is_some();
+            let mut flags = 0u8;
+            for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
+                if target[idx].wrapping_sub(prev_quant[idx]) != 0 {
+                    flags |= bit;
+                }
+            }
+            if next_p1_valid != p1_valid {
+                flags |= 0x40;
+            }
+            if next_p2_valid != p2_valid {
+                flags |= 0x80;
+            }
+            writer.write_byte(flags);
+            for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
+                if flags & bit != 0 {
+                    let delta = target[idx].wrapping_sub(prev_quant[idx]);
+                    writer.write_var_i64(delta);
+                    prev_quant[idx] = target[idx];
+                }
+            }
+            if flags & 0x40 != 0 {
+                writer.write_boolean(next_p1_valid);
+                p1_valid = next_p1_valid;
+            }
+            if flags & 0x80 != 0 {
+                writer.write_boolean(next_p2_valid);
+                p2_valid = next_p2_valid;
+            }
+        }
+
+        Ok(writer.finish())
     }
 
     fn write_cml_compressed<W: Write>(&self, writer: &mut W, version: u64) -> Result<()> {
@@ -2509,6 +2728,11 @@ mod tests {
     }
 
     #[test]
+    fn test_cml_v7() {
+        test_roundtrip(ReplayType::CmlV7, "cml");
+    }
+
+    #[test]
     fn test_supported_format_button_roundtrips() {
         for typ in [
             ReplayType::Gdr,
@@ -2522,6 +2746,7 @@ mod tests {
             ReplayType::UvBot,
             ReplayType::Cml,
             ReplayType::CmlV6,
+            ReplayType::CmlV7,
             ReplayType::Ttr,
             ReplayType::Ttr2,
             ReplayType::Ttr3,

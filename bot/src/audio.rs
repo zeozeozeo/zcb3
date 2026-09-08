@@ -461,10 +461,9 @@ impl AudioSegment {
         let oversampling_factor = 128;
         let interpolation = SincInterpolationType::Linear;
         let window = WindowFunction::BlackmanHarris2;
-        let f_cutoff = rubato::calculate_cutoff(sinc_len, window);
         let params = SincInterpolationParameters {
             sinc_len,
-            f_cutoff,
+            f_cutoff: None,
             interpolation,
             oversampling_factor,
             window,

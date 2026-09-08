@@ -28,11 +28,11 @@ gdr2 = { path = "gdr2" }
 fastrand = "2.3.0"
 flate2 = "1.1.9"
 slc_oxide = "0.2.0"
-rubato = "3.0.0"
-audioadapter = "3.0.0"
+rubato = "5.0.0"
+audioadapter = "5.0.0"
 indexmap = "2.14.0"
 tcm = "0.1.0"
-audioadapter-buffers = "3.0.0"
+audioadapter-buffers = "5.2.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate"] }
 #rmp-serde = "1.3.0"
 

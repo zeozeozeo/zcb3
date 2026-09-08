@@ -549,6 +549,8 @@ pub enum ReplayType {
     /// xdBot 2.7 compressed macro files v5 (gzip-compressed payload)
     CmlV5,
     CmlV6,
+    /// xdBot 2.7 compressed macro files v7
+    CmlV7,
 }
 
 impl ReplayType {
@@ -593,6 +595,7 @@ impl ReplayType {
             ReplayType::Cml => "cml",
             ReplayType::CmlV5 => "cml",
             ReplayType::CmlV6 => "cml",
+            ReplayType::CmlV7 => "cml",
         }
     }
 
@@ -637,12 +640,13 @@ impl ReplayType {
             ReplayType::Cml => "xdBot compressed macro (.cml)",
             ReplayType::CmlV5 => "xdBot compressed macro v5 (.cml)",
             ReplayType::CmlV6 => "xdBot compressed macro v6 (.cml)",
+            ReplayType::CmlV7 => "xdBot compressed macro v7 (.cml)",
         }
     }
 }
 
 impl ReplayType {
-    pub const VARIANTS: [Self; 39] = [
+    pub const VARIANTS: [Self; 40] = [
         ReplayType::Mhr,
         ReplayType::TasBot,
         ReplayType::Zbot,
@@ -682,6 +686,7 @@ impl ReplayType {
         ReplayType::Cml,
         ReplayType::CmlV5,
         ReplayType::CmlV6,
+        ReplayType::CmlV7,
     ];
 
     pub fn guess_format(filename: &str) -> Result<Self> {
@@ -888,7 +893,9 @@ impl Replay {
             ReplayType::UvBot => self.parse_uvbot(reader)?,
             ReplayType::TcBot => self.parse_tcm(reader)?,
             // CmlV5 uses the same parser; version is auto-detected from the file header
-            ReplayType::Cml | ReplayType::CmlV5 | ReplayType::CmlV6 => self.parse_cml(reader)?,
+            ReplayType::Cml | ReplayType::CmlV5 | ReplayType::CmlV6 | ReplayType::CmlV7 => {
+                self.parse_cml(reader)?
+            }
         }
 
         // sort actions by time / frame
@@ -3854,11 +3861,11 @@ impl Replay {
         let mut cml = CmlReader::new(data)?;
 
         let version = cml.read_var_u64()?;
-        if !(1..=3).contains(&version) && !(5..=6).contains(&version) {
+        if !(1..=3).contains(&version) && !(5..=7).contains(&version) {
             anyhow::bail!("unsupported CML version {version}");
         }
 
-        if (5..=6).contains(&version) {
+        if (5..=7).contains(&version) {
             let decompressed_size = cml.read_var_u64()?;
             let gzip_data = &cml.data[cml.pos..];
             use flate2::read::GzDecoder;
@@ -3866,6 +3873,9 @@ impl Replay {
             let mut decompressed = Vec::with_capacity(decompressed_size as usize);
             decoder.read_to_end(&mut decompressed)?;
             let encoded_strings = cml.encoded_strings;
+            if version == 7 {
+                return self.parse_cml_v7(decompressed, encoded_strings);
+            }
             cml = CmlReader {
                 data: decompressed,
                 pos: 0,
@@ -4025,6 +4035,250 @@ impl Replay {
             if !flat_groups {
                 base_frame += i64::try_from(group_len.saturating_sub(1))
                     .context("CML frame fix group length overflow")?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn parse_cml_v7(&mut self, data: Vec<u8>, encoded_strings: bool) -> Result<()> {
+        const CML_V7_SUBTICK_SCALE: i64 = 1_000_000;
+        const CML_V7_FIXED_SCALE: f32 = 1_000_000.0;
+
+        struct CmlBitReader {
+            data: Vec<u8>,
+            pos: usize,
+            buf: u8,
+            bits_left: u32,
+            encoded_strings: bool,
+        }
+
+        impl CmlBitReader {
+            fn new(data: Vec<u8>, encoded_strings: bool) -> Self {
+                Self {
+                    data,
+                    pos: 0,
+                    buf: 0,
+                    bits_left: 0,
+                    encoded_strings,
+                }
+            }
+
+            fn read_bit(&mut self) -> Result<bool> {
+                if self.bits_left == 0 {
+                    let byte = *self
+                        .data
+                        .get(self.pos)
+                        .context("unexpected EOF reading CML v7 bit")?;
+                    self.pos += 1;
+                    self.buf = byte;
+                    self.bits_left = 8;
+                }
+                self.bits_left -= 1;
+                Ok((self.buf >> self.bits_left) & 1 == 1)
+            }
+
+            fn read_bits(&mut self, count: u32) -> Result<u64> {
+                let mut value = 0u64;
+                for _ in 0..count {
+                    value = (value << 1) | u64::from(self.read_bit()?);
+                }
+                Ok(value)
+            }
+
+            fn read_byte(&mut self) -> Result<u8> {
+                Ok(self.read_bits(8)? as u8)
+            }
+
+            fn read_f32(&mut self) -> Result<f32> {
+                Ok(f32::from_bits(self.read_bits(32)? as u32))
+            }
+
+            fn read_var_u64(&mut self) -> Result<u64> {
+                let mut value = 0u64;
+                let mut shift = 0u32;
+                loop {
+                    let cont = self.read_bit()?;
+                    let chunk = self.read_bits(7)?;
+                    value |= chunk << shift;
+                    shift += 7;
+                    if !cont {
+                        return Ok(value);
+                    }
+                    if shift >= 64 {
+                        anyhow::bail!("CML v7 varint is too long");
+                    }
+                }
+            }
+
+            fn read_var_i64(&mut self) -> Result<i64> {
+                let value = self.read_var_u64()?;
+                Ok(((value >> 1) as i64) ^ (-((value & 1) as i64)))
+            }
+
+            fn read_len(&mut self, what: &str) -> Result<usize> {
+                usize::try_from(self.read_var_u64()?)
+                    .with_context(|| format!("CML v7 {what} length does not fit in usize"))
+            }
+
+            fn string_key(index: usize) -> u8 {
+                ((index as u64 * 0x3d + 0xa7 + ((index as u64 >> 1) * 0x11)) & 0xff) as u8
+            }
+
+            fn read_string(&mut self) -> Result<String> {
+                let len = self.read_len("string")?;
+                let mut bytes = Vec::with_capacity(len);
+                for i in 0..len {
+                    let mut byte = self.read_byte()?;
+                    if self.encoded_strings {
+                        byte ^= Self::string_key(i);
+                    }
+                    bytes.push(byte);
+                }
+                String::from_utf8(bytes).context("CML v7 string is not valid UTF-8")
+            }
+        }
+
+        fn split_subtick(subtick: i64) -> (i64, u32) {
+            let subtick = subtick.max(0);
+            (
+                subtick / CML_V7_SUBTICK_SCALE,
+                (subtick % CML_V7_SUBTICK_SCALE) as u32,
+            )
+        }
+
+        let mut bits = CmlBitReader::new(data, encoded_strings);
+
+        let _author = bits.read_string()?;
+        let _description = bits.read_string()?;
+        let _unknown_f1 = bits.read_f32()?;
+        let _unknown_f2 = bits.read_f32()?;
+        let _unknown_f3 = bits.read_f32()?;
+        let fps = bits.read_f32()?;
+        self.fps = self.get_fps(fps as f64);
+
+        let _unknown_a = bits.read_var_i64()?;
+        let _unknown_b = bits.read_var_i64()?;
+        let _unknown_flag = bits.read_bit()?;
+        let mut last_frame = bits.read_var_i64()?;
+        let bot_name = bits.read_string()?;
+        let bot_version = bits.read_string()?;
+        let seed = bits.read_var_u64()?;
+        self.seed = seed;
+        let macro_name = bits.read_string()?;
+
+        log::info!(
+            "CML v7 macro: name='{macro_name}', bot='{bot_name}', version='{bot_version}', seed={seed}"
+        );
+
+        let input_count = bits.read_len("input")?;
+        self.actions.reserve(input_count);
+        let mut subtick = 0i64;
+        for _ in 0..input_count {
+            let delta = if bits.read_bit()? {
+                CML_V7_SUBTICK_SCALE
+            } else {
+                bits.read_var_i64()?
+            };
+            subtick = subtick.wrapping_add(delta);
+            let (frame, _sub) = split_subtick(subtick);
+            let frame_u32 = u32::try_from(frame).context("CML v7 input frame exceeds u32")?;
+            let flags = bits.read_byte()?;
+            let button_idx = ((flags >> 2) & 0x0f) as i32;
+            let player = if flags & 0x02 != 0 {
+                Player::Two
+            } else {
+                Player::One
+            };
+            let down = flags & 0x01 != 0;
+
+            let button = Button::from_button_idx(button_idx, down);
+            self.push_button_input(
+                player,
+                subtick as f64 / CML_V7_SUBTICK_SCALE as f64 / self.fps,
+                button,
+                frame_u32,
+                None,
+            );
+        }
+
+        let framefix_count = bits.read_len("frame fix")?;
+        if last_frame <= 0 {
+            last_frame = self.actions.last().map(|a| i64::from(a.frame)).unwrap_or(0);
+        }
+        log::info!(
+            "CML v7 macro inputs={}, frame_fixes={}, last_frame={last_frame}",
+            input_count,
+            framefix_count
+        );
+
+        let mut accum = [0i64; 6];
+        let mut p1_valid = false;
+        let mut p2_valid = false;
+        let mut base = 0i64;
+        let mut action_idx = 0usize;
+        let mut down_state = [[false; 3]; 2];
+
+        for _ in 0..framefix_count {
+            let delta = if bits.read_bit()? {
+                CML_V7_SUBTICK_SCALE
+            } else {
+                bits.read_var_i64()?
+            };
+            base = base.wrapping_add(delta);
+            let (frame, _sub) = split_subtick(base);
+            let current_frame =
+                u32::try_from(frame).context("CML v7 frame fix frame exceeds u32")?;
+
+            let flags = bits.read_byte()?;
+            for (idx, bit) in [1, 2, 4, 8, 16, 32].into_iter().enumerate() {
+                if flags & bit != 0 {
+                    accum[idx] = accum[idx].wrapping_add(bits.read_var_i64()?);
+                }
+            }
+            if flags & 0x40 != 0 {
+                p1_valid = bits.read_bit()?;
+            }
+            if flags & 0x80 != 0 {
+                p2_valid = bits.read_bit()?;
+            }
+
+            while let Some(action) = self.actions.get(action_idx) {
+                if action.frame > current_frame {
+                    break;
+                }
+                let player_idx = match action.player {
+                    Player::One => 0,
+                    Player::Two => 1,
+                };
+                down_state[player_idx][action.click.button().index()] = action.click.is_click();
+                action_idx += 1;
+            }
+
+            let p1_down = down_state[0].iter().any(|down| *down);
+            let p2_down = down_state[1].iter().any(|down| *down);
+            let p1_x = accum[0] as f32 / CML_V7_FIXED_SCALE;
+            let p1_y = accum[1] as f32 / CML_V7_FIXED_SCALE;
+            let p1_rot = accum[2] as f32 / CML_V7_FIXED_SCALE;
+            let p2_x = accum[3] as f32 / CML_V7_FIXED_SCALE;
+            let p2_y = accum[4] as f32 / CML_V7_FIXED_SCALE;
+            let p2_rot = accum[5] as f32 / CML_V7_FIXED_SCALE;
+
+            if p1_valid {
+                self.push_physics(
+                    Player::One,
+                    p1_down,
+                    current_frame,
+                    PhysicsSnapshot::new(p1_x, p1_y, 0.0, p1_rot),
+                );
+            }
+            if p2_valid && (p2_x != 0.0 || p2_y != 0.0 || p2_rot != 0.0) {
+                self.push_physics(
+                    Player::Two,
+                    p2_down,
+                    current_frame,
+                    PhysicsSnapshot::new(p2_x, p2_y, 0.0, p2_rot),
+                );
             }
         }
 
