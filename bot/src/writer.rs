@@ -22,6 +22,17 @@ pub struct Writer {
     seed: u64,
     build: u32,
     extended_map: HashMap<(u32, bool), ExtendedAction>,
+    strip_physics: bool,
+    drop_deaths: bool,
+}
+
+/// Options applied when exporting a replay
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WriterOptions {
+    /// Drop all position corrections / physics data on export
+    pub strip_physics: bool,
+    /// Drop recorded deaths on export
+    pub drop_deaths: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -66,8 +77,8 @@ fn write_cml_string<W: Write>(writer: &mut W, value: &str) -> Result<()> {
     Ok(())
 }
 
-fn cml_fixed(value: f32) -> i64 {
-    (value * 1000.0).round() as i64
+fn cml_fixed_scaled(value: f32, scale: f32) -> i64 {
+    (value * scale).round() as i64
 }
 
 fn cml_fixed_v7(value: f32) -> i64 {
@@ -156,14 +167,21 @@ fn write_cml_frame_fix<W: Write>(
     accum: &mut [i64; 6],
     p1_valid: &mut bool,
     p2_valid: &mut bool,
+    fixed_scale: f32,
 ) -> Result<()> {
     let target = [
-        p1.map(|e| cml_fixed(e.x)).unwrap_or(accum[0]),
-        p1.map(|e| cml_fixed(e.y)).unwrap_or(accum[1]),
-        p1.map(|e| cml_fixed(e.rot)).unwrap_or(accum[2]),
-        p2.map(|e| cml_fixed(e.x)).unwrap_or(accum[3]),
-        p2.map(|e| cml_fixed(e.y)).unwrap_or(accum[4]),
-        p2.map(|e| cml_fixed(e.rot)).unwrap_or(accum[5]),
+        p1.map(|e| cml_fixed_scaled(e.x, fixed_scale))
+            .unwrap_or(accum[0]),
+        p1.map(|e| cml_fixed_scaled(e.y, fixed_scale))
+            .unwrap_or(accum[1]),
+        p1.map(|e| cml_fixed_scaled(e.rot, fixed_scale))
+            .unwrap_or(accum[2]),
+        p2.map(|e| cml_fixed_scaled(e.x, fixed_scale))
+            .unwrap_or(accum[3]),
+        p2.map(|e| cml_fixed_scaled(e.y, fixed_scale))
+            .unwrap_or(accum[4]),
+        p2.map(|e| cml_fixed_scaled(e.rot, fixed_scale))
+            .unwrap_or(accum[5]),
     ];
     let next_p1_valid = p1.is_some();
     let next_p2_valid = p2.is_some();
@@ -240,7 +258,25 @@ impl Writer {
             seed: replay.seed,
             build: replay.build,
             extended_map,
+            strip_physics: false,
+            drop_deaths: false,
         }
+    }
+
+    pub fn with_options(mut self, options: WriterOptions) -> Self {
+        self.strip_physics = options.strip_physics;
+        self.drop_deaths = options.drop_deaths;
+        self
+    }
+
+    pub fn with_strip_physics(mut self, strip: bool) -> Self {
+        self.strip_physics = strip;
+        self
+    }
+
+    pub fn with_drop_deaths(mut self, drop: bool) -> Self {
+        self.drop_deaths = drop;
+        self
     }
 
     pub fn write<W: Write + Seek>(&self, typ: ReplayType, writer: W) -> Result<W> {
@@ -290,7 +326,27 @@ impl Writer {
     }
 
     fn get_extended(&self, frame: u32, player2: bool) -> Option<ExtendedAction> {
+        if self.strip_physics {
+            return None;
+        }
         self.extended_map.get(&(frame, player2)).copied()
+    }
+
+    fn frame_fixes_map(&self) -> BTreeMap<u32, (Option<ExtendedAction>, Option<ExtendedAction>)> {
+        let mut frame_fixes: BTreeMap<u32, (Option<ExtendedAction>, Option<ExtendedAction>)> =
+            BTreeMap::new();
+        if self.strip_physics {
+            return frame_fixes;
+        }
+        for ((frame, player2), extended) in &self.extended_map {
+            let entry = frame_fixes.entry(*frame).or_default();
+            if *player2 {
+                entry.1 = Some(*extended);
+            } else {
+                entry.0 = Some(*extended);
+            }
+        }
+        frame_fixes
     }
 
     fn input_records(&self) -> Vec<ReplayInput> {
@@ -327,18 +383,23 @@ impl Writer {
             })
             .collect();
 
-        records.extend(self.events.iter().map(|event| match *event {
-            ReplayEvent::FpsChange { frame, fps } => (frame as u64, InputData::TPS(fps)),
-            ReplayEvent::Restart { frame, full, .. } => (
-                frame as u64,
-                if full {
-                    InputData::RestartFull
-                } else {
-                    InputData::Restart
-                },
-            ),
-            ReplayEvent::Death { frame, .. } => (frame as u64, InputData::Death),
-        }));
+        records.extend(
+            self.events
+                .iter()
+                .filter(|event| !self.drop_deaths || !matches!(event, ReplayEvent::Death { .. }))
+                .map(|event| match *event {
+                    ReplayEvent::FpsChange { frame, fps } => (frame as u64, InputData::TPS(fps)),
+                    ReplayEvent::Restart { frame, full, .. } => (
+                        frame as u64,
+                        if full {
+                            InputData::RestartFull
+                        } else {
+                            InputData::Restart
+                        },
+                    ),
+                    ReplayEvent::Death { frame, .. } => (frame as u64, InputData::Death),
+                }),
+        );
 
         records.sort_by_key(|(frame, _)| *frame);
         records
@@ -349,7 +410,7 @@ impl Writer {
 
         writer.write_all(&CML_MAGIC)?;
         write_var_u64(&mut writer, 3)?;
-        self.write_cml_body(&mut writer, 1, false)?;
+        self.write_cml_body(&mut writer, 1, false, 1000.0)?;
 
         Ok(writer)
     }
@@ -433,16 +494,7 @@ impl Writer {
             writer.write_byte(flags);
         }
 
-        let mut frame_fixes: BTreeMap<u32, (Option<ExtendedAction>, Option<ExtendedAction>)> =
-            BTreeMap::new();
-        for ((frame, player2), extended) in &self.extended_map {
-            let entry = frame_fixes.entry(*frame).or_default();
-            if *player2 {
-                entry.1 = Some(*extended);
-            } else {
-                entry.0 = Some(*extended);
-            }
-        }
+        let frame_fixes = self.frame_fixes_map();
 
         writer.write_var_u64(frame_fixes.len() as u64);
         let mut base = 0i64;
@@ -507,7 +559,7 @@ impl Writer {
         const CML_MAGIC: [u8; 4] = [0xd7, 0x8a, 0x3e, 0x91];
 
         let mut payload = Vec::new();
-        self.write_cml_body(&mut payload, 1_000_000i64, true)?;
+        self.write_cml_body(&mut payload, 1_000_000i64, true, 1_000_000.0)?;
         let decompressed_size = payload.len() as u64;
 
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -525,11 +577,13 @@ impl Writer {
     /// Writes the CML payload body (metadata + inputs + frame-fixes)
     ///
     /// `frame_scale` is multiplied onto each frame number before encoding, use `1` for v1-v3 and `1_000_000` for v5
+    /// `fixed_scale` is multiplied onto each position before encoding, use `1_000.0` for v1-v3 and `1_000_000.0` for v5/v6
     fn write_cml_body<W: Write>(
         &self,
         writer: &mut W,
         frame_scale: i64,
         flat_groups: bool,
+        fixed_scale: f32,
     ) -> Result<()> {
         write_cml_string(writer, "")?;
         write_cml_string(writer, "")?;
@@ -573,16 +627,7 @@ impl Writer {
             writer.write_u8(flags)?;
         }
 
-        let mut frame_fixes: BTreeMap<u32, (Option<ExtendedAction>, Option<ExtendedAction>)> =
-            BTreeMap::new();
-        for ((frame, player2), extended) in &self.extended_map {
-            let entry = frame_fixes.entry(*frame).or_default();
-            if *player2 {
-                entry.1 = Some(*extended);
-            } else {
-                entry.0 = Some(*extended);
-            }
-        }
+        let frame_fixes = self.frame_fixes_map();
 
         let mut base_frame = 0i64;
         let mut accum = [0i64; 6];
@@ -595,7 +640,15 @@ impl Writer {
                 let frame = i64::from(frame) * frame_scale;
                 write_var_i64(writer, frame - base_frame)?;
                 base_frame = frame;
-                write_cml_frame_fix(writer, p1, p2, &mut accum, &mut p1_valid, &mut p2_valid)?;
+                write_cml_frame_fix(
+                    writer,
+                    p1,
+                    p2,
+                    &mut accum,
+                    &mut p1_valid,
+                    &mut p2_valid,
+                    fixed_scale,
+                )?;
             }
         } else {
             let mut groups: Vec<Vec<(u32, Option<ExtendedAction>, Option<ExtendedAction>)>> =
@@ -626,6 +679,7 @@ impl Writer {
                         &mut accum,
                         &mut p1_valid,
                         &mut p2_valid,
+                        fixed_scale,
                     )?;
                 }
                 base_frame = group_start + (group.len() as i64 - 1) * frame_scale;
@@ -676,21 +730,30 @@ impl Writer {
             })
             .collect::<Vec<_>>();
 
-        let mut fixes: Vec<ttrl::TtrlFix> = self
-            .extended_map
-            .iter()
-            .map(|((frame, player2), extended)| ttrl::TtrlFix {
-                frame: *frame,
-                player: if *player2 { Player::Two } else { Player::One },
-                x: extended.x,
-                y: extended.y,
-                rot: extended.rot,
-                y_vel: f64::from(extended.y_accel),
-            })
-            .collect();
-        fixes.sort_by_key(|fix| (fix.frame, fix.player));
+        let fixes: Vec<ttrl::TtrlFix> = if self.strip_physics {
+            Vec::new()
+        } else {
+            let mut fixes: Vec<ttrl::TtrlFix> = self
+                .extended_map
+                .iter()
+                .map(|((frame, player2), extended)| ttrl::TtrlFix {
+                    frame: *frame,
+                    player: if *player2 { Player::Two } else { Player::One },
+                    x: extended.x,
+                    y: extended.y,
+                    rot: extended.rot,
+                    y_vel: f64::from(extended.y_accel),
+                })
+                .collect();
+            fixes.sort_by_key(|fix| (fix.frame, fix.player));
+            fixes
+        };
 
-        let seed = if self.seed != 0 { Some(self.seed) } else { None };
+        let seed = if self.seed != 0 {
+            Some(self.seed)
+        } else {
+            None
+        };
         let game_version = if self.build != 0 {
             self.build
         } else {
@@ -1598,14 +1661,16 @@ impl Writer {
         writer.write_f32::<LittleEndian>(self.fps as f32)?;
 
         let mut physics = Vec::new();
-        for ((frame, player2), extended) in &self.extended_map {
-            physics.push(Re4Physics {
-                frame: u64::from(*frame),
-                x: extended.x,
-                y: extended.y,
-                y_accel: extended.y_accel as f64,
-                player2: *player2,
-            });
+        if !self.strip_physics {
+            for ((frame, player2), extended) in &self.extended_map {
+                physics.push(Re4Physics {
+                    frame: u64::from(*frame),
+                    x: extended.x,
+                    y: extended.y,
+                    y_accel: extended.y_accel as f64,
+                    player2: *player2,
+                });
+            }
         }
         physics.sort_by_key(|entry| (entry.frame, entry.player2));
 
@@ -1640,25 +1705,29 @@ impl Writer {
         let mut inputs = Vec::new();
 
         for input in source_inputs {
-            let physics = input
-                .physics
-                .map(|p| gdr2::PhysicsData {
-                    x_position: p.x,
-                    y_position: p.y,
-                    rotation: p.rot,
-                    x_velocity: 0.0,
-                    y_velocity: p.y_accel as f64,
-                })
-                .or_else(|| {
-                    self.get_extended(input.frame, input.lane.player == Player::Two)
-                        .map(|e| gdr2::PhysicsData {
-                            x_position: e.x,
-                            y_position: e.y,
-                            rotation: e.rot,
-                            x_velocity: 0.0,
-                            y_velocity: e.y_accel as f64,
-                        })
-                });
+            let physics = if self.strip_physics {
+                None
+            } else {
+                input
+                    .physics
+                    .map(|p| gdr2::PhysicsData {
+                        x_position: p.x,
+                        y_position: p.y,
+                        rotation: p.rot,
+                        x_velocity: 0.0,
+                        y_velocity: p.y_accel as f64,
+                    })
+                    .or_else(|| {
+                        self.get_extended(input.frame, input.lane.player == Player::Two)
+                            .map(|e| gdr2::PhysicsData {
+                                x_position: e.x,
+                                y_position: e.y,
+                                rotation: e.rot,
+                                x_velocity: 0.0,
+                                y_velocity: e.y_accel as f64,
+                            })
+                    })
+            };
 
             inputs.push(gdr2::Input {
                 frame: input.frame as u64,
@@ -1669,14 +1738,17 @@ impl Writer {
             });
         }
 
-        let deaths = self
-            .events
-            .iter()
-            .filter_map(|event| match *event {
-                ReplayEvent::Death { frame, .. } => Some(frame as u64),
-                _ => None,
-            })
-            .collect();
+        let deaths: Vec<u64> = if self.drop_deaths {
+            Vec::new()
+        } else {
+            self.events
+                .iter()
+                .filter_map(|event| match *event {
+                    ReplayEvent::Death { frame, .. } => Some(frame as u64),
+                    _ => None,
+                })
+                .collect()
+        };
 
         let replay = Gdr2Replay {
             author: String::new(),
@@ -2772,6 +2844,112 @@ mod tests {
     #[test]
     fn test_cml_v7() {
         test_roundtrip(ReplayType::CmlV7, "cml");
+    }
+
+    #[test]
+    fn test_cml_v6_uses_micro_position_scale() {
+        assert_eq!(super::cml_fixed_scaled(115.544176, 1_000_000.0), 115544176);
+
+        let mut replay = Replay::build();
+        replay.fps = 480.0;
+        replay.extended_data = true;
+        replay.actions.push(Action::new(
+            10.0 / replay.fps,
+            Player::One,
+            Click::Regular(ClickType::Click),
+            0.0,
+            10,
+        ));
+        replay.extended.push(ExtendedAction {
+            player2: false,
+            down: true,
+            frame: 10,
+            x: 115.544,
+            y: 114.587,
+            y_accel: 0.0,
+            rot: 11.25,
+            fps_change: None,
+        });
+        replay.duration = 10.0 / replay.fps;
+
+        let mut buffer = Cursor::new(Vec::new());
+        replay
+            .to_writer()
+            .write(ReplayType::CmlV6, &mut buffer)
+            .unwrap();
+        let parsed = Replay::build()
+            .with_extended(true)
+            .parse(ReplayType::CmlV6, Cursor::new(buffer.into_inner()))
+            .unwrap();
+        let ext = parsed
+            .extended
+            .iter()
+            .find(|e| e.frame == 10 && !e.player2)
+            .expect("v6 roundtrip should preserve the frame fix");
+        assert!(
+            (ext.x - 115.544).abs() < 0.01,
+            "v6 position scale mismatch: expected ~115.544, got {}",
+            ext.x
+        );
+        assert!(
+            ext.x < 1000.0,
+            "v6 position looks 1000x inflated: got {}",
+            ext.x
+        );
+    }
+
+    #[test]
+    fn test_gdr2_strip_physics() {
+        let mut replay = Replay::build();
+        replay.fps = 240.0;
+        replay.push_input(
+            ReplayInput::new(
+                InputLane::new(Player::One, ButtonKind::Jump),
+                true,
+                120,
+                0.5,
+            )
+            .with_physics(PhysicsSnapshot::new(12.0, 34.0, 56.0, 78.0)),
+        );
+
+        let mut buffer = Cursor::new(Vec::new());
+        replay
+            .to_writer()
+            .write(ReplayType::Gdr2, &mut buffer)
+            .unwrap();
+        let imported = gdr2::Replay::import_data(buffer.get_ref()).unwrap();
+        assert!(imported.inputs[0].physics.is_some());
+
+        let mut buffer = Cursor::new(Vec::new());
+        replay
+            .to_writer()
+            .with_options(WriterOptions {
+                strip_physics: true,
+                drop_deaths: false,
+            })
+            .write(ReplayType::Gdr2, &mut buffer)
+            .unwrap();
+        let imported = gdr2::Replay::import_data(buffer.get_ref()).unwrap();
+        assert_eq!(imported.inputs.len(), 1);
+        assert!(imported.inputs[0].physics.is_none());
+    }
+
+    #[test]
+    fn test_gdr2_drop_deaths() {
+        let replay = conversion_replay();
+
+        let mut buffer = Cursor::new(Vec::new());
+        replay
+            .to_writer()
+            .with_options(WriterOptions {
+                strip_physics: false,
+                drop_deaths: true,
+            })
+            .write(ReplayType::Gdr2, &mut buffer)
+            .unwrap();
+        let imported = gdr2::Replay::import_data(buffer.get_ref()).unwrap();
+        assert!(imported.deaths.is_empty());
+        assert!(!imported.inputs.is_empty());
     }
 
     #[test]

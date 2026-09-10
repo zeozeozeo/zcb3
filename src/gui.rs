@@ -289,6 +289,8 @@ struct App {
     convert_to_format: ReplayType,
     convert_replay_data: Option<Vec<u8>>,
     convert_replay_name: String,
+    convert_strip_physics: bool,
+    convert_drop_deaths: bool,
 }
 
 impl Default for App {
@@ -332,6 +334,8 @@ impl Default for App {
             convert_to_format: ReplayType::Silicate2,
             convert_replay_data: None,
             convert_replay_name: String::new(),
+            convert_strip_physics: false,
+            convert_drop_deaths: false,
         }
     }
 }
@@ -1904,6 +1908,19 @@ impl App {
                 }
             });
         });
+
+        ui.horizontal(|ui| {
+            help_text(
+                ui,
+                "Drop all position corrections / physics data on export",
+                |ui| {
+                    ui.checkbox(&mut self.convert_strip_physics, "Strip physics");
+                },
+            );
+            help_text(ui, "Drop recorded deaths on export", |ui| {
+                ui.checkbox(&mut self.convert_drop_deaths, "Drop deaths");
+            });
+        });
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1937,7 +1954,10 @@ impl App {
             )?;
 
         // Create writer and write to output format
-        let writer = Writer::new(replay);
+        let writer = Writer::new(replay).with_options(bot::WriterOptions {
+            strip_physics: self.convert_strip_physics,
+            drop_deaths: self.convert_drop_deaths,
+        });
         let file = File::create(output_path)?;
         let buf_writer = BufWriter::new(file);
 
@@ -1977,7 +1997,10 @@ impl App {
             )?;
 
         // Create writer and write to output format
-        let writer = Writer::new(replay);
+        let writer = Writer::new(replay).with_options(bot::WriterOptions {
+            strip_physics: self.convert_strip_physics,
+            drop_deaths: self.convert_drop_deaths,
+        });
         let cursor = Cursor::new(Vec::new());
 
         let cursor = writer.write(self.convert_to_format, cursor)?;

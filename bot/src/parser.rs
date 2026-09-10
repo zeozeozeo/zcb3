@@ -3797,7 +3797,8 @@ impl Replay {
     fn parse_cml<R: Read + Seek>(&mut self, mut reader: R) -> Result<()> {
         const CML_MAGIC: [u8; 4] = [0xd7, 0x8a, 0x3e, 0x91];
         const CML_TEXT_MAGIC: [u8; 4] = *b"CML\0";
-        const CML_FIXED_SCALE: f32 = 1000.0;
+        const CML_FIXED_SCALE_V1: f32 = 1000.0;
+        const CML_FIXED_SCALE_V56: f32 = 1_000_000.0;
 
         struct CmlReader {
             data: Vec<u8>,
@@ -4060,12 +4061,17 @@ impl Replay {
 
                 let p1_down = down_state[0].iter().any(|down| *down);
                 let p2_down = down_state[1].iter().any(|down| *down);
-                let p1_x = accum[0] as f32 / CML_FIXED_SCALE;
-                let p1_y = accum[1] as f32 / CML_FIXED_SCALE;
-                let p1_rot = accum[2] as f32 / CML_FIXED_SCALE;
-                let p2_x = accum[3] as f32 / CML_FIXED_SCALE;
-                let p2_y = accum[4] as f32 / CML_FIXED_SCALE;
-                let p2_rot = accum[5] as f32 / CML_FIXED_SCALE;
+                let fixed_scale = if (5..=6).contains(&version) {
+                    CML_FIXED_SCALE_V56
+                } else {
+                    CML_FIXED_SCALE_V1
+                };
+                let p1_x = accum[0] as f32 / fixed_scale;
+                let p1_y = accum[1] as f32 / fixed_scale;
+                let p1_rot = accum[2] as f32 / fixed_scale;
+                let p2_x = accum[3] as f32 / fixed_scale;
+                let p2_y = accum[4] as f32 / fixed_scale;
+                let p2_rot = accum[5] as f32 / fixed_scale;
 
                 if p1_valid {
                     self.push_physics(
